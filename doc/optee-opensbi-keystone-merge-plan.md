@@ -3,6 +3,9 @@
 調査日：2026-11-11（JST）。本書はソース調査と実装・試験の計画である。
 今回の変更は文書のみで、OpenSBI/SMの機能マージ、ビルド、実QEMU試験、実機試験は実施していない。
 
+同一LinuxプロセスがEnclaveとTAの双方を呼ぶ要件については、
+[Keystone・OP-TEE同居設計](keystone-optee-coexistence-design.md)でP5の追加機能と受入条件を具体化した。
+
 ## 1. 結論
 
 **RISC-V OP-TEEのためのOpenSBI変更はある。本リポジトリにもその一部が既に存在する。

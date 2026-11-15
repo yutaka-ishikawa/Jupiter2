@@ -10,6 +10,9 @@ The `main` branch contains `qemu/`, `opensbi/`, `keystone/`, and `linux-k3/`. Or
 
 実機情報と現在のファームウェアの適合性は、[Milk-V Jupiter 2実機調査](doc/jupiter2-hardware-compatibility.md)にまとめています。
 
+同一LinuxプロセスからKeystone EnclaveとOP-TEE TAを呼ぶための追加機能は、
+[Keystone・OP-TEE同居設計](doc/keystone-optee-coexistence-design.md)を参照してください。
+
 未移植機能の一覧と実装順序は、[K3 Keystone移植計画](doc/keystone-porting-plan.md)を参照してください。
 
 QEMU上の実OpenSBI・Keystone SMを通る統合試験は、[verifications/README.md](verifications/README.md)にまとめています。
