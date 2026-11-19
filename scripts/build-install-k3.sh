@@ -75,6 +75,7 @@ if [[ "$COMPONENT" == all || "$COMPONENT" == firmware ]]; then
  if test -s "$BUILD_DIR/firmware/sm-combined.o"; then
    install -D -m 0644 "$BUILD_DIR/firmware/sm-combined.o" "$PREFIX/firmware/k3/sm-combined.o"
  fi
+ install -D -m 0644 "$BUILD_DIR/firmware/sm-build-options.json" "$PREFIX/firmware/k3/sm-build-options.json"
 fi
 if [[ "$COMPONENT" == all || "$COMPONENT" == linux ]]; then
  test -f "$ROOT/linux-k3/Makefile" || { echo 'Missing Linux K3 source' >&2; exit 3; }

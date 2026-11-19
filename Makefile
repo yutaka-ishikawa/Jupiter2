@@ -8,10 +8,11 @@ K3_BUILD_DIR ?= $(ROOT)/.build-k3
 KEYSTONE_BUILD_DIR ?= $(ROOT)/.build-keystone
 STAGE := $(abspath $(KEYSTONE_BUILD_DIR))/stage
 JOBS ?= $(shell nproc)
+KEYSTONE_SM_OPT_LEVEL ?= 2
 CROSS_COMPILE ?= riscv64-linux-gnu-
 ROOTFS_ARCHIVE ?=
 ROOTFS_SHA256 ?=
-export CROSS_COMPILE JOBS
+export CROSS_COMPILE JOBS KEYSTONE_SM_OPT_LEVEL
 K3_ARGS = --prefix "$(STAGE)" --build-dir "$(K3_BUILD_DIR)" --jobs "$(JOBS)"
 SDK_ARGS = --build-dir "$(KEYSTONE_BUILD_DIR)" --jobs "$(JOBS)"
 VERIFY_ARGS = KEYSTONE_BUILD_DIR="$(KEYSTONE_BUILD_DIR)" KERNEL_OUT="$(K3_BUILD_DIR)/linux"
@@ -29,6 +30,7 @@ opensbi: sm
 	mkdir -p "$(STAGE)/firmware/k3"
 	cp "$(K3_BUILD_DIR)/firmware/build-opensbi-k3-keystone/platform/generic/firmware/"fw_dynamic.* "$(STAGE)/firmware/k3/"
 	cp "$(K3_BUILD_DIR)/firmware/sm-combined.o" "$(STAGE)/firmware/k3/"
+	cp "$(K3_BUILD_DIR)/firmware/sm-build-options.json" "$(STAGE)/firmware/k3/"
 firmware: opensbi
 openSBI: opensbi
 install-openSBI: install-opensbi

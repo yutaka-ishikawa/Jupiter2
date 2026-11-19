@@ -22,7 +22,7 @@ case "$component" in
   copy_tree "$stage/bin" "$prefix/bin"
   copy_tree "$stage/share/qemu" "$prefix/share/qemu";;
  opensbi)
-  for name in fw_dynamic.bin fw_dynamic.elf sm-combined.o; do
+  for name in fw_dynamic.bin fw_dynamic.elf sm-combined.o sm-build-options.json; do
    test -s "$stage/firmware/k3/$name"
    install -D -m 0644 "$stage/firmware/k3/$name" "$prefix/firmware/k3/$name"
   done;;

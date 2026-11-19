@@ -9,9 +9,10 @@ OpenSBI/SMソースと基準commitの差分なし。実験では別出力ディ�
 **384 KiBのOpenSBI区画に収められる見込みは高い。同じ機能設定のままSMに`-O2`を指定すると、
 今回の最終ITBは271,903 bytesとなり、393,216 bytesに対して121,313 bytesの余裕ができた。**
 
-現在のSMビルドには最適化指定がなく、Clangの通常の既定値`-O0`でコンパイルされる。
-OpenSBI本体は既に`-O2`である。まずSM側の最適化指定を正式なbuildオプションとして導入し、
-コンテキスト切替・PMP・IPI・timer・MPRVの実ゲスト回帰を通すことを推奨する。
+調査時のSMビルドには最適化指定がなく、Clangの通常の既定値`-O0`でコンパイルされていた。
+その後、MakefileとSM build scriptに`KEYSTONE_SM_OPT_LEVEL`を追加し、通常buildの既定値を2とした。
+OpenSBI本体は従来どおり`-O2`である。コンテキスト切替・PMP・IPI・timer・MPRVの実ゲスト回帰は
+実機採用前に必要となる。
 今回の実験はコンパイル・リンク・包装・容量確認までで、QEMU guestと実機の起動は未検証。
 
 ## 測定条件と結果
@@ -23,7 +24,7 @@ FITヘッダー・padding等の違いを含め、最終ITBの実サイズで比�
 
 | SM compile条件 | .text | BIN | 最終ITB | 384 KiBに対する余裕 |
 | --- | ---: | ---: | ---: | ---: |
-| 現行相当（最適化指定なし） | 214,296 | 532,392 | 534,047 | −140,831 |
+| 変更前相当（最適化指定なし） | 214,296 | 532,392 | 534,047 | −140,831 |
 | `-O2` | 178,312 | 270,248 | 271,903 | 121,313 |
 | `-Os` | 169,176 | 270,248 | 271,903 | 121,313 |
 | `-Oz` | 168,472 | 270,248 | 271,903 | 121,313 |
@@ -43,8 +44,8 @@ FITヘッダー・padding等の違いを含め、最終ITBの実サイズで比�
 
 ## なぜ約256 KiB小さくなるか
 
-[現行SM compiler](../keystone/sm/tools/k3_rv64_compile_audit.py)の`flags`には
-`-O`指定がなく、関数・データ単位sectionも指定されていない。一方、
+[SM compiler](../keystone/sm/tools/k3_rv64_compile_audit.py)の調査時の`flags`には
+`-O`指定がなく、関数・データ単位sectionも指定されていなかった（現在はO2を追加）。一方、
 [OpenSBI Makefile](../opensbi/Makefile)は通常buildで`-O2`、section分割とGCを使う。
 SMは別工程でコンパイルしたrelocatable objectなので、OpenSBI側の`-O2`はSMへ適用されない。
 
@@ -96,7 +97,9 @@ HSM start、Keystone SBI handler、domain context entryのsymbolがO2版にも�
 開発ホストのrepository rootで実行する。LLVM、Clang、LLD、FIT toolは
 [導入手順](milkv-jupiter2-stack-install.md)の依存に加えて用意する。
 既存buildディレクトリを使わず、未使用の作業先を指定する。
-以下はcompiler wrapperで実験する手順であり、通常buildの既定値は変更しない。
+以下は調査時のcompiler wrapperを使う比較手順。現在の通常buildはすでにO2なので、
+通常利用は`make opensbi JOBS=4`でよく、このwrapperは不要である。
+変更前のbaselineを再現する場合は直接compile scriptへ`--opt-level 0`を指定する。
 
 ```bash
 set -euo pipefail
@@ -126,8 +129,10 @@ baselineと同条件比較する場合は、未設定のKEYSTONE_SM_TRACE/crypto
 
 ## 正式採用までの作業
 
-1. SM buildへ最適化レベルを明示するオプションと成果物manifestを追加する。
-   フラグ変更で古いSM objectを再利用しないことを確認する。
+1. 実装済み：Makefileの`KEYSTONE_SM_OPT_LEVEL ?= 2`をexportし、SM scriptから
+   compile scriptの`--opt-level`へ渡す。未指定時は直接呼出しでも2となる。
+   `sm-build-options.json`にcompiler/flagsを保存する。
+   同じ出力先でO2→O0→既定O2を再buildし、容量と記録が切り替わることを確認した。
 2. O2版を再リンクし、実際のtoolchain/ITSで最終ITBを再計測する。
    393,216 bytes以下と確認し、source/config/ELF/BIN/ITBのhashを保存する。
 3. 対応QEMU guestで既存suite・robustness・Sstc on/off・2/16 hartの回帰を確認する。
@@ -136,5 +141,6 @@ baselineと同条件比較する場合は、未設定のKEYSTONE_SM_TRACE/crypto
    容量に収まったことでこれらの未確認条件が解消したとは判断しない。
 5. [実機導入・復旧手順](milkv-jupiter2-stack-install.md)に従い、復旧可能な順序で実機確認する。
 
-今回、製品既定値の変更、実機書込み、QEMU guestの実行は行っていない。
+通常Makefile経由でもBIN 270,248 bytes、最終ITB 271,903 bytesを確認し、容量検査に成功した。
+最適化既定値はO2へ変更済み。実機書込み、QEMU guestの実行は行っていない。
 新しい機能不具合の実証はなく、最適化未指定とlinker alignmentを容量上の要因として特定した。

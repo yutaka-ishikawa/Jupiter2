@@ -166,3 +166,28 @@ Eyrie作業ディレクトリは`.build-keystone/sample-runtimes/{hello,hello-na
 従来の`.build-keystone/examples/{hello,hello-native}`には互換用runtime/packageを置く。
 元の`keystone/examples/`のCMakeアプリビルドは通常workflowから呼ばない。
 [samples手順](../samples/README.md)と[互換性差分](keystone-examples-integration.md)を参照。
+
+## SMの最適化レベル
+
+通常の`make opensbi`、`make sm`、`make keystone`はSMを`-O2`でコンパイルする。
+Makefileは`KEYSTONE_SM_OPT_LEVEL ?= 2`をexportし、SM build scriptと直接compile scriptも
+未指定時に2を使う。通常のイメージ作成に実験用compiler wrapperは不要。
+
+```bash
+make opensbi JOBS=4
+# 診断・比較用。0/1/2/3/s/zのみ指定できる。
+make opensbi JOBS=4 KEYSTONE_SM_OPT_LEVEL=0
+# 既定のO2へ戻す
+make opensbi JOBS=4
+```
+
+SMは呼出しごとに全translation unitを再コンパイルし、OpenSBIも更新されたSM objectを
+依存として再リンクする。最適化レベルを変更するための手動cleanは不要。
+`sm-build-options.json`にcompilerの版、最適化、全flags、対象ソースを記録する。
+生成先は`K3_BUILD_DIR/firmware/`、通常makeのstage配置は
+`KEYSTONE_BUILD_DIR/stage/firmware/k3/`。`make install-opensbi`でPREFIXの`firmware/k3/`にも配置する。
+旧stageにこのJSONがない場合は`make opensbi`から再実行する。
+
+同条件の実測ではO2版の最終ITBは271,903 bytes（mkimage 2023.01）。
+[容量削減調査](jupiter2-firmware-size-reduction.md)を参照し、使用するtoolchainでも最終容量を検査する。
+最適化版のQEMU guest・実機での動作は未確認であり、容量条件と動作確認は分けて扱う。

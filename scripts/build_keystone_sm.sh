@@ -10,6 +10,10 @@ W=$(realpath -m "$3")
 [ -f "$K/sm/src/platform/spacemit_k3/platform.c" ] || { echo 'ERROR: K3 platform missing' >&2; exit 3; }
 for tool in python3 clang ld.lld readelf nm; do command -v "$tool" >/dev/null || { echo "ERROR missing $tool" >&2; exit 3; }; done
 trace_args=(--rng "${KEYSTONE_RNG_BACKEND:-auto}" --crypto "${KEYSTONE_CRYPTO_PROVIDER:-unavailable}")
+case ${KEYSTONE_SM_OPT_LEVEL:-2} in
+ 0|1|2|3|s|z) trace_args+=(--opt-level "${KEYSTONE_SM_OPT_LEVEL:-2}");;
+ *) echo 'KEYSTONE_SM_OPT_LEVEL must be 0, 1, 2, 3, s or z' >&2; exit 2;;
+esac
 case ${KEYSTONE_SM_TRACE:-0} in
  0) :;;
  1) trace_args+=(--trace);;
@@ -28,6 +32,7 @@ find "$OBJDIR" -maxdepth 1 -type f -name '*.o' -delete
 rm -f "$SM_OBJ"
 
 python3 "$K/sm/tools/k3_rv64_compile_audit.py" "${trace_args[@]}" --opensbi "$S" --output "$OBJDIR" --compiler clang 2>&1 | tee "$W/keystone-sm-compile.log"
+cp "$OBJDIR/compile-options.json" "$W/sm-build-options.json"
 python3 - "$K/sm/tools/k3_rv64_compile_audit.py" "$OBJDIR" <<'PY_AUDIT'
 import ast, pathlib, sys
 p=pathlib.Path(sys.argv[1]);d=pathlib.Path(sys.argv[2]);t=ast.parse(p.read_text())

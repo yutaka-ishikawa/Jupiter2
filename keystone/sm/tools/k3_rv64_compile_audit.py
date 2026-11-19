@@ -6,6 +6,7 @@ provider has no keys; explicit qemu-dev builds include extractable development
 material and do not provide hardware endorsement.
 """
 import argparse
+import json
 import pathlib
 import subprocess
 import sys
@@ -28,6 +29,8 @@ def main():
     p.add_argument('--opensbi', type=pathlib.Path, required=True)
     p.add_argument('--output', type=pathlib.Path, required=True)
     p.add_argument('--compiler', default='clang')
+    p.add_argument('--opt-level', choices=['0', '1', '2', '3', 's', 'z'],
+                   default='2', help='SM optimization level (default: 2)')
     p.add_argument('--dev-embedded-key', action='store_true',
                    help='Diagnostic only: compile with build-time-generated dev key. Never production.')
     p.add_argument("--trace", action="store_true", help="Enable SM progress markers for hang diagnosis")
@@ -37,6 +40,7 @@ def main():
     sm=pathlib.Path(__file__).resolve().parents[1]/'src'
     a.output.mkdir(parents=True,exist_ok=True)
     flags=['--target=riscv64-unknown-elf','-march=rv64imafdc_zicsr_zifencei',
+           '-O' + a.opt_level,
            '-mabi=lp64','-mcmodel=medany','-fPIE','-ffreestanding','-fno-builtin',
            '-fno-stack-protector','-D__riscv_xlen=64',
            # SM is linked into OpenSBI; no standalone SM address macros.
@@ -62,6 +66,14 @@ def main():
         flags.append("-DKEYSTONE_SM_TRACE=1")
     if a.dev_embedded_key:
         flags.append('-DKEYSTONE_K3_DEV_EMBED_KEY=1')
+    options = {'compiler': a.compiler,
+               'compiler_version': subprocess.check_output(
+                   [a.compiler, '--version'], text=True).splitlines()[0],
+               'optimization': '-O' + a.opt_level,
+               'flags': flags, 'sources': SOURCES}
+    (a.output / 'compile-options.json').write_text(
+        json.dumps(options, indent=2) + '\n')
+    print('SM optimization: -O' + a.opt_level, flush=True)
     failed=[]
     for src in SOURCES:
         s=sm/src
