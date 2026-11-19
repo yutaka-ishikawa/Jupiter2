@@ -270,6 +270,9 @@ python3 scripts/build-jupiter2-install-image.py \
 firmware-only出力にはLinux/modules/apps/kernelrelease.txtは含まれず、第6節のOS配置には使えない。
 容量超過した現行firmwareをこのスクリプトが小さくするわけではない。サイズ削減・対応圧縮・
 区画変更は別作業とし、ITBを切り詰めたり、uboot区画へはみ出して書いたりしない。
+SMの最適化指定による削減実測は[OpenSBIとSMの容量削減調査](jupiter2-firmware-size-reduction.md)を参照。
+同機能設定のO2候補で最終ITB 271,903 bytesを確認したが、通常buildの既定値は未変更であり、
+実機採用には同資料の回帰・適合性確認が必要となる。
 
 ### 転送後に実機容量ともう一度比較する
 
