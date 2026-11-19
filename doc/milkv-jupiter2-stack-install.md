@@ -131,8 +131,38 @@ BusyBox wrapper等が通常OSのコマンドを置き換えるため、次節で
 
 ## 5. 容量確認とインストールイメージ作成
 
-Python 3.11以上を使う。開発PCには`u-boot-tools`と`device-tree-compiler`も必要。
-以下のスクリプトはビルド済み成果物を包装するもので、コンパイルや実機書込みは行わない。
+以下はクロスビルドを行った開発PCで実行する。Python 3.11以上、Git、
+`mkimage`、`dumpimage`、`dtc`が必要。第4節のbuildとは別に、次の包装用ツールも導入する。
+
+### 開発PCにイメージ作成用ツールをインストールする
+
+Ubuntu 24.04またはDebian 12以降のAPT環境：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3 git u-boot-tools device-tree-compiler coreutils bash tar gzip
+```
+
+Fedora等のDNF環境：
+
+```bash
+sudo dnf install -y python3 git uboot-tools dtc coreutils bash tar gzip
+```
+
+使用中のOSに対応する一方を実行する。Pythonの版とコマンドの有無を確認する。
+
+```bash
+python3 -c 'import sys; print(sys.version); assert sys.version_info >= (3, 11), "Python 3.11以上が必要です"'
+command -v git mkimage dumpimage dtc
+```
+
+`mkimage`と`dumpimage`はAPTの`u-boot-tools`／DNFの`uboot-tools`、
+`dtc`はAPTの`device-tree-compiler`／DNFの`dtc`に含まれる。
+Pythonの追加pipパッケージは不要。Pythonが3.11未満なら対応するPythonを用意し、
+以降の`python3`をその実行コマンドに置き換える。
+これらは開発PC上でFITを作るためのホスト用ツールであり、実機へコピーしない。
+
+以下のイメージ作成スクリプトはビルド済み成果物を包装するもので、コンパイルや実機書込みは行わない。
 
 ### 実機でopensbi区画容量を確認する
 
@@ -158,8 +188,16 @@ erase単位4096 bytes。比較対象はNOR全体ではなくOpenSBI区画の容�
 ```bash
 python3 scripts/build-jupiter2-install-image.py \
     --capacity-bytes 393216 \
-    --output work/jupiter2-install/release-01
+    --output work/jupiter2-release
 ```
+
+**上記コマンドを実行し、終了code 0で完了すると、インストール用イメージが作成される。**
+OpenSBI＋SMの最終FITは`work/jupiter2-release/bundle/firmware/fw_dynamic.itb`、
+Linux・modules・アプリ・実機用tools・docsを含む配布イメージは
+`work/jupiter2-release/bundle.tar.gz`に生成される。
+展開済みの同内容も`work/jupiter2-release/bundle/`にまとまる。
+新しいLinux Imageをコンパイルする処理は含まれないため、第4節のbuild成功が前提となる。
+最終ITBが393216 bytesを超えるなどの検査失敗時は配布イメージを残さず終了する。
 
 このコマンドは以下を行う。
 
@@ -172,7 +210,7 @@ python3 scripts/build-jupiter2-install-image.py \
 出力例：
 
 ```text
-work/jupiter2-install/release-01/
+work/jupiter2-release/
 ├── bundle.tar.gz
 ├── bundle.tar.gz.sha256
 └── bundle/
