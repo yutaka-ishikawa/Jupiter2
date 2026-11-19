@@ -14,6 +14,7 @@ The `main` branch contains `qemu/`, `opensbi/`, `keystone/`, and `linux-k3/`. Or
 ビルド・退避・kernel/driver配置・OpenSBI更新・復旧と、書き込み前の停止条件をまとめています。
 実機区画容量の確認は`scripts/check-jupiter2-install-capacity.py`、
 ビルド済み成果物からFIT・転送用アーカイブを作る場合は`scripts/build-jupiter2-install-image.py`を使います。
+出力の`bundle/`にイメージ・実機用tools・運用docsを集約します。実機へはこのディレクトリ全体を転送します。
 引数と実機での再確認は同手順の第5章を参照してください。
 
 同一LinuxプロセスからKeystone EnclaveとOP-TEE TAを呼ぶための追加機能は、

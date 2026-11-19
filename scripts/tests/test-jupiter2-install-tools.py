@@ -120,6 +120,18 @@ class InstallToolsTest(unittest.TestCase):
         out = self.work / 'full'
         self.invoke(BUILD, *args, '--output', out)
         self.assertTrue((out / 'bundle/modules/6.18-test/extra/keystone-driver.ko').is_file())
+        self.assertTrue((out / 'bundle/docs/milkv-jupiter2-stack-install.md').is_file())
+        self.assertTrue((out / 'bundle/README.md').is_file())
+        moved = self.work / 'standalone'
+        shutil.copytree(out / 'bundle', moved)
+        subprocess.run(['bash', str(moved / 'tools/verify.sh')], cwd='/',
+                       check=True, capture_output=True)
+        self.invoke(moved / 'tools/check-capacity.py', '--capacity-bytes', '393216',
+                    '--image', moved / 'firmware/fw_dynamic.itb')
+        (moved / 'apps/hello.ke').write_bytes(b'tampered')
+        result = subprocess.run(['bash', str(moved / 'tools/verify.sh')],
+                                cwd='/', capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
         (ks / 'stage/boot/k3/Image').write_bytes(b'wrong kernel')
         bad = self.work / 'mismatch'
         self.invoke(BUILD, *args, '--output', bad, expected=2)

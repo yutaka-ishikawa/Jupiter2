@@ -55,7 +55,17 @@ def package(args, temporary):
     report['image'] = 'firmware/fw_dynamic.itb'
     (bundle / 'capacity.json').write_text(json.dumps(report, indent=2) + '\n')
     (bundle / 'fit-inspection.txt').write_text(log)
-    copy_file(CHECKER, bundle / 'check-capacity.py')
+    copy_file(CHECKER, bundle / 'check-capacity.py')  # Backward-compatible path.
+    copy_file(CHECKER, bundle / 'tools/check-capacity.py')
+    tools = ROOT / 'scripts/jupiter2-target-tools'
+    for name in ('verify.sh', 'preflight.sh', 'install-linux.sh', 'run-hello.sh'):
+        copy_file(tools / name, bundle / 'tools' / name)
+    copy_file(tools / 'README.md', bundle / 'README.md')
+    # Keep linked operational documents together; no cross-build binaries on target.
+    for document in sorted((ROOT / 'doc').glob('*.md')):
+        copy_file(document, bundle / 'docs' / document.name)
+    for document in sorted((ROOT / 'doc').glob('*.json')):
+        copy_file(document, bundle / 'docs' / document.name)
     if not args.firmware_only:
         kout = args.k3_build_dir / 'linux'
         kbuild = args.keystone_build_dir
@@ -131,6 +141,7 @@ def main():
                 shutil.rmtree(args.output)
                 raise
         print(f'Created: {args.output / "bundle.tar.gz"}')
+        print(f'Target directory: {args.output / "bundle"}')
         print(f'FIT: {args.output / "bundle/firmware/fw_dynamic.itb"}')
         print('Capacity verified against explicit input only. No flashing or hardware validation performed.')
         return 0

@@ -183,12 +183,36 @@ work/jupiter2-install/release-01/
     ├── kernelrelease.txt
     ├── capacity.json
     ├── fit-inspection.txt
-    ├── check-capacity.py
+    ├── README.md
+    ├── tools/{check-capacity.py,verify.sh,preflight.sh,install-linux.sh,run-hello.sh}
+    ├── docs/                    本手順・置換復旧・実機調査等
+    ├── check-capacity.py        互換用の従来パス
     ├── source-commit.txt
     ├── source-local.patch
     ├── source-untracked.txt
     └── SHA256SUMS
 ```
+
+**実機へ持っていくものは、この`bundle/`全体、または`bundle.tar.gz`とそのchecksumだけ。**
+生成物・実機用スクリプト・運用資料を一か所へ集約しており、実機にrepositoryのcheckoutは不要。
+展開先の`README.md`に最初の操作とOS依存ツールを記載する。
+
+```bash
+# 実機。展開済みbundle内で実行。verify/preflightは書込みをしない。
+bash tools/verify.sh
+bash tools/preflight.sh
+# 第6節の配置を行う場合だけ実行する。手動配置との二重実行はしない。
+sudo bash tools/install-linux.sh
+```
+
+`install-linux.sh`はLinux/modules/appsだけを追加配置する。initramfs生成、boot entry変更、
+firmware書込みは同梱docsを見て別工程で行う。配置途中の失敗は全体rollbackしないため、
+再実行前に部分配置を確認する。新firmwareと一致するkernelの起動確認後は、
+`sudo bash tools/run-hello.sh`で同梱hello二種を実行できる。
+
+Python/Bash/coreutils/kmod等は実機OSの標準パッケージを使い、開発PCのx86バイナリーを
+bundleへ混入させない。`tools/preflight.sh`が主要依存を検査し、NOR書込み用mtd-utilsなど
+追加依存は同梱READMEで確認する。OS標準パッケージまで含むオフラインOSイメージではない。
 
 `source-untracked.txt`は未追跡ファイルの名前だけを記録する。再現可能な配布には必要な
 ソースをcommitし、変更のないcheckoutでbuildする。ビルド先を変えた場合は
@@ -219,7 +243,7 @@ sha256sum -c bundle.tar.gz.sha256
 tar -xzf bundle.tar.gz
 cd bundle
 sha256sum -c SHA256SUMS
-python3 check-capacity.py --image firmware/fw_dynamic.itb --mtd mtd5
+python3 tools/check-capacity.py --image firmware/fw_dynamic.itb --mtd mtd5
 ```
 
 `mtd5`はその時点の実機の番号に合わせる。省略すれば自動検出する。
@@ -244,6 +268,8 @@ OpenSBI/SM・QEMU guest・実機の動作試験ではない。FIT tool不足時�
 
 以降は実機上。旧kernelのboot entry、Image、initramfs、modulesを保持する。
 `BUNDLE`は前節で検証した`bundle/`の絶対パスを指定する（firmware-onlyは不可）。
+第5節の`tools/install-linux.sh`を使う場合は、以下の手動配置を重ねて実行しない。
+同スクリプトで配置した場合も、次のinitramfs生成と第7節以降は必要である。
 
 ```bash
 set -euo pipefail
