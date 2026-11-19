@@ -1,7 +1,7 @@
 # Milk-V Jupiter2実機へのKeystoneソフトウェアスタック導入手順
 
-更新日：2026-11-20（JST）。対象ソース：`yutaka-ishikawa/public`、
-`110c1138adb336d3a4c046c9f3250a7e3e4812ee`。
+更新日：2026-11-20（JST）。対象：`yutaka-ishikawa/public`のK3スタックと本書のイメージ作成スクリプト。
+実機調査・build経路は`6403232967178cb896fc761eb0038fdf9a85bd54`を基準とし、使用commitは取得時に記録する。
 
 対象はSpacemiT K3搭載Milk-V Jupiter2 SBCで、既存のEDK2・Linux環境を残しながら、
 開発したOpenSBI＋Keystone SM、Linux、Keystone driver、SDK/Eyrieアプリを段階導入する。
@@ -92,11 +92,13 @@ OpenSBI区画全体と必要なNOR/GPT情報の読取りは
 ```bash
 git clone https://github.com/yutaka-ishikawa/public.git
 cd public
-git checkout 110c1138adb336d3a4c046c9f3250a7e3e4812ee
+git checkout main
+git rev-parse HEAD
 sudo bash scripts/install-build-deps.sh
 ```
 
-実機対応の追加修正がある場合は上記commitの代わりにレビュー済みcommitを指定する。
+表示したcommitを導入記録へ保存する。再現時は`git checkout 保存したcommit`で固定する。
+実機対応の追加修正がある場合はレビュー済みcommitを指定する。
 異なるソース・設定・toolchainの中間物は混用しない。
 
 ```bash
@@ -127,85 +129,125 @@ OpenSBIは別ターゲットなので両方を指定する。
 `guest-overlay/`全体を実機の`/`へ展開してはいけない。QEMU向けのshutdown/reboot、
 BusyBox wrapper等が通常OSのコマンドを置き換えるため、次節では必要なファイルだけ取り出す。
 
-## 5. 転送用パッケージを作成する
+## 5. 容量確認とインストールイメージ作成
 
-開発PCで続ける。新規ディレクトリを使用し、既存候補へ重ねて作成しない。
+Python 3.11以上を使う。開発PCには`u-boot-tools`と`device-tree-compiler`も必要。
+以下のスクリプトはビルド済み成果物を包装するもので、コンパイルや実機書込みは行わない。
 
-```bash
-set -euo pipefail
-KOUT="$PWD/.build-k3/linux"
-STAGE="$PWD/.build-keystone/stage"
-KREL=$(make -s -C linux-k3 O="$KOUT" ARCH=riscv \
-    CROSS_COMPILE=riscv64-linux-gnu- kernelrelease)
-case "$KREL" in ''|*[!A-Za-z0-9._+-]*) exit 1;; esac
-BUNDLE="$PWD/work/jupiter2-install/bundle-$KREL"
-test ! -e "$BUNDLE"
-mkdir -p "$BUNDLE/linux" "$BUNDLE/modules" "$BUNDLE/apps" "$BUNDLE/firmware"
-test -s "$KOUT/Module.symvers"
-cmp "$STAGE/boot/k3/Image" "$KOUT/arch/riscv/boot/Image"
-install -m 0644 "$KOUT/arch/riscv/boot/Image" "$BUNDLE/linux/Image"
-install -m 0644 "$KOUT/.config" "$BUNDLE/linux/config"
-# この全modules treeは同じImageのbuild時に生成されたもの。
-cp -a "$STAGE/lib/modules/$KREL" "$BUNDLE/modules/"
-rm -f "$BUNDLE/modules/$KREL/build" "$BUNDLE/modules/$KREL/source"
-install -D -m 0644 .build-keystone/driver/keystone-driver.ko \
-    "$BUNDLE/modules/$KREL/extra/keystone-driver.ko"
-install -m 0755 .build-keystone/examples/hello/hello.ke "$BUNDLE/apps/"
-install -m 0755 .build-keystone/examples/hello-native/hello-native.ke "$BUNDLE/apps/"
-printf '%s\n' "$KREL" > "$BUNDLE/kernelrelease.txt"
-git rev-parse HEAD > "$BUNDLE/source-commit.txt"
-git diff --binary HEAD > "$BUNDLE/source-local.patch"
-```
+### 実機でopensbi区画容量を確認する
 
-driverの`modinfo -F vermagic`と`KREL`、Imageとmodulesの対応を確認する。
-release文字列の一致だけでは同じbuildと証明できないため、上記Image照合とbuild記録も保持する。
-DTBは実機のboot方式・revisionに対応すると確認したものだけ別途追加する。
-QEMU生成DTや全DTB一式を実機の既存DTへ一括上書きしない。
-
-FITを作る。以下のテンプレートはload/entryが`0x100000000`、compressionがnoneであり、
-実機のFSBL契約と一致していることが前提。
+repositoryの`scripts/check-jupiter2-install-capacity.py`を実機へコピーして実行する。
+root権限は不要。`/sys/class/mtd/`からnameが`opensbi`、typeが`nor`の区画を一意に検出する。
 
 ```bash
-set -euo pipefail
-FW="$PWD/.build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware"
-install -m 0644 "$FW/fw_dynamic.bin" "$BUNDLE/firmware/"
-install -m 0644 "$FW/fw_dynamic.elf" "$BUNDLE/firmware/"
-cp opensbi/platform/generic/spacemit/fw_dynamic.its "$BUNDLE/firmware/"
-(cd "$BUNDLE/firmware" && mkimage -f fw_dynamic.its fw_dynamic.itb)
-dumpimage -l "$BUNDLE/firmware/fw_dynamic.itb"
-stat -c '%n %s bytes' "$BUNDLE/firmware/"fw_dynamic.{bin,itb}
+python3 scripts/check-jupiter2-install-capacity.py
+# 対象番号を明示する場合もname/typeを検査する
+python3 scripts/check-jupiter2-install-capacity.py --mtd mtd5 --json
 ```
 
-ここで**最終ITB**を実機の使用中区画容量と比較する。384 KiBのNOR構成なら：
+今回提供された実機の配置はNOR全体8 MiB、OpenSBI区画`mtd5`が393216 bytes（384 KiB）、
+erase単位4096 bytes。比較対象はNOR全体ではなくOpenSBI区画の容量である。
+番号・容量は再確認し、JSONの`capacity_bytes`を次の開発PCの指定値へ転記する。
+区画名の重複、非NOR、読取り失敗時は停止する。使用中boot媒体の判定は別途必要。
+
+### 開発PCでイメージを作る
+
+第4節のbuild成功後、repository rootで実行する。`--capacity-bytes`は実測値を明示し、
+既存出力へ上書きしないよう新しい`--output`を指定する。
 
 ```bash
-test "$(stat -c %s "$BUNDLE/firmware/fw_dynamic.itb")" -le 393216
+python3 scripts/build-jupiter2-install-image.py \
+    --capacity-bytes 393216 \
+    --output work/jupiter2-install/release-01
 ```
 
-失敗した候補は書き込めない。サイズ削減、ロード経路の変更、区画変更は別の移植作業とし、
-切り詰め・隣接区画へのはみ出し・未対応圧縮で回避しない。
+このコマンドは以下を行う。
 
-転送前に通常ファイルのmanifestとアーカイブを作成する。
+1. OpenSBI BINを既存K3 ITSで最終ITBに包装する（load/entry `0x100000000`、非圧縮）。
+2. `dumpimage`で本体を抽出し、元BINとSHA-256が一致することを確認する。
+3. 最終ITB全体を指定容量と比較し、超過なら出力を残さず失敗する。
+4. Imageとdriver overlayの記録済みkernel hashを照合し、全modules、driver、hello二種をまとめる。
+5. 容量結果、FIT表示、source情報、SHA256SUMS、転送用tar.gzを生成する。
+
+出力例：
+
+```text
+work/jupiter2-install/release-01/
+├── bundle.tar.gz
+├── bundle.tar.gz.sha256
+└── bundle/
+    ├── firmware/fw_dynamic.{bin,elf,itb,its}
+    ├── linux/{Image,config}
+    ├── modules/KERNELRELEASE/
+    ├── apps/{hello,hello-native}.ke
+    ├── kernelrelease.txt
+    ├── capacity.json
+    ├── fit-inspection.txt
+    ├── check-capacity.py
+    ├── source-commit.txt
+    ├── source-local.patch
+    ├── source-untracked.txt
+    └── SHA256SUMS
+```
+
+`source-untracked.txt`は未追跡ファイルの名前だけを記録する。再現可能な配布には必要な
+ソースをcommitし、変更のないcheckoutでbuildする。ビルド先を変えた場合は
+`--k3-build-dir`と`--keystone-build-dir`を指定する。
+DTBは自動同梱しない。実機に適合すると確認したDTを別途管理し、既存DTへ一括上書きしない。
+QEMU向けguest-overlayのshutdown等も同梱しない。
+
+FITだけを作る場合：
 
 ```bash
-(cd "$BUNDLE" && find . -type f ! -name SHA256SUMS -print0 \
-    | sort -z | xargs -0 sha256sum > SHA256SUMS)
-tar -C "$(dirname "$BUNDLE")" -czf "$BUNDLE.tar.gz" "$(basename "$BUNDLE")"
-sha256sum "$BUNDLE.tar.gz"
+python3 scripts/build-jupiter2-install-image.py \
+    --firmware-only --capacity-bytes 393216 \
+    --output work/jupiter2-install/firmware-01
+# 明示的な別BINの場合は、上記に --firmware-bin /absolute/path/fw_dynamic.bin を追加
 ```
 
-`scp`またはUSBストレージで実機の一般ユーザーの作業ディレクトリへ転送する。
-実機でアーカイブのSHA-256をホストの値と比較してから展開し、展開先で
-`sha256sum -c SHA256SUMS`を実行する。ネットワーク先・device名を推測して書き込まない。
+firmware-only出力にはLinux/modules/apps/kernelrelease.txtは含まれず、第6節のOS配置には使えない。
+容量超過した現行firmwareをこのスクリプトが小さくするわけではない。サイズ削減・対応圧縮・
+区画変更は別作業とし、ITBを切り詰めたり、uboot区画へはみ出して書いたりしない。
+
+### 転送後に実機容量ともう一度比較する
+
+`bundle.tar.gz`とchecksumをscpまたはUSBで実機へ転送する。
+ホストで表示したSHA-256と照合してから新規directoryへ展開する。
+
+```bash
+sha256sum -c bundle.tar.gz.sha256
+tar -xzf bundle.tar.gz
+cd bundle
+sha256sum -c SHA256SUMS
+python3 check-capacity.py --image firmware/fw_dynamic.itb --mtd mtd5
+```
+
+`mtd5`はその時点の実機の番号に合わせる。省略すれば自動検出する。
+開発PCで再確認する場合は、実機sysfsの代わりに`--capacity-bytes 393216`を指定できる。
+
+容量確認の終了codeは0＝収まる（image省略時は容量取得成功）、1＝容量超過、2＝入力・読取りerror。
+`--json`の`fits`と終了codeを両方確認する。イメージ作成は0＝作成成功、2＝作成失敗。
+FIT magicの検査と容量確認は、署名・完全なFIT構造・実機起動互換性の検証ではない。
+このスクリプトはMTDを読取り参照するだけで、区画が使用中boot元であるとは判定しない。
+
+スクリプトのローカル試験：
+
+```bash
+python3 scripts/tests/test-jupiter2-install-tools.py -v
+```
+
+容量境界、MTD属性、実mkimage/dumpimageによる包装・抽出、超過時cleanup、
+出力の上書き拒否、kernel hash不一致を検査する。テストpayloadは包装用の人工データであり、
+OpenSBI/SM・QEMU guest・実機の動作試験ではない。FIT tool不足時は該当caseがskipされる。
 
 ## 6. 新Linuxとアプリを追加配置する
 
 以降は実機上。旧kernelのboot entry、Image、initramfs、modulesを保持する。
-`BUNDLE`は前節で検証した展開先の絶対パスを指定する。
+`BUNDLE`は前節で検証した`bundle/`の絶対パスを指定する（firmware-onlyは不可）。
 
 ```bash
 set -euo pipefail
-BUNDLE=/absolute/path/to/bundle-KERNELRELEASE
+BUNDLE=/absolute/path/to/bundle
 KREL=$(cat "$BUNDLE/kernelrelease.txt")
 case "$KREL" in ''|*[!A-Za-z0-9._+-]*) exit 1;; esac
 cd "$BUNDLE"
@@ -306,7 +348,7 @@ sudo dmesg | tail -n 100
 
 ```bash
 set -e
-BUNDLE=/absolute/path/to/bundle-KERNELRELEASE
+BUNDLE=/absolute/path/to/bundle
 KREL=$(cat "$BUNDLE/kernelrelease.txt")
 test "$(uname -r)" = "$KREL"
 modinfo "/lib/modules/$KREL/extra/keystone-driver.ko"

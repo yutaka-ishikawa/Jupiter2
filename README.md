@@ -12,6 +12,9 @@ The `main` branch contains `qemu/`, `opensbi/`, `keystone/`, and `linux-k3/`. Or
 
 実機への段階的な導入は、[Milk-V Jupiter2ソフトウェアスタック導入手順](doc/milkv-jupiter2-stack-install.md)を参照してください。
 ビルド・退避・kernel/driver配置・OpenSBI更新・復旧と、書き込み前の停止条件をまとめています。
+実機区画容量の確認は`scripts/check-jupiter2-install-capacity.py`、
+ビルド済み成果物からFIT・転送用アーカイブを作る場合は`scripts/build-jupiter2-install-image.py`を使います。
+引数と実機での再確認は同手順の第5章を参照してください。
 
 同一LinuxプロセスからKeystone EnclaveとOP-TEE TAを呼ぶための追加機能は、
 [Keystone・OP-TEE同居設計](doc/keystone-optee-coexistence-design.md)を参照してください。
