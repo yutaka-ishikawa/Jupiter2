@@ -56,73 +56,7 @@ PMP条件を確定するまで書き込まない。以下の「停止条件」�
 NORのuboot区画内に0xffの末尾領域があっても、opensbi区画を拡張してよい根拠にはならない。
 UFS上の1 MiB区画に収まる場合も、FSBLが実際にそこを読むと確定するまで対象を変更しない。
 
-## 3. 実機の現状記録とバックアップ
-
-実機に電源、UART、ネットワークを接続する。UARTは基板資料で電圧・端子を確認し、
-115200/8N1・フロー制御なしで電源投入直後から記録する。
-Jupiter2 SBCにSDスロットはないため、SD起動を前提にしない。
-
-以下は実機Linuxで実行する。root権限が必要な読取りだけ`sudo`を使う。
-ログは個体情報を含むため、公開Gitへ追加せず作業用PCにも保存する。
-
-```bash
-set -e
-RECORD="$PWD/jupiter2-before-$(date +%Y%m%d-%H%M%S)"
-mkdir -m 700 "$RECORD"
-uname -a > "$RECORD/uname.txt"
-lscpu > "$RECORD/lscpu.txt"
-cat /proc/cpuinfo > "$RECORD/cpuinfo.txt"
-cat /proc/cmdline > "$RECORD/cmdline.txt"
-cat /proc/mtd > "$RECORD/proc-mtd.txt"
-lsblk -o NAME,PATH,TYPE,SIZE,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS \
-    > "$RECORD/lsblk.txt"
-findmnt > "$RECORD/findmnt.txt"
-sudo dmesg > "$RECORD/dmesg.txt"
-sudo cat /sys/firmware/fdt > "$RECORD/running.dtb"
-```
-
-`/sys/firmware/fdt`がない環境は、`dtc -I fs`等で実行中DTを別途採取する。
-UEFIを使用していれば`efibootmgr -v`、GRUBなら`/etc/default/grub`、`/etc/grub.d/`、
-`/boot/grub/grub.cfg`、extlinuxなら実際に使う`extlinux.conf`も退避する。
-`/boot`、ESP、rootfs上の利用者データもバックアップする。
-
-OpenSBI区画全体と必要なNOR/GPT情報の読取りは
-[置換手順の第4章](milkv-jupiter2-opensbi-replacement.md#4-実機の起動媒体と配置を確定しバックアップする)
-で行う。MTD番号を固定せずname/type/offset/sizeを照合する。
-現在の販売元一式（FSBL、書込み用U-Boot、EDK2、ESOS、bootinfo、JSON等）は同一releaseで保存する。
-
-### 2段階のrollbackに使う記録
-
-第1段階のファイル配置や設定変更より前に、実機Linuxで保存する。
-`ROLLBACK`は以降の各章でも同じ絶対パスを指定する。実機外の作業PCにもコピーしておく。
-
-```bash
-set -euo pipefail
-ROLLBACK="$PWD/jupiter2-rollback-$(date +%Y%m%d-%H%M%S)"
-mkdir -m 700 "$ROLLBACK"
-uname -r > "$ROLLBACK/original-kernel-release.txt"
-findmnt /boot > "$ROLLBACK/boot-mount.txt"
-lsblk -o NAME,PATH,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS > "$ROLLBACK/storage.txt"
-sudo cp -a /boot/env_k3.txt "$ROLLBACK/env_k3.txt"
-sha256sum "$ROLLBACK/env_k3.txt" > "$ROLLBACK/env_k3.txt.sha256"
-```
-
-これは今回の`env_k3.txt`方式用。GRUB/extlinux方式では、実際に変更する設定を同様に保存する。
-旧kernel・旧initramfs・旧DTB・旧modulesを残し、新releaseが旧releaseと重複しないことを確認する。
-OpenSBIは前節の置換手順に従い**区画全体**を読取り保存する。
-OpenSBI区画のバックアップ取得直後に、検証用checksumも保存する。
-
-```bash
-set -euo pipefail
-BACKUP=/absolute/path/to/opensbi-partition-before.bin
-(cd "$(dirname "$BACKUP")" && sha256sum "$(basename "$BACKUP")") > "$BACKUP.sha256"
-```
-
-バックアップとchecksumの両方を実機外へコピーする。
-復旧用Linuxから実機のbootfsへアクセスできることも、起動先を変える前に確認する。
-Linuxが起動しない場合、元設定を同じ実機の通常シェルから戻すことはできないためである。
-
-## 4. 開発ホストで候補をビルドする
+## 3. 開発ホストで候補をビルドする
 
 以下はUbuntu系開発PCのBashで、repository rootから実行する。
 実機へSSHして実行するコマンドではない。依存導入は開発PCのパッケージを変更する。
@@ -167,10 +101,10 @@ OpenSBIは別ターゲットなので両方を指定する。
 `guest-overlay/`全体を実機の`/`へ展開してはいけない。QEMU向けのshutdown/reboot、
 BusyBox wrapper等が通常OSのコマンドを置き換えるため、次節では必要なファイルだけ取り出す。
 
-## 5. 容量確認とインストールイメージ作成
+## 4. 容量確認とインストールイメージ作成
 
 以下はクロスビルドを行った開発PCで実行する。Python 3.11以上、Git、
-`mkimage`、`dumpimage`、`dtc`が必要。第4節のbuildとは別に、次の包装用ツールも導入する。
+`mkimage`、`dumpimage`、`dtc`が必要。第3章のbuildとは別に、次の包装用ツールも導入する。
 
 ### 開発PCにイメージ作成用ツールをインストールする
 
@@ -220,7 +154,7 @@ erase単位4096 bytes。比較対象はNOR全体ではなくOpenSBI区画の容�
 
 ### 開発PCでイメージを作る
 
-第4節のbuild成功後、repository rootで実行する。`--capacity-bytes`は実測値を明示し、
+第3章のbuild成功後、repository rootで実行する。`--capacity-bytes`は実測値を明示し、
 既存出力へ上書きしないよう新しい`--output`を指定する。
 
 ```bash
@@ -234,7 +168,7 @@ OpenSBI＋SMの最終FITは`work/jupiter2-release/bundle/firmware/fw_dynamic.itb
 Linux・modules・アプリ・実機用tools・docsを含む配布イメージは
 `work/jupiter2-release/bundle.tar.gz`に生成される。
 展開済みの同内容も`work/jupiter2-release/bundle/`にまとまる。
-新しいLinux Imageをコンパイルする処理は含まれないため、第4節のbuild成功が前提となる。
+新しいLinux Imageをコンパイルする処理は含まれないため、第3章のbuild成功が前提となる。
 最終ITBが393216 bytesを超えるなどの検査失敗時は配布イメージを残さず終了する。
 
 このコマンドは以下を行う。
@@ -277,7 +211,7 @@ work/jupiter2-release/
 # 実機。展開済みbundle内で実行。verify/preflightは書込みをしない。
 bash tools/verify.sh
 bash tools/preflight.sh
-# 第6節の配置を行う場合だけ実行する。手動配置との二重実行はしない。
+# 第5章のバックアップを済ませ、第6章の配置を行う場合だけ実行する。手動配置との二重実行はしない。
 sudo bash tools/install-linux.sh
 ```
 
@@ -387,13 +321,79 @@ python3 scripts/tests/test-jupiter2-install-tools.py -v
 出力の上書き拒否、kernel hash不一致を検査する。テストpayloadは包装用の人工データであり、
 OpenSBI/SM・QEMU guest・実機の動作試験ではない。FIT tool不足時は該当caseがskipされる。
 
+## 5. 実機の現状記録とバックアップ
+
+実機に電源、UART、ネットワークを接続する。UARTは基板資料で電圧・端子を確認し、
+115200/8N1・フロー制御なしで電源投入直後から記録する。
+Jupiter2 SBCにSDスロットはないため、SD起動を前提にしない。
+
+以下は実機Linuxで実行する。root権限が必要な読取りだけ`sudo`を使う。
+ログは個体情報を含むため、公開Gitへ追加せず作業用PCにも保存する。
+
+```bash
+set -e
+RECORD="$PWD/jupiter2-before-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$RECORD"
+uname -a > "$RECORD/uname.txt"
+lscpu > "$RECORD/lscpu.txt"
+cat /proc/cpuinfo > "$RECORD/cpuinfo.txt"
+cat /proc/cmdline > "$RECORD/cmdline.txt"
+cat /proc/mtd > "$RECORD/proc-mtd.txt"
+lsblk -o NAME,PATH,TYPE,SIZE,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS \
+    > "$RECORD/lsblk.txt"
+findmnt > "$RECORD/findmnt.txt"
+sudo dmesg > "$RECORD/dmesg.txt"
+sudo cat /sys/firmware/fdt > "$RECORD/running.dtb"
+```
+
+`/sys/firmware/fdt`がない環境は、`dtc -I fs`等で実行中DTを別途採取する。
+UEFIを使用していれば`efibootmgr -v`、GRUBなら`/etc/default/grub`、`/etc/grub.d/`、
+`/boot/grub/grub.cfg`、extlinuxなら実際に使う`extlinux.conf`も退避する。
+`/boot`、ESP、rootfs上の利用者データもバックアップする。
+
+OpenSBI区画全体と必要なNOR/GPT情報の読取りは
+[置換手順の第4章](milkv-jupiter2-opensbi-replacement.md#4-実機の起動媒体と配置を確定しバックアップする)
+で行う。MTD番号を固定せずname/type/offset/sizeを照合する。
+現在の販売元一式（FSBL、書込み用U-Boot、EDK2、ESOS、bootinfo、JSON等）は同一releaseで保存する。
+
+### 2段階のrollbackに使う記録
+
+第1段階のファイル配置や設定変更より前に、実機Linuxで保存する。
+`ROLLBACK`は以降の各章でも同じ絶対パスを指定する。実機外の作業PCにもコピーしておく。
+
+```bash
+set -euo pipefail
+ROLLBACK="$PWD/jupiter2-rollback-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$ROLLBACK"
+uname -r > "$ROLLBACK/original-kernel-release.txt"
+findmnt /boot > "$ROLLBACK/boot-mount.txt"
+lsblk -o NAME,PATH,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS > "$ROLLBACK/storage.txt"
+sudo cp -a /boot/env_k3.txt "$ROLLBACK/env_k3.txt"
+sha256sum "$ROLLBACK/env_k3.txt" > "$ROLLBACK/env_k3.txt.sha256"
+```
+
+これは今回の`env_k3.txt`方式用。GRUB/extlinux方式では、実際に変更する設定を同様に保存する。
+旧kernel・旧initramfs・旧DTB・旧modulesを残し、新releaseが旧releaseと重複しないことを確認する。
+OpenSBIは前節の置換手順に従い**区画全体**を読取り保存する。
+OpenSBI区画のバックアップ取得直後に、検証用checksumも保存する。
+
+```bash
+set -euo pipefail
+BACKUP=/absolute/path/to/opensbi-partition-before.bin
+(cd "$(dirname "$BACKUP")" && sha256sum "$(basename "$BACKUP")") > "$BACKUP.sha256"
+```
+
+バックアップとchecksumの両方を実機外へコピーする。
+復旧用Linuxから実機のbootfsへアクセスできることも、起動先を変える前に確認する。
+Linuxが起動しない場合、元設定を同じ実機の通常シェルから戻すことはできないためである。
+
 ## 6. 新Linuxとアプリを追加配置する
 
 **第1段階の配置工程。OpenSBIは既存のまま変更しない。**
 
 以降は実機上。旧kernelのboot entry、Image、initramfs、modulesを保持する。
 `BUNDLE`は前節で検証した`bundle/`の絶対パスを指定する（firmware-onlyは不可）。
-第5節の`tools/install-linux.sh`を使う場合は、以下の手動配置を重ねて実行しない。
+第4章の`tools/install-linux.sh`を使う場合は、以下の手動配置を重ねて実行しない。
 同スクリプトで配置した場合も、次のinitramfs生成と第7節以降は必要である。
 
 ```bash
@@ -437,7 +437,7 @@ ls -l "/boot/initrd.img-$KREL"
 
 **第1段階の起動確認工程。第6章の新Linuxを、既存OpenSBIのまま起動する。**
 
-使用中のboot経路を第3節の記録から選ぶ。EDK2のBoot ManagerでOSを切り替えても
+使用中のboot経路を第5章の記録から選ぶ。EDK2のBoot ManagerでOSを切り替えても
 M-modeのOpenSBIは置き換わらない。kernel entryとfirmware更新は別工程である。
 
 ### U-Bootから直接起動する場合
@@ -593,7 +593,7 @@ OpenSBI区画の復元は不要である。
 | 新kernelが起動せず通常Linuxを使えない | 復旧用Linuxからbootfsをマウントして元設定を復元する。手順は下記 |
 
 今回の`env_k3.txt`方式で、通常Linuxが使える場合は次を実行する。
-`ROLLBACK`には第3章で保存したdirectoryを指定する。
+`ROLLBACK`には第5章で保存したdirectoryを指定する。
 
 ```bash
 set -euo pipefail
@@ -610,7 +610,7 @@ GRUB/extlinux方式では旧entryを選び、追加したtrial entryを削除ま
 変更した既定値も保存済み設定へ戻す。GRUBは元の設定から`update-grub`で再生成する。
 
 **Linuxが起動しない場合：** 作業前に用意した、K3のUFS/NVMe等へアクセスできる復旧用Linuxを起動する。
-第3章のPARTUUIDと照合して、実際のbootfsをマウントする。
+第5章のPARTUUIDと照合して、実際のbootfsをマウントする。
 以下は復旧用Linux上での例で、deviceとバックアップのパスは実物へ置き換える。
 
 ```bash
