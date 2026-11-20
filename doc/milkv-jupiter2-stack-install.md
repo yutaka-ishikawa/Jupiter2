@@ -683,26 +683,133 @@ Keystone driverを自動loadする設定は作らず、`insmod`・`modprobe keys
 ## 8. OpenSBIとSMを置換する
 
 **第2段階。第1段階で起動確認できた新Linuxとその起動設定を維持し、OpenSBI＋SMだけを更新する。**
-第1段階の失敗をOpenSBI更新で直そうとせず、合格した場合だけ進む。
-更新直前に元OpenSBIの区画全体バックアップ・SHA-256・実機外への退避と、
-FDL／復旧用FSBL・U-Bootによる復元経路を確認する。
+第1段階で新kernelが起動しただけでは、firmwareの実機適合性を確認したことにはならない。
+第2章の条件を満たし、第5章の元OpenSBIバックアップと復旧手段を確認してから行う。
 
-第2節の条件と容量検査をすべて満たした候補だけを対象にする。
-書込み操作は[EDK2維持の置換手順](milkv-jupiter2-opensbi-replacement.md)の
-第7章（NOR fastboot）または第8章（実機Linux）から、**確定した媒体に対応する一方式**を選ぶ。
-そこにある`candidate/fw_dynamic.itb`を、今回検証済みのITBとする。
+以下に、今回のSPI NOR `mtd5`へ、転送済みbundleのITBを**実機Linuxから直接書き込む手順**を示す。
+開発PCやU-Bootプロンプトで実行するコマンドではない。
+使用中のOpenSBIロード元がこのNOR区画であることをUARTログ等で確認済みであることが前提。
+更新対象は`opensbi`だけで、U-Boot／EDK2の`uboot`区画、FSBL、ESOS、env、区画表は変更しない。
 
-- 更新対象は使用中の`opensbi`だけ。EDK2の`uboot`、FSBL、ESOS、ECを一括更新しない。
-- NORは消去・検証を扱う`flashcp`等を用い、raw `dd`書込みをしない。
-- fastboot用のRAM常駐U-Bootと実機のEDK2は別物。U-BootをEDK2区画へ書かない。
-- Linux経由では読み戻し一致を確認してから再起動。fastboot経由は起動後にも照合する。
+### 8.1 実機にflashcpを用意する
 
-再起動後は、第1段階と同じ新kernelを、新OpenSBI＋SM上で起動する。
-UARTで候補firmwareの固有build情報、SM初期化、全hart、timer/IPIを照合する。
-SBI versionが同じというだけでは新firmware起動の証拠にしない。
-PMP/admissionエラーやkernel起動失敗があれば、検査を無効にせず
+Bianbu上で`flashcp`がなければ、実機OSへmtd-utilsを導入する。
+
+```bash
+sudo apt-get update
+sudo apt-get install -y mtd-utils
+command -v flashcp
+```
+
+### 8.2 bundle内のITBと更新対象を確認する
+
+実機へ転送・展開した**`bundle/`の中へ移動してから**次を実行する。
+`BUNDLE`はその場の絶対パスとなるため、以下のfirmwareパスを別のcandidateディレクトリへ
+コピーし直す必要はない。ここでは第1段階で使った通常の全体bundleを使用する。
+
+```bash
+set -euo pipefail
+BUNDLE=$(pwd -P)
+test -f "$BUNDLE/kernelrelease.txt"
+test -s "$BUNDLE/firmware/fw_dynamic.itb"
+bash "$BUNDLE/tools/verify.sh"
+test "$(uname -r)" = "$(cat "$BUNDLE/kernelrelease.txt")"
+
+MTD_NAME=mtd5
+cat /proc/mtd
+test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
+test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
+test "$(cat /sys/class/mtd/"$MTD_NAME"/size)" -eq 393216
+python3 "$BUNDLE/tools/check-capacity.py" \
+    --image "$BUNDLE/firmware/fw_dynamic.itb" --mtd "$MTD_NAME"
+```
+
+実際に書くのは**`$BUNDLE/firmware/fw_dynamic.itb`**。
+`fw_dynamic.bin`、`bundle.tar.gz`、Linuxの`Image`をOpenSBI区画へ書いてはいけない。
+検査が失敗した場合は、以降を実行せず原因を確認する。
+
+### 8.3 元OpenSBIのバックアップを指定する
+
+第5章で作成した`opensbi-partition-info-日時/`を指定する。
+以下を実行すると保存先を質問するので、**実際のdirectoryの絶対パス**を入力する。
+新しく空のdirectoryを作るのではなく、取得済みの元バックアップを指定する。
+
+```bash
+read -r -p '第5章のopensbi-partition-infoディレクトリの絶対パス: ' OPENSBI_INFO
+test -d "$OPENSBI_INFO"
+BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
+test -s "$BACKUP"
+test "$(stat -c %s "$BACKUP")" -eq 393216
+(cd "$OPENSBI_INFO" && sha256sum -c opensbi-partition-before.bin.sha256)
+```
+
+**このdirectory全体を実機外の作業PCへコピー済みであることを確認する。**
+元firmwareでFDL復旧できるFSBL・U-Boot等もPC側へ用意しておく。
+バックアップが読めることだけでなく、実際の復旧経路を確認してから書き込む。
+
+### 8.4 mtd5へ書き込み、読み戻す
+
+ここからが実機NORへの書込みである。
+上記検査とバックアップを確認した同じBashセッションで実行する。
+
+```bash
+sudo flashcp -v "$BUNDLE/firmware/fw_dynamic.itb" /dev/"$MTD_NAME"
+sync
+```
+
+`flashcp`は対象NORの必要な消去blockを消去し、ITBを書き込んで検証する。
+エラーなら再起動せず、第10章の第2段階rollbackへ進む。
+
+成功したら、区画全体もファイルへ読み戻し、ITBの長さ分が元イメージと一致するか照合する。
+
+```bash
+READBACK=$(mktemp "$OPENSBI_INFO/opensbi-after-XXXXXX.bin")
+sudo dd if=/dev/"$MTD_NAME" of="$READBACK" bs=64K status=progress
+test "$(stat -c %s "$READBACK")" -eq "$(cat /sys/class/mtd/"$MTD_NAME"/size)"
+cmp -n "$(stat -c %s "$BUNDLE/firmware/fw_dynamic.itb")" \
+    "$BUNDLE/firmware/fw_dynamic.itb" "$READBACK"
+sha256sum "$BUNDLE/firmware/fw_dynamic.itb" "$READBACK"
+sync
+```
+
+`cmp`が終了code 0なら、書き込んだITB部分は一致している。
+区画全体の読戻しはITBより大きいため、上記二つのSHA-256が同じになるとは限らない。
+読戻しファイルは`opensbi-partition-info-日時/`内に残し、書込み後の記録として使う。
+
+**書込みまたは照合に失敗した場合は、再起動しない。**
+第10章の「第2段階のrollback」に従い、動作中Linuxから元区画を復元・読戻し確認する。
+動作中LinuxはRAM上で実行しているが、次回起動時はNORの内容を使うため、
+区画が不完全な状態でリセットしない。
+
+### 8.5 再起動し、同じ新kernelで確認する
+
+書込みと読戻し照合が成功し、UART端末のログ保存を開始してから再起動する。
+
+```bash
+sudo reboot
+```
+
+UARTで新OpenSBIの固有build情報、SM初期化、全hart、timer/IPIを照合する。
+SBI versionが同じというだけでは、新firmwareを使っている証拠にしない。
+Linuxへ到達したら、今回の新kernelのreleaseを確認する。
+
+```bash
+uname -r
+# 今回の期待値：6.18.3
+```
+
+第1段階と同じkernelで通常動作が確認できてから、第9章のdriverロード・hello実行へ進む。
+PMP/admissionエラーやkernel起動失敗があれば、
 [第2段階のrollback](#第2段階のrollback)で元OpenSBIへ戻す。
 同じkernelが既存OpenSBI上で動作する状態へ復旧し、新OpenSBI側の原因を調査する。
+
+### 別媒体やFDL経由で更新する場合
+
+上記は今回のNOR `mtd5`用で、GPT上のopensbi区画やNANDには適用しない。
+媒体が異なる場合、またはLinuxが起動せずFDLから更新する場合は、
+[OpenSBI置換手順](milkv-jupiter2-opensbi-replacement.md)の該当媒体の手順を使う。
+その場合も入力ITBは今回の`bundle/firmware/fw_dynamic.itb`とし、
+全体イメージの再flashや区画表変更を追加しない。
 
 ## 9. 実機での基本確認
 
