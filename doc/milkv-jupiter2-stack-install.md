@@ -211,24 +211,24 @@ Linux・modules・アプリ・実機用tools・docsを含む配布イメージ�
 
 ```text
 work/jupiter2-release/
-├── bundle.tar.gz
-├── bundle.tar.gz.sha256
-└── bundle/
-    ├── firmware/fw_dynamic.{bin,elf,itb,its}
-    ├── linux/{Image,config}
-    ├── modules/KERNELRELEASE/
-    ├── apps/{hello,hello-native}.ke
-    ├── kernelrelease.txt
-    ├── capacity.json
-    ├── fit-inspection.txt
-    ├── README.md
-    ├── tools/{check-capacity.py,verify.sh,preflight.sh,install-linux.sh,run-hello.sh}
-    ├── docs/                    本手順・置換復旧・実機調査等
-    ├── check-capacity.py        互換用の従来パス
-    ├── source-commit.txt
-    ├── source-local.patch
-    ├── source-untracked.txt
-    └── SHA256SUMS
+    ├── bundle.tar.gz
+    ├── bundle.tar.gz.sha256
+    └── bundle/
+        ├── firmware/fw_dynamic.{bin,elf,itb,its}
+        ├── linux/{Image,config}
+        ├── modules/KERNELRELEASE/
+        ├── apps/{hello,hello-native}.ke
+        ├── kernelrelease.txt
+        ├── capacity.json
+        ├── fit-inspection.txt
+        ├── README.md
+        ├── tools/{check-capacity.py,verify.sh,preflight.sh,install-linux.sh,run-hello.sh}
+        ├── docs/                    本手順・置換復旧・実機調査等
+        ├── check-capacity.py        互換用の従来パス
+        ├── source-commit.txt
+        ├── source-local.patch
+        ├── source-untracked.txt
+        └── SHA256SUMS
 ```
 
 **実機へ持っていくものは、この`bundle/`全体、または`bundle.tar.gz`とそのchecksumだけ。**
