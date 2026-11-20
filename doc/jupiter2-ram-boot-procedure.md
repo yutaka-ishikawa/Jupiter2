@@ -72,6 +72,16 @@ OpenSBIにはDTBと、次に実行するU-Bootのアドレス・実行モード�
 
 ## 5. 開発PCでの準備と成果物の配置
 
+**本書のbuild-jupiter2-ram-boot-image.pyは開発PCで実行する。Jupiter2実機では実行しない。** publicリポジトリ、入力ファイルを置くwork/jupiter2-ram-boot/original、生成先も開発PC上のディレクトリである。
+
+| 操作 | 実行する場所 |
+| --- | --- |
+| ファームウェアのビルド、統合FIT生成、dumpimage・sha256sumによる生成物確認 | 開発PCのターミナル |
+| fastboot devices／stage／continue／getvar | 開発PCのターミナル。USB経由でJupiter2実機と通信する。 |
+| U-Bootのversion／printenv／setenv、Linuxの起動・動作確認 | Jupiter2実機。U-Boot操作は開発PCのUART端末から入力する。 |
+
+生成スクリプト自体は実機との接続を必要としない。ただし、引数に指定する転送上限や実行時領域の値は事前に確認する。生成後、第8章で開発PCからイメージを転送し、実機で起動する。
+
 Ubuntu／Debian系PCの例。PC用ツールを実機へコピーする必要はない。
 
 ```bash
@@ -172,7 +182,7 @@ sudo fastboot -s "$FASTBOOT_SERIAL" getvar max-download-size
 ### 7.3 販売元OpenSBIを含むイメージを生成する
 
 ```bash
-# publicリポジトリのルートで実行する
+# 開発PCのターミナルで、publicリポジトリのルートから実行する
 read -r -p '確認済みSPL転送上限(bytes): ' SPL_DOWNLOAD_BYTES
 read -r -p '確認済み販売元OpenSBI実行時領域(bytes): ' VENDOR_SBI_RESERVE_BYTES
 
@@ -226,7 +236,7 @@ python3 scripts/tests/test_jupiter2_ram_boot_image.py
 
 ### 7.4 数値とファイル名を直接指定する実行例
 
-以下は対話入力やシェル変数を使わず、引数をすべて記載した例である。publicリポジトリのルートで実行する。
+以下は対話入力やシェル変数を使わず、引数をすべて記載した例である。**販売元版・SM版ともに、開発PCのターミナルで、開発PC上のpublicリポジトリのルートから実行する。Jupiter2実機で実行するコマンドではない。**
 
 **この例の転送上限16 MiBとOpenSBI実行時領域1 MiBは説明用の条件であり、今回の実機で確認済みの値ではない。採用するFSBLの受信容量が16 MiBであり、OpenSBIの全実行時領域が1 MiB以内であることを第6章・第7.2節で確認した場合に使用する。異なる場合は二つの数値を確認値へ変更する。** スクリプトへ数値を指定して成功しても、その数値自体の正しさや実機起動の成功を証明するものではない。
 
@@ -252,7 +262,7 @@ work/jupiter2-ram-boot/original/
 fw_dynamic.binは販売元OpenSBIの生BINである。fw_dynamic.itbを改名して置かない。ファイルの入手元とSHA-256も別途記録する。
 
 ```bash
-# publicリポジトリのルートで実行する
+# 開発PCのターミナルで、publicリポジトリのルートから実行する
 python3 scripts/build-jupiter2-ram-boot-image.py \
   --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
   --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
@@ -284,7 +294,7 @@ dumpimage -l work/jupiter2-ram-boot/vendor-release/images/ram-boot-vendor.itb
 同じ入力のうちOpenSBIだけを標準ビルド先の開発版へ変更する例である。**SM版についても全実行時領域が1 MiB以内であると別途確認した場合の数値例**であり、販売元版の値を無条件に流用しない。
 
 ```bash
-# publicリポジトリのルートで実行する
+# 開発PCのターミナルで、publicリポジトリのルートから実行する
 python3 scripts/build-jupiter2-ram-boot-image.py \
   --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
   --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
