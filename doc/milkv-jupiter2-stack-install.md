@@ -497,6 +497,7 @@ M-modeのOpenSBIは置き換わらない。kernel entryとfirmware更新は別�
 
 #### UARTでU-BootのRAM上だけに新kernelを指定する
 
+配線・PC側ソフト・ログ保存は[UART接続手順](milkv-jupiter2-uart.md)を参照する。
 UARTコンソールを接続し、リセット・電源投入直後から小文字の`s`を押し続け、
 U-Bootプロンプトへ入る。kernelを変更する前に、この操作で停止できることを確認しておく。
 
