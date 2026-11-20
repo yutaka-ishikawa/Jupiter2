@@ -374,16 +374,54 @@ sha256sum "$ROLLBACK/env_k3.txt" > "$ROLLBACK/env_k3.txt.sha256"
 
 これは今回の`env_k3.txt`方式用。GRUB/extlinux方式では、実際に変更する設定を同様に保存する。
 旧kernel・旧initramfs・旧DTB・旧modulesを残し、新releaseが旧releaseと重複しないことを確認する。
-OpenSBIは前節の置換手順に従い**区画全体**を読取り保存する。
-OpenSBI区画のバックアップ取得直後に、検証用checksumも保存する。
+### OpenSBI区画の記録とバックアップ
+
+Linux設定を保存する`jupiter2-rollback-日時/`とは別に、
+`opensbi-partition-info-日時/`を作り、OpenSBI区画の情報・バックアップ・checksumをまとめて保存する。
+以下は今回のNOR `mtd5`を実機Linuxから読み出す手順で、区画への書込みは行わない。
+実際の起動元区画であることは、前節で参照した置換手順に従って確認する。
 
 ```bash
 set -euo pipefail
-BACKUP=/absolute/path/to/opensbi-partition-before.bin
-(cd "$(dirname "$BACKUP")" && sha256sum "$(basename "$BACKUP")") > "$BACKUP.sha256"
+OPENSBI_INFO="$PWD/opensbi-partition-info-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$OPENSBI_INFO"
+MTD_NAME=mtd5
+test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
+test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
+
+cat /proc/mtd > "$OPENSBI_INFO/proc-mtd.txt"
+printf '%s\n' "$MTD_NAME" > "$OPENSBI_INFO/mtd-name.txt"
+for field in name type size erasesize; do
+    cat /sys/class/mtd/"$MTD_NAME"/"$field" > "$OPENSBI_INFO/$field.txt"
+done
+if test -r /sys/class/mtd/"$MTD_NAME"/offset; then
+    cat /sys/class/mtd/"$MTD_NAME"/offset > "$OPENSBI_INFO/offset.txt"
+fi
+
+BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
+sudo dd if=/dev/"$MTD_NAME" of="$BACKUP" bs=64K status=progress
+test "$(stat -c %s "$BACKUP")" -eq "$(cat "$OPENSBI_INFO/size.txt")"
+(cd "$OPENSBI_INFO" && sha256sum opensbi-partition-before.bin) > "$BACKUP.sha256"
 ```
 
-バックアップとchecksumの両方を実機外へコピーする。
+今回の実機では`opensbi-partition-before.bin`は393,216 bytesとなる。
+作成後は、このdirectory全体を実機外の作業PCにもコピーする。
+
+```text
+opensbi-partition-info-YYYYMMDD-HHMMSS/
+    ├── opensbi-partition-before.bin
+    ├── opensbi-partition-before.bin.sha256
+    ├── proc-mtd.txt
+    ├── mtd-name.txt
+    ├── name.txt
+    ├── type.txt
+    ├── size.txt
+    ├── erasesize.txt
+    └── offset.txt    sysfsで取得できる場合だけ
+```
+
+第10章のrollbackでは、取得済みのこのdirectoryを`OPENSBI_INFO`に指定して使う。
+新しいdirectoryを作り直したり、更新後の区画内容で元バックアップを上書きしたりしない。
 復旧用Linuxから実機のbootfsへアクセスできることも、起動先を変える前に確認する。
 Linuxが起動しない場合、元設定を同じ実機の通常シェルから戻すことはできないためである。
 
@@ -653,21 +691,24 @@ kernelと`env_k3.txt`は第1段階の合格状態を維持し、OpenSBI区画だ
 
 ```bash
 set -euo pipefail
+# TIMESTAMPは第5章で実際に作成したdirectory名の日時に置き換える
+OPENSBI_INFO="$PWD/opensbi-partition-info-TIMESTAMP"
 MTD_NAME=mtd5
-BACKUP=/absolute/path/to/opensbi-partition-before.bin
+BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
 test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
 test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
 test "$(stat -c %s "$BACKUP")" -eq "$(cat /sys/class/mtd/"$MTD_NAME"/size)"
 # 保存時のSHA-256と一致することを確認してから復元する
 (cd "$(dirname "$BACKUP")" && sha256sum -c "$(basename "$BACKUP").sha256")
 sudo flashcp -v "$BACKUP" /dev/"$MTD_NAME"
-READBACK=$(mktemp)
+READBACK=$(mktemp "$OPENSBI_INFO/opensbi-readback-XXXXXX.bin")
 sudo dd if=/dev/"$MTD_NAME" of="$READBACK" bs=64K status=progress
 sudo cmp "$BACKUP" "$READBACK"
-rm -f "$READBACK"
 sync
 ```
 
+`OPENSBI_INFO`は保存先が異なる場合、その実際の絶対パスを指定する。
+読戻しファイルも同じdirectory内に残り、復元結果の記録に使える。
 復元と読戻しが成功するまで再起動しない。エラー時は復旧環境を使う。
 再起動後、UARTで元OpenSBIの識別情報と新kernelの起動を確認する。
 
