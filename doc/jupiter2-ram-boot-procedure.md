@@ -133,6 +133,35 @@ fw_dynamic.binは統合FITへ格納する実行バイナリーの候補、fw_dyn
 
 提供されたdumpimage一覧では、このFITにU-Boot本体と複数のDTBが入っており、conf_11がk3-pico-itxを参照している。スクリプトへはFIT全体を渡す。U-Boot本体を事前にBINへ抽出して渡す必要はない。ただし、この販売元バイナリーがOpenSBI経由のS-mode起動に適合するかは第6章で確認する。
 
+#### --configuration conf_11：u-boot.itbの構成一覧から名前を読み取る
+
+conf_11は実機からファイルとして取り出すものではなく、**--uboot-itbへ渡すFITに格納されている構成ノード名**である。開発PCで次を実行する。
+
+```bash
+# 開発PCのターミナルで、publicリポジトリのルートから実行する
+dumpimage -l work/jupiter2-ram-boot/original/u-boot.itb
+```
+
+今回提供された販売元FITの一覧には、次の表示があった。
+
+```text
+ Image 11 (fdt_11)
+  Description:  k3-pico-itx.dtb
+  ...
+ Configuration 10 (conf_11)
+  Description:  k3-pico-itx
+  Kernel:       unavailable
+  FDT:          fdt_11
+  Loadables:    uboot
+```
+
+1. 一覧のConfiguration各項目から、Descriptionが実機のボードに対応するk3-pico-itxの項目を探す。今回はUARTのModel表示もspacemit k3 pico itx boardだった。
+2. その見出しConfiguration 10 (conf_11)の**括弧内のconf_11**を--configurationへ指定する。10は一覧上の番号であり、引数に指定する値ではない。
+3. 同じ項目のFDTがfdt_11を参照し、そのImageのDescriptionがk3-pico-itx.dtbであること、Loadablesがubootを参照していることを確認する。
+4. 構成のDescriptionそのものを--boardへ指定する。このため今回の組合せは--configuration conf_11 --board k3-pico-itxとなる。
+
+**Image 11、Configuration 10、構成名conf_11、DTBのimage名fdt_11はそれぞれ別の識別子である。番号から構成名を推測せず、括弧内の名前をそのまま使う。** 別版のFITでは構成名や番号が変わる可能性があるため、実際に入力するu-boot.itbを毎回確認する。defaultがconf_3でも、それを理由にconf_3を選ばない。該当するDescriptionが見つからない場合は、入力FITやボード適合性を確認してから進む。
+
 #### --esos-itb：同じ販売元構成に対応するesos.itbを用意する
 
 販売元OS／ファームウェア配布パッケージのesos.itbを使用し、開発PCのwork/jupiter2-ram-boot/original/esos.itbへコピーする。ESOSが別パッケージで配布されている場合は、使用する販売元SDK／OSに対応する版を取り出す。公開ガイドにある別版のダウンロードURLを無条件に流用しない。
