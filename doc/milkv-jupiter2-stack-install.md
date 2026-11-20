@@ -24,9 +24,16 @@ PMP条件を確定するまで書き込まない。以下の「停止条件」�
 | QEMU・9p共有 | 開発ホスト専用 | 実機へ導入しない |
 | OP-TEE | 今回の導入対象外 | [同居設計](keystone-optee-coexistence-design.md)は未実装。TAも呼べる構成として扱わない |
 
-推奨順序は、現行環境の記録・復旧準備→候補作成→互換性判定→旧OpenSBI上で新Linuxの
-起動確認→OpenSBI＋SM置換→Enclave基本試験。新Linuxと新OpenSBIを一度に更新して
-障害を切り分けにくくしない。旧OpenSBI上ではdriverをロードしてEnclaveを実行しない。
+インストールは次の2段階で行い、第1段階の成功後だけ第2段階へ進む。
+
+| 段階 | 起動する組合せ | 実施内容 | 失敗時に戻すもの |
+| --- | --- | --- | --- |
+| 第1段階 | 新Linux＋既存OpenSBI | 第6章で配置し、第7章で新kernelへ切り替えて起動を確認 | 元のLinux起動設定。既存OpenSBIは変更しない |
+| 第2段階 | 第1段階と同じ新Linux＋新OpenSBI／SM | 第8章でOpenSBIだけ更新し、同じkernelの起動を確認。その後第9章のEnclave試験 | まずOpenSBIを更新前へ戻す。必要ならLinux起動設定も元へ戻す |
+
+第1段階ではKeystone driverをロードせず、Enclaveを実行しない。
+第2段階に入るために旧kernelへ戻す必要はない。
+各段階のrollbackは[第10章](#10-復旧と正式採用)を参照する。
 
 ## 2. 書き込み前の停止条件
 
@@ -83,6 +90,37 @@ OpenSBI区画全体と必要なNOR/GPT情報の読取りは
 [置換手順の第4章](milkv-jupiter2-opensbi-replacement.md#4-実機の起動媒体と配置を確定しバックアップする)
 で行う。MTD番号を固定せずname/type/offset/sizeを照合する。
 現在の販売元一式（FSBL、書込み用U-Boot、EDK2、ESOS、bootinfo、JSON等）は同一releaseで保存する。
+
+### 2段階のrollbackに使う記録
+
+第1段階のファイル配置や設定変更より前に、実機Linuxで保存する。
+`ROLLBACK`は以降の各章でも同じ絶対パスを指定する。実機外の作業PCにもコピーしておく。
+
+```bash
+set -euo pipefail
+ROLLBACK="$PWD/jupiter2-rollback-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$ROLLBACK"
+uname -r > "$ROLLBACK/original-kernel-release.txt"
+findmnt /boot > "$ROLLBACK/boot-mount.txt"
+lsblk -o NAME,PATH,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS > "$ROLLBACK/storage.txt"
+sudo cp -a /boot/env_k3.txt "$ROLLBACK/env_k3.txt"
+sha256sum "$ROLLBACK/env_k3.txt" > "$ROLLBACK/env_k3.txt.sha256"
+```
+
+これは今回の`env_k3.txt`方式用。GRUB/extlinux方式では、実際に変更する設定を同様に保存する。
+旧kernel・旧initramfs・旧DTB・旧modulesを残し、新releaseが旧releaseと重複しないことを確認する。
+OpenSBIは前節の置換手順に従い**区画全体**を読取り保存する。
+OpenSBI区画のバックアップ取得直後に、検証用checksumも保存する。
+
+```bash
+set -euo pipefail
+BACKUP=/absolute/path/to/opensbi-partition-before.bin
+(cd "$(dirname "$BACKUP")" && sha256sum "$(basename "$BACKUP")") > "$BACKUP.sha256"
+```
+
+バックアップとchecksumの両方を実機外へコピーする。
+復旧用Linuxから実機のbootfsへアクセスできることも、起動先を変える前に確認する。
+Linuxが起動しない場合、元設定を同じ実機の通常シェルから戻すことはできないためである。
 
 ## 4. 開発ホストで候補をビルドする
 
@@ -351,6 +389,8 @@ OpenSBI/SM・QEMU guest・実機の動作試験ではない。FIT tool不足時�
 
 ## 6. 新Linuxとアプリを追加配置する
 
+**第1段階の配置工程。OpenSBIは既存のまま変更しない。**
+
 以降は実機上。旧kernelのboot entry、Image、initramfs、modulesを保持する。
 `BUNDLE`は前節で検証した`bundle/`の絶対パスを指定する（firmware-onlyは不可）。
 第5節の`tools/install-linux.sh`を使う場合は、以下の手動配置を重ねて実行しない。
@@ -394,6 +434,8 @@ ls -l "/boot/initrd.img-$KREL"
 対応sysrootでrunnerを再buildし、実機libcを手動上書きして解決しない。
 
 ## 7. 試験用boot entryを追加する
+
+**第1段階の起動確認工程。第6章の新Linuxを、既存OpenSBIのまま起動する。**
 
 使用中のboot経路を第3節の記録から選ぶ。EDK2のBoot ManagerでOSを切り替えても
 M-modeのOpenSBIは置き換わらない。kernel entryとfirmware更新は別工程である。
@@ -451,10 +493,22 @@ GRUB/extlinuxで別entryを追加する場合は、既定entryを旧環境のま
 最初は通常メモリー量のhelloだけを試し、256 MiB EPM用CMAは後段で
 [大容量EPM手順](keystone-large-epm.md)に従い実機の予約領域と照合して追加する。
 
-旧OpenSBIのままtrial Linuxを一度起動し、`uname -r`、全CPU、storage、network、UARTを確認する。
-成功してから旧kernelへ戻す。SM未導入の段階で`insmod`やEnclave実行は行わない。
+### 第1段階の合格条件
+
+既存OpenSBIのまま新Linuxを起動し、`uname -r`がbundleの`kernelrelease.txt`と一致すること、
+全16 CPU、storage、network、UART、通常のtimer動作を確認する。
+Keystone driverを自動loadする設定は作らず、`insmod`・`modprobe keystone_driver`・
+`tools/run-hello.sh`・Enclave実行はまだ行わない。
+
+起動ログと結果を保存する。第1段階が合格したら新Linuxの指定を維持し、第8章へ進む。
+失敗したら第2段階には進まず、[第1段階のrollback](#第1段階のrollback)で元の起動設定へ戻す。
 
 ## 8. OpenSBIとSMを置換する
+
+**第2段階。第1段階で起動確認できた新Linuxとその起動設定を維持し、OpenSBI＋SMだけを更新する。**
+第1段階の失敗をOpenSBI更新で直そうとせず、合格した場合だけ進む。
+更新直前に元OpenSBIの区画全体バックアップ・SHA-256・実機外への退避と、
+FDL／復旧用FSBL・U-Bootによる復元経路を確認する。
 
 第2節の条件と容量検査をすべて満たした候補だけを対象にする。
 書込み操作は[EDK2維持の置換手順](milkv-jupiter2-opensbi-replacement.md)の
@@ -466,10 +520,12 @@ GRUB/extlinuxで別entryを追加する場合は、既定entryを旧環境のま
 - fastboot用のRAM常駐U-Bootと実機のEDK2は別物。U-BootをEDK2区画へ書かない。
 - Linux経由では読み戻し一致を確認してから再起動。fastboot経由は起動後にも照合する。
 
-最初は新firmware＋旧kernelでLinuxまで起動することを確認し、その後trial kernelを選ぶ。
+再起動後は、第1段階と同じ新kernelを、新OpenSBI＋SM上で起動する。
 UARTで候補firmwareの固有build情報、SM初期化、全hart、timer/IPIを照合する。
 SBI versionが同じというだけでは新firmware起動の証拠にしない。
-PMP/admissionエラーで止まった場合、検査を無効にせず元firmwareへ戻す。
+PMP/admissionエラーやkernel起動失敗があれば、検査を無効にせず
+[第2段階のrollback](#第2段階のrollback)で元OpenSBIへ戻す。
+同じkernelが既存OpenSBI上で動作する状態へ復旧し、新OpenSBI側の原因を調査する。
 
 ## 9. 実機での基本確認
 
@@ -509,8 +565,8 @@ Keystone構成のSTOP/SUSPEND制限を踏まえ、初期確認でCPU hotplug・s
 
 | 段階 | 合格条件 |
 | --- | --- |
-| 新Linux単独 | 旧OpenSBI上でstorage/network/全CPUが動作し、旧kernelへ戻せる |
-| 新firmware単独 | 新候補を識別でき、EDK2→旧kernelまで到達。全hart・timer/IPIを確認 |
+| 第1段階：新Linux＋既存OpenSBI | 指定した新releaseで起動し、storage/network/全CPUが動作。復旧用の旧設定を保持 |
+| 第2段階：同じ新Linux＋新OpenSBI／SM | 新firmwareを識別でき、第1段階と同じkernelが起動。SM初期化・全hart・timer/IPIを確認 |
 | hello | 両サンプルが正常終了し、Linuxのclock・I/O・割込みが動作し続ける |
 | 再実行・混成CPU | lifecycle反復と両CPU種類で同じ期待値。PMP資源の回収を確認 |
 | 隔離・大容量 | 別工程でCPU/DMA保護、CMA、負荷・異常系を実機検証 |
@@ -524,22 +580,110 @@ hello成功をattestation/sealing、乱数品質、DMA隔離の成功に読み�
 
 ## 10. 復旧と正式採用
 
-| 症状 | 対応 |
+### 第1段階のrollback
+
+目標は**元のLinux＋既存OpenSBI**へ戻すこと。第1段階ではOpenSBIを書き換えていないので、
+OpenSBI区画の復元は不要である。
+
+| 失敗した時点 | 対処 |
 | --- | --- |
-| trial Linuxだけ起動しない | 旧boot entryを手動選択。root UUID、initramfs、DT、storage driverを確認 |
-| driverのinvalid module format | Image/modules/driverを同一buildへ揃える。強制loadしない |
-| 新firmwareでUART/EDK2へ到達しない | FDLから保存済みFSBL/U-BootをRAM起動し、元opensbiを復元。詳細は置換手順第10章 |
-| SM初期化・PMP同期失敗 | 元firmwareへ戻す。全hart診断とDT/配置を見直す |
-| helloがhangする | UARTを保存して復旧。RCU stallだけで原因をtimerと決めない |
-| libc等の依存不足 | 実機対応sysrootでアプリを再build。基本OSライブラリーを上書きしない |
+| ファイル配置／initramfs生成中、起動設定を変更する前 | 旧起動設定を維持する。部分配置を確認し、新kernelを選ばない |
+| 起動設定変更後、再起動前 | 下記の元設定復元を行い、元kernel指定に戻す |
+| 新kernelが起動したがI/O等に問題がある | 動作中Linuxから元設定を復元し、旧kernelで再起動する |
+| 新kernelが起動せず通常Linuxを使えない | 復旧用Linuxからbootfsをマウントして元設定を復元する。手順は下記 |
 
-旧kernelへ戻しても新OpenSBIは残る。M-mode側に原因がある場合はfirmwareも元に戻す。
-firmwareの復旧は[置換手順第10章](milkv-jupiter2-opensbi-replacement.md#10-起動しない場合の復旧)を使い、
-パーティション全体の読戻しとUARTを確認する。
+今回の`env_k3.txt`方式で、通常Linuxが使える場合は次を実行する。
+`ROLLBACK`には第3章で保存したdirectoryを指定する。
 
-正式採用は基本動作・回帰・隔離試験の結果をレビューしてから行う。
-既定boot entryの変更とdriverの自動loadをその時点で設定する。
-旧firmware、旧kernel、復旧用一式は残し、新旧のhash、config、DT、toolchain、
+```bash
+set -euo pipefail
+ROLLBACK=/absolute/path/to/jupiter2-rollback-TIMESTAMP
+sha256sum -c "$ROLLBACK/env_k3.txt.sha256"
+sudo cp -a "$ROLLBACK/env_k3.txt" /boot/env_k3.txt
+sudo cmp "$ROLLBACK/env_k3.txt" /boot/env_k3.txt
+sync
+```
+
+復元が成功してから再起動し、
+`uname -r`が`original-kernel-release.txt`の値へ戻ったことを確認する。
+GRUB/extlinux方式では旧entryを選び、追加したtrial entryを削除または無効化し、
+変更した既定値も保存済み設定へ戻す。GRUBは元の設定から`update-grub`で再生成する。
+
+**Linuxが起動しない場合：** 作業前に用意した、K3のUFS/NVMe等へアクセスできる復旧用Linuxを起動する。
+第3章のPARTUUIDと照合して、実際のbootfsをマウントする。
+以下は復旧用Linux上での例で、deviceとバックアップのパスは実物へ置き換える。
+
+```bash
+set -euo pipefail
+BOOTFS_DEV=/dev/disk/by-partuuid/ACTUAL-BOOTFS-PARTUUID
+ROLLBACK=/absolute/path/to/jupiter2-rollback-TIMESTAMP
+sudo mkdir -p /mnt/jupiter2-bootfs
+sudo mount "$BOOTFS_DEV" /mnt/jupiter2-bootfs
+sudo cp -a "$ROLLBACK/env_k3.txt" /mnt/jupiter2-bootfs/env_k3.txt
+sudo cmp "$ROLLBACK/env_k3.txt" /mnt/jupiter2-bootfs/env_k3.txt
+sync
+sudo umount /mnt/jupiter2-bootfs
+```
+
+bootfsをLinuxの`/boot`へマウントしていた構成では、マウント先直下が`env_k3.txt`の置き場所となる。
+FDLでOpenSBIを書き戻すだけでは、bootfs上の誤ったkernel指定は直らない。
+UARTのU-Bootから旧kernelを一時起動する方法を使う場合も、実機のboot変数・deviceに合わせ、
+元ファイルを読み込む手順を事前確認しておく。
+
+旧kernelで正常復旧するまでは、新規配置ファイルを削除しない。
+復旧後、不要な新releaseのImage/config/initramfs/modules/appsだけを個別に退避または削除できる。
+削除対象は第6章の配置先と実際の生成物を照合し、実行中kernelや旧releaseを対象にしない。
+部分配置が残ると再実行が拒否されるため、再インストール前に整理する。
+
+### 第2段階のrollback
+
+目標はまず**第1段階で確認済みの新Linux＋元OpenSBI**へ戻すこと。
+kernelと`env_k3.txt`は第1段階の合格状態を維持し、OpenSBI区画だけを元に戻す。
+旧kernelを選ぶだけでは、新OpenSBIの問題は解消しない。
+
+| 失敗した時点 | 対処 |
+| --- | --- |
+| 容量検査等で停止し、まだ書き込んでいない | OpenSBIはそのまま。新kernel＋既存OpenSBIでの状態を維持 |
+| erase／書込み／読戻しに失敗したがLinuxが動作中 | 再起動せず、退避済みの元区画全体を復元し、読戻し一致を確認 |
+| 再起動後にLinuxまで到達しない | FDLから販売元FSBLとU-BootをRAM起動し、元OpenSBIを復元 |
+| 新Linuxは起動するがSMやhelloが失敗 | ログを保存し、必要なら元OpenSBIを復元。旧firmware上でEnclaveを再実行しない |
+
+今回のNOR `mtd5`をLinuxから復元する例。
+番号は毎回name/type/sizeで照合し、保存したバックアップがその区画のものであることを確認する。
+
+```bash
+set -euo pipefail
+MTD_NAME=mtd5
+BACKUP=/absolute/path/to/opensbi-partition-before.bin
+test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
+test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
+test "$(stat -c %s "$BACKUP")" -eq "$(cat /sys/class/mtd/"$MTD_NAME"/size)"
+# 保存時のSHA-256と一致することを確認してから復元する
+(cd "$(dirname "$BACKUP")" && sha256sum -c "$(basename "$BACKUP").sha256")
+sudo flashcp -v "$BACKUP" /dev/"$MTD_NAME"
+READBACK=$(mktemp)
+sudo dd if=/dev/"$MTD_NAME" of="$READBACK" bs=64K status=progress
+sudo cmp "$BACKUP" "$READBACK"
+rm -f "$READBACK"
+sync
+```
+
+復元と読戻しが成功するまで再起動しない。エラー時は復旧環境を使う。
+再起動後、UARTで元OpenSBIの識別情報と新kernelの起動を確認する。
+
+Linuxが起動しない場合のFDL手順、および使用中区画がGPTの場合の復旧は、
+[OpenSBI置換手順の第10章](milkv-jupiter2-opensbi-replacement.md#10-起動しない場合の復旧)に従う。
+保存済みの実機に対応するFSBL/U-BootをRAMへロードし、使用中の`opensbi`だけを戻す。
+`uboot`区画がU-BootかEDK2かを勝手に変更せず、FSBL・ESOS・env・区画表も一括更新しない。
+
+導入前の状態へ完全に戻す場合は、元OpenSBIで正常起動することを確認した後、
+第1段階のrollbackも行って元のLinux指定へ戻す。
+
+### 正式採用
+
+第1段階、第2段階、Enclave試験の結果を別々に保存する。
+基本動作・回帰・隔離試験の結果を確認してからdriverの自動load等を設定する。
+旧firmware、旧kernel、元の起動設定、復旧用一式は残し、新旧のhash、config、DT、toolchain、
 buildログ、UARTログ、case別結果を一つの導入記録にまとめる。
 
 ## 関連資料
