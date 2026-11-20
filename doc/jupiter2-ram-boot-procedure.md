@@ -1,6 +1,6 @@
 # Milk-V Jupiter2：OpenSBI＋Keystone SMをRAMブートで確認する手順と実施計画
 
-作成日：2026-11-20。状態：**レビュー用の実施計画。統合FITの作成とJupiter2実機での起動は未検証。**
+更新日：2026-11-20。状態：**統合FIT作成スクリプトを実装し、ホスト上で検査済み。販売元バイナリーとの実際の組合せとJupiter2実機での起動は未検証。**
 
 ## 1. 目的と到達点
 
@@ -8,7 +8,7 @@ NORのOpenSBI区画を書き換える前に、開発PCからUSB fastbootでフ�
 
 最初に販売元OpenSBIでRAM起動の経路を確認し、その後OpenSBI部分だけを開発版へ差し替える。Linuxは既に導入したカーネルを使用し、起動方法の問題とSMの問題を切り分ける。
 
-本書の作成段階では、ソース改修、ビルド、実機操作は実施していない。コマンドは実施予定を具体化するためのもので、各段階の開始条件を満たしてから実行する。特に第6章の互換性確認が完了するまでは、第8章の統合FIT転送へ進まない。
+本書では統合FITの作成ツールと、実機確認までの計画を示す。FSBL／U-Bootの互換性改修、販売元ファームウェアでの実ビルド、実機操作は実施していない。コマンドは実施予定を具体化するためのもので、各段階の開始条件を満たしてから実行する。特に第6章の互換性確認が完了するまでは、第8章の統合FIT転送へ進まない。
 
 RAM起動では384 KiBのopensbi区画に統合FIT全体を収める必要はない。制約はFSBLの転送上限、RAM配置、ロード時の重なりである。NORへ正式導入する場合の容量確認は、従来の[スタック導入手順](milkv-jupiter2-stack-install.md)に従う。
 
@@ -68,7 +68,7 @@ stageはRAMへの転送であり、単独では起動を意味しない。FSBL�
 
 OpenSBIにはDTBと、次に実行するU-Bootのアドレス・実行モード等の引渡し情報が必要である。単独ITBの転送、任意アドレスへのgo、fastboot bootへの置換を推測で行わない。
 
-本書のram-boot-*.itbは今後作る統合FITの名称である。既存bundle/firmware/fw_dynamic.itbとは別物で、既存のインストールイメージ作成スクリプトがこれを生成するわけではない。
+本書のram-boot-*.itbは、[build-jupiter2-ram-boot-image.py](../scripts/build-jupiter2-ram-boot-image.py)が生成する統合FITである。既存bundle/firmware/fw_dynamic.itbとは別物で、インストール用のbuild-jupiter2-install-image.pyでは生成しない。RAM用スクリプトもファームウェアのコンパイルや実機転送は行わない。
 
 ## 5. 開発PCでの準備と成果物の配置
 
@@ -78,7 +78,7 @@ Ubuntu／Debian系PCの例。PC用ツールを実機へコピーする必要は�
 sudo apt update
 sudo apt install fastboot u-boot-tools device-tree-compiler git \
   build-essential python3 bc bison flex libssl-dev dpkg-dev picocom
-mkdir -p work/jupiter2-ram-boot/{original,source,build,images,records,logs}
+mkdir -p work/jupiter2-ram-boot/{original,source,build,records,logs}
 ```
 
 上記は転送・解析用と一般的なビルド依存である。クロスコンパイラー、DDRライブラリー、FSBL包装用ツール等は、採用するSDK・コミットの要件を第6章で確定して追加する。汎用コンパイラーだけで販売元FSBLを再現できるとは扱わない。
@@ -88,7 +88,8 @@ work/jupiter2-ram-boot/
 ├── original/     販売元FSBL.bin、u-boot.itb、OpenSBI、ESOS、入手元の記録
 ├── source/       固定コミットのソース
 ├── build/        販売元版と開発版を分けたビルド出力
-├── images/       確認済みFSBL.bin、ram-boot-vendor.itb、ram-boot-keystone.itb
+├── vendor-release/    スクリプトが作る販売元版（images/とrecords/）
+├── keystone-release/  スクリプトが作るSM版（images/とrecords/）
 ├── records/      SHA-256、FIT一覧、DT情報、コンパイラー版、差分、判定結果
 └── logs/         各段階のUARTログとPC側fastbootログ
 ```
@@ -135,16 +136,92 @@ write 38912 byte to spinor @offset 65536
 
 公開ガイドのmake k3_defconfig allやOpenSBIのリンク指定は参考情報であり、そのまま本リポジトリの確定手順にはしない。特にfw_dynamic.binの場所は実際のビルド出力で確認する。クロス環境での正確なビルドコマンド、必要なFSBL包装処理、採用ツール版は、段階A完了後に本章へ追記する。
 
-予定成果物は次のとおり。
+### 7.1 スクリプトに渡す入力
 
-| ファイル | 内容 |
+リポジトリのルートから実行する。必要なものは、ビルド済みの次の4ファイルである。original内の名前は、対応を確認した配布物から手動配置する。
+
+| オプション | 入力 |
 | --- | --- |
-| images/FSBL.bin | Jupiter2のDDR初期化と統合FIT起動に適合すると確認したFSBL |
-| images/ram-boot-vendor.itb | 販売元OpenSBIを含むRAM起動用統合FIT |
-| records/vendor-build.txt | 全入力コミット、バイナリーの出典とSHA-256、設定、ツール版、実行コマンド |
-| records/vendor-memory-map.txt | 転送・展開時と実行時の領域、重複がない根拠 |
+| --fsbl | 選定済みFSBL.bin。コピーするだけで、互換性・包装・DDR設定は変更しない。 |
+| --uboot-itb | U-Boot＋DTBを含む販売元形式FIT。今回のconf_11のようにloadablesがU-Boot一つの構成。S-mode起動に必要な改修がある場合は、そのビルド済みFIT。 |
+| --esos-itb | 同じボードに対応するESOS FIT。選択構成はdescriptionが--boardと完全一致するものを一つだけ採用する。 |
+| --opensbi-bin | 生のfw_dynamic.bin。販売元版、次に開発版＋SMを渡す。ELFや単独ITBは渡さない。 |
 
-PC上でdumpimage -l、FITのDT解析、必要なimageの抽出・ハッシュ比較を行い、Jupiter2用構成がOpenSBI、U-Boot、DTB、ESOSを参照していることを確認する。スクリプトの終了コードだけで合格としない。S-mode引渡しはFIT一覧だけでなく、SPLソースと実機ログでも確認する。
+--configuration conf_11と--board k3-pico-itxを明示する。U-Boot構成のdescriptionが一致しなければ停止する。出力には選択した構成だけを残し、defaultも同じ構成にする。元FITは変更しない。
+
+ESOSの全loadablesをハッシュ検査後に取り込み、名前の衝突を避けて参照を付け直す。OpenSBIをfirmware、U-BootとESOSをloadablesに指定する。U-Bootにosがない場合はu-bootを設定し、entryがなければ元のloadを設定する。これによってバイナリー自体がS-mode用に変換されるわけではない。
+
+対応範囲は署名・暗号化のないFIT、非圧縮の選択image、CRC32／SHA-1／SHA-256／SHA-384／SHA-512の入力ハッシュである。inline dataとexternal dataの両方を取り込める。未知の形式、ハッシュ不一致、ESOSボード不一致等では、完成出力を残さず停止する。
+
+### 7.2 転送上限とOpenSBI実行時領域を確認する
+
+スクリプトへ次の二つの値を必ず渡す。NOR容量393216を転送上限として流用しない。
+
+- --max-download-bytes：**SPL段階**のfastboot受信バッファーの容量。使用するFSBLの設定と照合する。第8.2節で選定済みFSBLをRAM起動した後、PCから下記のgetvarで確認できる場合がある。BootROM段階の値と区別する。取得できない場合は採用FSBLのソース・設定から確認する。
+- --opensbi-reserve-bytes：OpenSBIのloadから必要な実行時領域末尾までのサイズ。BINのファイル長ではなく、ELFの配置、BSS、heap、scratch等を含めて段階Aで確定する。SM版では改めて求める。
+
+```bash
+# 第8.2節でFSBL起動とUSB再認識を確認した後のPC操作
+sudo fastboot devices
+read -r -p 'SPLのserial: ' FASTBOOT_SERIAL
+sudo fastboot -s "$FASTBOOT_SERIAL" getvar max-download-size
+```
+
+これらの確認値を入力する実行例を以下に示す。0xから始まる16進数、または10進数を入力できる。未確認の値を仮置きして実機へ進めない。
+
+### 7.3 販売元OpenSBIを含むイメージを生成する
+
+```bash
+# publicリポジトリのルートで実行する
+read -r -p '確認済みSPL転送上限(bytes): ' SPL_DOWNLOAD_BYTES
+read -r -p '確認済み販売元OpenSBI実行時領域(bytes): ' VENDOR_SBI_RESERVE_BYTES
+
+python3 scripts/build-jupiter2-ram-boot-image.py \
+  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
+  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
+  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  --configuration conf_11 \
+  --board k3-pico-itx \
+  --variant vendor \
+  --opensbi-reserve-bytes "$VENDOR_SBI_RESERVE_BYTES" \
+  --max-download-bytes "$SPL_DOWNLOAD_BYTES" \
+  --output work/jupiter2-ram-boot/vendor-release
+```
+
+**このコマンドの成功によって、次の統合イメージとFSBLのコピーが生成される。実機への転送・flash・再起動は行われない。** --outputは未作成のディレクトリを指定する。既存出力を上書きしないため、再生成時は別名を使う。
+
+```text
+work/jupiter2-ram-boot/vendor-release/
+├── images/
+│   ├── FSBL.bin
+│   └── ram-boot-vendor.itb
+└── records/
+    ├── manifest.json
+    ├── fit-list.txt
+    ├── mkimage.txt
+    ├── ram-boot.its
+    ├── payload-*.bin
+    ├── FSBL.bin.sha256
+    └── ram-boot-vendor.itb.sha256
+```
+
+manifest.jsonは入力ファイル名・SHA-256、格納payload、ボード、構成、検査対象のload領域、指定した制約、ツール版、未検証項目を記録する。入力の絶対パスや実機serialは収録しない。ram-boot.itsとpayload-*.binは生成内容を調べるための資料で、実機へ送るのはimages内の二ファイルだけである。
+
+```bash
+cd work/jupiter2-ram-boot/vendor-release
+sha256sum -c records/FSBL.bin.sha256
+sha256sum -c records/ram-boot-vendor.itb.sha256
+cat records/fit-list.txt
+```
+
+スクリプトは各ロードイメージのファイル範囲、および指定されたOpenSBI実行時領域について重複を拒否する。最終FITを再読込し、全payloadのハッシュと元データとの一致、SPL転送上限を検査する。ただしDTBの自動配置、転送バッファー、U-Boot等のBSS・動的領域、SM予約領域、FSBL互換性、ESOS起動、NOR自動保存の有無までは証明しない。manifestのhardware_verifiedはfalseである。
+
+ホスト側の検査は次で再実行できる。実際のmkimage、dumpimage、dtcを使用する。これはファイル生成・検査の試験であり、SBIやPMPの動作試験ではない。
+
+```bash
+python3 scripts/tests/test_jupiter2_ram_boot_image.py
+```
 
 ## 8. 段階C：販売元OpenSBIをRAM起動する
 
@@ -160,7 +237,7 @@ Linux起動に進むとOSは通常のファイルシステムへ書き込む。R
 
 1. UARTログを保存した状態でFDLを押しながらRSTを短く押し、FDLを離す。
 2. データ通信対応USBケーブルでDRD Type-CとPCを接続する。実機の電源は別途供給する。
-3. PCで次を実行する。以下の相対パスはwork/jupiter2-ram-bootを作業ディレクトリとする。
+3. PCで次を実行する。以下の相対パスは生成したwork/jupiter2-ram-boot/vendor-releaseを作業ディレクトリとする。
 
 ```bash
 sudo fastboot devices
@@ -215,11 +292,33 @@ dtb_dirは既存DTBを継続利用する場合の例であり、6.18.3というm
 
 1. 本リポジトリの[スタック導入手順の第3章](milkv-jupiter2-stack-install.md#3-開発ホストで候補をビルドする)に従いOpenSBI＋SMを作り、BIN、ELF、設定とビルド記録を保存する。
 2. 実K3の初期化、必要なSBI、ESOSとの連携、SMのPMP・予約領域について販売元版との差分を確認する。QEMU向け設定のビルド成功を実機互換性の根拠にしない。
-3. 段階Bと同じU-Boot、DTB、ESOS、FSBLを使い、OpenSBI部分だけを差し替えてimages/ram-boot-keystone.itbを作る。変更したOpenSBIの実行時領域を含めてRAM配置を再検査する。
+3. 段階Bと同じU-Boot、DTB、ESOS、FSBLを使い、下記のコマンドでOpenSBI部分だけを差し替えてkeystone-release/images/ram-boot-keystone.itbを作る。変更したOpenSBIの実行時領域を含めてRAM配置を再検査する。
 4. 段階Cと同じFDL手順を最初から行い、最後に転送するFITだけをram-boot-keystone.itbへ変える。起動済みU-Bootへ単独OpenSBIを追加転送する方法は使わない。
 5. UARTで開発版OpenSBIとSMの識別、初期化、S-modeへの移行を確認する。同じ新Linuxを起動し、kernelログ、CPU、ネットワーク等を販売元版と比較する。
 6. 正確に対応するdriver、runtime、アプリを確認してから同梱hello二種を実行する。展開済みbundleを作業ディレクトリとしてsudo bash tools/run-hello.shを使用する。失敗した場合はログを残して中止する。
 7. 必要な実機検証を行う。ホストでのコンパイル、FITの生成、OpenSBIのバナー表示だけでEnclaveの動作を合格にしない。
+
+### 開発版＋SMの生成例
+
+リポジトリのルートで実行する。SPL_DOWNLOAD_BYTESは第7.3節で確認した値を使用する。OpenSBI BINのパスは標準ビルド先の例で、変更している場合は実際の出力先を指定する。
+
+```bash
+read -r -p '確認済みSM版OpenSBI実行時領域(bytes): ' KEYSTONE_SBI_RESERVE_BYTES
+
+python3 scripts/build-jupiter2-ram-boot-image.py \
+  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
+  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
+  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
+  --configuration conf_11 \
+  --board k3-pico-itx \
+  --variant keystone \
+  --opensbi-reserve-bytes "$KEYSTONE_SBI_RESERVE_BYTES" \
+  --max-download-bytes "$SPL_DOWNLOAD_BYTES" \
+  --output work/jupiter2-ram-boot/keystone-release
+```
+
+出力構成は販売元版と同じで、FIT名がram-boot-keystone.itbとなる。第8章を最初から実施する際の作業ディレクトリはkeystone-releaseにする。FSBLをstageするところから再開し、統合FITはimages/ram-boot-keystone.itbを指定する。販売元版・SM版のmanifestで、OpenSBI以外の入力SHA-256が一致していることも確認する。
 
 ## 10. 失敗時の停止・復帰方法
 
@@ -248,4 +347,4 @@ UARTが応答しない場合は、ログを保存し、電源を切る。FDLを�
 | C：販売元版RAM起動 | PCログ、全UARTログ、Linux状態、通常起動との差分 | 新OpenSBIへ差し替える前にRAM起動経路が動作 |
 | D：OpenSBI＋SM | 同じ記録とSM初期化・hello等の実行結果 | 実機の基本機能と必要なEnclave動作を確認 |
 
-次に行う作業は段階Aのソース比較である。その結果を基に、実際に使うFSBL、ビルドコマンド、FIT生成方法を確定し、本書の第6・7章を更新する。現時点で実機試験は未実施で、RAMブートの成功やNORへの無書込みを検証済みとはしていない。
+次に行う作業は段階Aのソース比較である。その結果を基に、実際に使うFSBLと各ファームウェアのビルド条件を確定し、第7章のスクリプトへ渡す入力を用意する。現時点で実機試験は未実施で、RAMブートの成功やNORへの無書込みを検証済みとはしていない。
