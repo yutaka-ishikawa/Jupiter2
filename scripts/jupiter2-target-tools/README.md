@@ -32,6 +32,35 @@ initramfs生成は同梱手順書の第6章、起動kernelの選択は第7章、
 DTB配置、firmware書込み、driverロード、再起動は行わない。
 配置途中の失敗ではコピー済みファイルを自動削除しないため、再実行前に上表の配置先を確認する。
 
+## 配置後にinitrdを作る
+
+**install-linux.shはinitrdを生成しない。**
+新kernelのreleaseはbundle内の`kernelrelease.txt`と配置済みmodulesで確認する。
+今回の`Image-6.18.3-keystone`に対応するreleaseは`6.18.3`であり、
+ファイル名の末尾`-keystone`を`update-initramfs -k`へ付けない。
+
+同梱手順書の[第6章](docs/milkv-jupiter2-stack-install.md#6-新linuxとアプリを追加配置する)に従い、
+実機上でmodulesと標準名のconfigを準備してから：
+
+```bash
+sudo update-initramfs -c -k 6.18.3
+ls -lh /boot/initrd.img-6.18.3
+```
+
+既に作成済みの同releaseを更新する場合は`-u`を使う。
+生成が成功した後、UARTのU-Bootで今回の値を指定する。
+
+```text
+setenv knl_name Image-6.18.3-keystone
+setenv ramdisk_name initrd.img-6.18.3
+setenv dtb_dir spacemit/6.18.3-generic
+printenv knl_name ramdisk_name dtb_dir
+```
+
+DTBは既存の実機用directoryを継続利用する例で、新kernelとの適合を確認する。
+`env_k3.txt`の編集・`saveenv`はこの試験前に行わない。
+別releaseの場合は、同梱手順書第6・7章の照合方法で実際のファイル名に合わせる。
+
 ## 2段階の起動確認
 
 1. **新Linux＋既存OpenSBI**：kernel配置とinitramfs生成後も`env_k3.txt`は変更しない。UARTでU-Bootを止め、RAM上の`knl_name`・`ramdisk_name`・`dtb_dir`を新kernel用にして起動する。`saveenv`は使わない。正常動作確認後に`env_k3.txt`へ同じ値を設定し、通常再起動でも新kernelが選ばれることを確認する。この段階ではKeystone driverをロードせず、helloも実行しない。
