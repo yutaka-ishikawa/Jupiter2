@@ -3,7 +3,7 @@
 更新日：2026-11-20（JST）。対象：`yutaka-ishikawa/public`のK3スタックと本書のイメージ作成スクリプト。
 実機調査・build経路は`6403232967178cb896fc761eb0038fdf9a85bd54`を基準とし、使用commitは取得時に記録する。
 
-対象はSpacemiT K3搭載Milk-V Jupiter2 SBCで、既存のEDK2・Linux環境を残しながら、
+対象はSpacemiT K3搭載Milk-V Jupiter2 SBCで、既存のboot firmware・Linux環境を残しながら、
 開発したOpenSBI＋Keystone SM、Linux、Keystone driver、SDK/Eyrieアプリを段階導入する。
 Jupiter（K1/M1）、Jupiter2 NX、Dev Kitにはそのまま適用しない。
 
@@ -243,20 +243,64 @@ bash tools/preflight.sh
 sudo bash tools/install-linux.sh
 ```
 
-`install-linux.sh`はLinux/modules/appsだけを追加配置する。initramfs生成、boot entry変更、
-firmware書込みは同梱docsを見て別工程で行う。配置途中の失敗は全体rollbackしないため、
-再実行前に部分配置を確認する。新firmwareと一致するkernelの起動確認後は、
-`sudo bash tools/run-hello.sh`で同梱hello二種を実行できる。
+### install-linux.shが実機へ配置するファイル
 
-Python/Bash/coreutils/kmod等は実機OSの標準パッケージを使い、開発PCのx86バイナリーを
-bundleへ混入させない。`tools/preflight.sh`が主要依存を検査し、NOR書込み用mtd-utilsなど
-追加依存は同梱READMEで確認する。OS標準パッケージまで含むオフラインOSイメージではない。
+`sudo bash tools/install-linux.sh`は、展開したbundleから次のファイルを実機へコピーする。
+表の`<release>`は、bundle内の`kernelrelease.txt`に記録されたkernel releaseを表す。
 
-`source-untracked.txt`は未追跡ファイルの名前だけを記録する。再現可能な配布には必要な
-ソースをcommitし、変更のないcheckoutでbuildする。ビルド先を変えた場合は
-`--k3-build-dir`と`--keystone-build-dir`を指定する。
-DTBは自動同梱しない。実機に適合すると確認したDTを別途管理し、既存DTへ一括上書きしない。
-QEMU向けguest-overlayのshutdown等も同梱しない。
+| bundle内のファイル | 実機への配置先 | 用途 |
+| --- | --- | --- |
+| `linux/Image` | `/boot/Image-<release>-keystone` | 新しいLinux kernel本体 |
+| `linux/config` | `/boot/config-<release>-keystone` | そのkernelのbuild設定。起動時に読む設定ファイルではない |
+| `modules/<release>/`全体 | `/lib/modules/<release>/` | 新kernel用の全kernel modules。Keystone driverを含む |
+| `modules/<release>/extra/keystone-driver.ko` | `/lib/modules/<release>/extra/keystone-driver.ko` | 上記modulesに含まれるKeystone driver |
+| `apps/hello.ke`、`apps/hello-native.ke` | `/opt/keystone/<release>/` | Enclave動作確認用の二つのサンプル |
+
+配置後、`depmod -a <release>`でmodule依存情報を生成する。
+事前にbundleのchecksum、実機側の必要コマンドと区画容量を検査し、
+同じreleaseの既存modulesや配置先がある場合は停止する。
+
+**このコマンドでは新しいLinuxを起動しない。現在実行中のkernelも、次回起動するkernelの指定も変わらない。**
+initramfsの生成は[第6章](#6-新linuxとアプリを追加配置する)、
+起動するLinuxの変更は[第7章](#7-試験用boot-entryを追加する)で行う。
+今回の`/boot/env_k3.txt`を使う構成は、第7章の「U-Bootから直接起動する場合」を参照する。
+OpenSBI＋SMの書込みは[第8章](#8-opensbiとsmを置換する)の別工程となる。
+DTBの配置、boot設定の編集、driverのロード、再起動も、このスクリプトでは行わない。
+
+配置途中でI/Oエラー等が発生しても、それまでにコピーしたファイルは自動削除しない。
+再実行前に上表の配置先を確認する。
+必要なfirmware更新と新kernelの起動確認が済んだ後、
+`sudo bash tools/run-hello.sh`でbundle内の二つのサンプルを実行できる。
+
+### bundle.tar.gzに含まれる記録ファイル
+
+次のファイルはtarを展開した`bundle/`内の説明・検証用ファイルであり、
+`install-linux.sh`によって`/boot`や`/lib/modules`へ配置されるものではない。
+
+| bundle内のファイル | 内容 |
+| --- | --- |
+| `kernelrelease.txt` | 同梱kernelとmodulesのrelease。配置先の名前と実行中kernelの照合に使う |
+| `capacity.json` | 作成時に指定したOpenSBI区画容量、最終ITBのサイズ、容量判定、ITBのSHA-256 |
+| `fit-inspection.txt` | FIT作成・内容表示の出力 |
+| `source-commit.txt` | パッケージ作成時のソースcheckoutのcommit ID |
+| `source-local.patch` | パッケージ作成時の追跡済みファイルとHEADとの差分 |
+| `source-untracked.txt` | パッケージ作成時のGit未追跡ファイルのパス一覧。ファイル本体は含まず、tarの収録ファイル一覧でもない |
+| `SHA256SUMS` | bundle内の通常ファイルを照合するSHA-256一覧 |
+| `README.md`、`docs/` | 実機での操作方法と関連手順書 |
+
+`source-*`は作成時checkoutの記録であり、ソースコード一式を保存するものではない。
+再現可能な配布には必要なソースをcommitし、変更のないcheckoutでbuildする。
+ビルド先を変えた場合は、イメージ作成時に`--k3-build-dir`と`--keystone-build-dir`を指定する。
+
+### 実機OS側で用意するツールと同梱しないもの
+
+Python、Bash、coreutils、kmod等は実機OSの標準パッケージを使う。
+`tools/preflight.sh`が主要コマンドの有無を検査する。
+NOR書込み用mtd-utils等の追加依存は、bundle内の`README.md`を参照する。
+これらのOS標準パッケージはtarに含まれないため、必要なら実機OSへ別途導入する。
+
+DTBは自動同梱・配置しない。実機に適合すると確認したDTBを別途用意し、第7章で参照先を指定する。
+開発PC用のx86バイナリー、QEMU向けguest-overlayのshutdown等も同梱しない。
 
 FITだけを作る場合：
 
@@ -354,6 +398,34 @@ ls -l "/boot/initrd.img-$KREL"
 使用中のboot経路を第3節の記録から選ぶ。EDK2のBoot ManagerでOSを切り替えても
 M-modeのOpenSBIは置き換わらない。kernel entryとfirmware更新は別工程である。
 
+### U-Bootから直接起動する場合
+
+今回提示されたBianbu 4.0.4の`/boot/env_k3.txt`には、
+`knl_name=vmlinuz-6.18.3-generic`、`ramdisk_name=initrd.img-6.18.3-generic`、
+`dtb_dir=spacemit/6.18.3-generic`が設定されている。
+U-Bootがこのファイルを読み込んでLinuxを直接起動する構成では、ここで起動ファイルを選ぶ。
+
+1. 現在の`env_k3.txt`を別名でバックアップし、起動失敗時に元へ戻せる手段を確認する。
+2. 第6章で新kernel用initramfsを作成する。
+3. `knl_name`を、配置した`Image-<release>-keystone`へ変更する。
+4. `ramdisk_name`を、生成した`initrd.img-<release>`へ変更する。
+5. `dtb_dir`は、使用する実機用DTBが存在するディレクトリを指定する。
+   既存DTBを継続利用する場合も、新kernelとの適合を確認する。
+
+上記のファイル名はU-Bootが読むbootfsを基準とする。
+Linuxでそのbootfsが`/boot`にマウントされていることを`findmnt /boot`で確認し、
+指定したkernel、initramfs、実際に選択されるDTBがそこに存在することを確認する。
+`<release>`は`kernelrelease.txt`の実際の値に置き換える。
+`ramdisk_addr`、`loglevel`、`commonargs`はkernelの選択のためには変更しない。
+
+**設定変更は次回起動から有効となる。** この方式はGRUBの別entry追加とは異なり、
+`env_k3.txt`のkernel指定を変更すると既定の起動先も変わる。
+旧kernelと元の設定を残し、UART等で復旧できる状態で試す。
+OpenSBI＋SMの更新はこのファイルでは行わない。
+
+[SpacemiT K3起動資料](https://github.com/spacemit-com/docs-buildroot/blob/main/en/k3_buildroot/device/boot.md)と
+[K3 U-Boot環境定義](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/board/spacemit/k3/k3.env)も参照。
+
 ### EDK2からGRUBを使っている場合
 
 動作中entryを複製し、次だけ変更した「Keystone trial」を追加する。
@@ -374,7 +446,7 @@ GRUBが参照するパスは、`/boot`が別partitionかrootfs内かで異なる
 EDK2が使わない`extlinux.conf`を編集しても反映されない。loaderが特定できない場合は
 ファイル配置までで止め、使用中entryの形式を確定する。
 
-どちらも既定entryは旧環境のまま、UART/画面から手動でtrialを選ぶ。
+GRUB/extlinuxで別entryを追加する場合は、既定entryを旧環境のまま残し、UART/画面から手動でtrialを選ぶ。
 `init=/bin/bash`、`root=/dev/vda`、QEMUのvirtio/9p設定は持ち込まない。
 最初は通常メモリー量のhelloだけを試し、256 MiB EPM用CMAは後段で
 [大容量EPM手順](keystone-large-epm.md)に従い実機の予約領域と照合して追加する。
