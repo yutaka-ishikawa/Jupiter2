@@ -28,7 +28,7 @@ PMP条件を確定するまで書き込まない。以下の「停止条件」�
 
 | 段階 | 起動する組合せ | 実施内容 | 失敗時に戻すもの |
 | --- | --- | --- | --- |
-| 第1段階 | 新Linux＋既存OpenSBI | 第6章で配置し、第7章で新kernelへ切り替えて起動を確認 | 元のLinux起動設定。既存OpenSBIは変更しない |
+| 第1段階 | 新Linux＋既存OpenSBI | 第6章で配置。第7章でUARTからRAM上だけ新kernelを試し、成功後に永続化 | 元のLinux起動設定。既存OpenSBIは変更しない |
 | 第2段階 | 第1段階と同じ新Linux＋新OpenSBI／SM | 第8章でOpenSBIだけ更新し、同じkernelの起動を確認。その後第9章のEnclave試験 | まずOpenSBIを更新前へ戻す。必要ならLinux起動設定も元へ戻す |
 
 第1段階ではKeystone driverをロードせず、Enclaveを実行しない。
@@ -480,31 +480,82 @@ M-modeのOpenSBIは置き換わらない。kernel entryとfirmware更新は別�
 
 ### U-Bootから直接起動する場合
 
-今回提示されたBianbu 4.0.4の`/boot/env_k3.txt`には、
-`knl_name=vmlinuz-6.18.3-generic`、`ramdisk_name=initrd.img-6.18.3-generic`、
-`dtb_dir=spacemit/6.18.3-generic`が設定されている。
-U-Bootがこのファイルを読み込んでLinuxを直接起動する構成では、ここで起動ファイルを選ぶ。
+今回のBianbu 4.0.4では、`env_k3.txt`を変更する前にUARTから一度だけ新kernelを起動する。
+試験に失敗しても、再起動すれば従来の`env_k3.txt`から旧kernelを選べるようにする。
 
-1. 現在の`env_k3.txt`を別名でバックアップし、起動失敗時に元へ戻せる手段を確認する。
-2. 第6章で新kernel用initramfsを作成する。
-3. `knl_name`を、配置した`Image-<release>-keystone`へ変更する。
-4. `ramdisk_name`を、生成した`initrd.img-<release>`へ変更する。
-5. `dtb_dir`は、使用する実機用DTBが存在するディレクトリを指定する。
-   既存DTBを継続利用する場合も、新kernelとの適合を確認する。
+#### 配置後に旧Linux上で準備する
 
-上記のファイル名はU-Bootが読むbootfsを基準とする。
-Linuxでそのbootfsが`/boot`にマウントされていることを`findmnt /boot`で確認し、
-指定したkernel、initramfs、実際に選択されるDTBがそこに存在することを確認する。
-`<release>`は`kernelrelease.txt`の実際の値に置き換える。
-`ramdisk_addr`、`loglevel`、`commonargs`はkernelの選択のためには変更しない。
+1. 第5章のバックアップを実機外にも保存し、旧kernel・旧initramfs・旧DTBを残す。
+2. 第6章で新kernel、modules、appsを配置し、新kernel用initramfsを生成する。
+3. `kernelrelease.txt`から新releaseを確認し、実際のkernel名
+   `Image-<release>-keystone`、initramfs名`initrd.img-<release>`を記録する。
+4. 新kernelで使う実機用DTBと、そのdirectoryを確認する。
+   DTBは自動配置されないため、既存DTBを使う場合も新kernelとの適合を確認する。
+5. `findmnt /boot`で、U-Bootが読むbootfsがLinuxの`/boot`にマウントされていることを確認する。
 
-**設定変更は次回起動から有効となる。** この方式はGRUBの別entry追加とは異なり、
-`env_k3.txt`のkernel指定を変更すると既定の起動先も変わる。
-旧kernelと元の設定を残し、UART等で復旧できる状態で試す。
-OpenSBI＋SMの更新はこのファイルでは行わない。
+**この時点では`/boot/env_k3.txt`を編集しない。**
 
-[SpacemiT K3起動資料](https://github.com/spacemit-com/docs-buildroot/blob/main/en/k3_buildroot/device/boot.md)と
-[K3 U-Boot環境定義](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/board/spacemit/k3/k3.env)も参照。
+#### UARTでU-BootのRAM上だけに新kernelを指定する
+
+UARTコンソールを接続し、リセット・電源投入直後から小文字の`s`を押し続け、
+U-Bootプロンプトへ入る。kernelを変更する前に、この操作で停止できることを確認しておく。
+
+まず旧設定と通常の起動処理を表示し、UARTログへ保存する。
+
+```text
+printenv bootcmd autoboot boot_device
+printenv boot_devname boot_devnum bootfs_part
+printenv knl_name ramdisk_name dtb_dir dtb_name
+```
+
+次に、新kernel用の値をRAM上に設定する。
+以下の`NEW-RELEASE`とDTB directoryは実際に記録した値へ置き換える。
+ファイル名はU-Bootが読むbootfsを基準とし、通常は先頭に`/boot/`を付けない。
+
+```text
+setenv knl_name Image-NEW-RELEASE-keystone
+setenv ramdisk_name initrd.img-NEW-RELEASE
+setenv dtb_dir spacemit/NEW-RELEASE
+printenv knl_name ramdisk_name dtb_dir
+```
+
+既存の実機DTBを継続利用する場合、`dtb_dir`はその実在するdirectoryを指定する。
+例えば従来の`spacemit/6.18.3-generic`を使うなら、そこを指定する。
+新release名のDTB directoryが自動作成されるわけではない。
+`dtb_name`を機種情報から決定する既存処理も維持し、実際に読み込むDTBをUARTログで確認する。
+
+**`saveenv`は実行しない。** NOR上の環境やbootfsのファイルへ保存せず、その起動だけに適用する。
+表示した`bootcmd`が通常のK3起動処理で、途中で設定を再読込み・上書きしないことを確認してから：
+
+```text
+run bootcmd
+```
+
+ベンダーK3の標準経路では`env_k3.txt`はU-Boot初期化中に読み込まれ、
+通常の起動処理はその時点のRAM上の変数を使う。実機の`bootcmd`が独自変更されている場合は、
+その内容に合わせる。新kernelの起動に失敗した場合は、第10章のRAM試験時のrollbackへ進む。
+
+#### 正常起動後にenv_k3.txtへ永続化する
+
+RAM上の指定で新Linuxが起動したら、下記の第1段階の合格条件を確認する。
+合格するまでは`env_k3.txt`を変更しない。
+
+**今回の標準U-Boot直起動構成では、正常起動した値を永続化するためのboot設定変更は
+`/boot/env_k3.txt`だけでよい。`saveenv`やNORのenv区画更新は不要。**
+
+`env_k3.txt`の既存の`knl_name`、`ramdisk_name`、`dtb_dir`を、
+試験に成功した値へ変更する。同じ変数の行を末尾に重複追加せず、既存行を編集する。
+kernel・initramfs・DTBの実ファイル配置は、それ以前に完了していることが前提となる。
+もし試験で他の起動変数も変更した場合は、必要性を確認し、その設定も別途反映する。
+
+`ramdisk_addr`、`loglevel`、`commonargs`は今回のkernel選択のためには変更しない。
+ファイルを保存後に`sync`し、次はUARTで変数を上書きせずに通常再起動する。
+新kernelが自動選択されて同じ条件で正常起動することを確認して、第2段階へ進む。
+永続化後の起動失敗は、第10章の永続化後のrollbackで戻す。
+
+[SpacemiT K3起動資料](https://github.com/spacemit-com/docs-buildroot/blob/main/en/k3_buildroot/device/boot.md)、
+[K3 U-Boot環境定義](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/board/spacemit/k3/k3.env)、
+[設定読込み処理](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/board/spacemit/k3/k3.c)も参照。
 
 ### EDK2からGRUBを使っている場合
 
@@ -538,7 +589,8 @@ GRUB/extlinuxで別entryを追加する場合は、既定entryを旧環境のま
 Keystone driverを自動loadする設定は作らず、`insmod`・`modprobe keystone_driver`・
 `tools/run-hello.sh`・Enclave実行はまだ行わない。
 
-起動ログと結果を保存する。第1段階が合格したら新Linuxの指定を維持し、第8章へ進む。
+起動ログと結果を保存する。U-Boot方式ではRAM上の試験成功後に上記の永続化と通常再起動確認まで行う。
+第1段階が合格したら新Linuxの指定を維持し、第8章へ進む。
 失敗したら第2段階には進まず、[第1段階のrollback](#第1段階のrollback)で元の起動設定へ戻す。
 
 ## 8. OpenSBIとSMを置換する
@@ -626,9 +678,28 @@ OpenSBI区画の復元は不要である。
 | 失敗した時点 | 対処 |
 | --- | --- |
 | ファイル配置／initramfs生成中、起動設定を変更する前 | 旧起動設定を維持する。部分配置を確認し、新kernelを選ばない |
-| 起動設定変更後、再起動前 | 下記の元設定復元を行い、元kernel指定に戻す |
-| 新kernelが起動したがI/O等に問題がある | 動作中Linuxから元設定を復元し、旧kernelで再起動する |
-| 新kernelが起動せず通常Linuxを使えない | 復旧用Linuxからbootfsをマウントして元設定を復元する。手順は下記 |
+| UARTのRAM試験中に新kernelが起動しない／正常動作しない | env_k3.txtは未変更なので、リセットしてRAM設定を破棄し、旧kernelを通常起動する |
+| RAM試験成功後、env_k3.txtへ永続化したが再起動前 | 下記の元設定復元を行い、元kernel指定に戻す |
+| 永続化後、新kernelは起動したがI/O等に問題がある | 動作中Linuxから元設定を復元し、旧kernelで再起動する |
+| 永続化後、新kernelが起動せず通常Linuxを使えない | UARTから旧kernelを一時起動して元設定を復元する。それでも起動できない場合だけ復旧用Linuxを使う |
+
+**RAM上だけで試験し、`env_k3.txt`を編集していない場合：**
+再起動するとRAM上の変更は消え、元のファイルに記録された旧kernelが選ばれる。
+この場合はkernel選択設定を復元するためにbootfsを修復する必要はない。
+Linuxが応答する場合は通常のshutdown/rebootを使い、起動途中で停止して応答しない場合は
+基板のリセットで再起動する。
+
+**正常起動後に`env_k3.txt`へ永続化した場合：**
+起動しなくなってもUARTからU-Bootで旧kernel名・旧initramfs名・旧DTB directoryをRAM上に指定し、
+`saveenv`を使わず通常の起動処理を実行すれば、旧Linuxから元設定を復元できる。
+今回保存した旧値は次のとおり。実際のバックアップ内容と一致することを確認して使う。
+
+```text
+setenv knl_name vmlinuz-6.18.3-generic
+setenv ramdisk_name initrd.img-6.18.3-generic
+setenv dtb_dir spacemit/6.18.3-generic
+run bootcmd
+```
 
 今回の`env_k3.txt`方式で、通常Linuxが使える場合は次を実行する。
 `ROLLBACK`には第5章で保存したdirectoryを指定する。
@@ -647,7 +718,7 @@ sync
 GRUB/extlinux方式では旧entryを選び、追加したtrial entryを削除または無効化し、
 変更した既定値も保存済み設定へ戻す。GRUBは元の設定から`update-grub`で再生成する。
 
-**Linuxが起動しない場合：** 作業前に用意した、K3のUFS/NVMe等へアクセスできる復旧用Linuxを起動する。
+**旧kernelの一時起動でも復旧できない場合：** 作業前に用意した、K3のUFS/NVMe等へアクセスできる復旧用Linuxを起動する。
 第5章のPARTUUIDと照合して、実際のbootfsをマウントする。
 以下は復旧用Linux上での例で、deviceとバックアップのパスは実物へ置き換える。
 
