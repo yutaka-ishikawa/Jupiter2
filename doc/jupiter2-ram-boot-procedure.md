@@ -117,6 +117,40 @@ dumpimage -T flat_dt -p 11 -o build/k3-pico-itx.dtb original/u-boot.itb
 
 fw_dynamic.binは統合FITへ格納する実行バイナリーの候補、fw_dynamic.elfはシンボル・配置の解析用として保存する。ELFをfastbootで送る予定ではない。単独fw_dynamic.itbはNOR用成果物として区別して保存する。
 
+### 5.1 4つの入力引数：ファイルの入手・抽出と配置先
+
+以下の4つは、開発PC上のファイルを指定する引数である。コマンドに書いたパスへファイルが自動ダウンロードされるわけではない。
+
+#### --fsbl：販売元のFSBL.binを用意する
+
+今回FDLからRAMへ転送してDDR初期化を確認した、実機に対応する販売元FSBL.binを使用する。入手元は、そのファイルを取り出した販売元OS／ファームウェア配布パッケージである。配布物ではfactory/FSBL.bin等に置かれるが、実際の収録場所を確認する。
+
+開発PCのwork/jupiter2-ram-boot/original/FSBL.binへコピーし、配布パッケージ名・版・入手URL・SHA-256を記録する。別ボード向けFSBLや、単に最新版という理由で選んだFSBLへ差し替えない。RAM起動用の改修版FSBLが必要と判明した場合は、第6章で確定したビルド出力を使う。
+
+#### --uboot-itb：販売元のu-boot.itbを用意する
+
+今回FSBLの後にstageしてU-Bootの起動を確認した、販売元配布パッケージ内のu-boot.itbを使用する。開発PCのwork/jupiter2-ram-boot/original/u-boot.itbへコピーする。
+
+提供されたdumpimage一覧では、このFITにU-Boot本体と複数のDTBが入っており、conf_11がk3-pico-itxを参照している。スクリプトへはFIT全体を渡す。U-Boot本体を事前にBINへ抽出して渡す必要はない。ただし、この販売元バイナリーがOpenSBI経由のS-mode起動に適合するかは第6章で確認する。
+
+#### --esos-itb：同じ販売元構成に対応するesos.itbを用意する
+
+販売元OS／ファームウェア配布パッケージのesos.itbを使用し、開発PCのwork/jupiter2-ram-boot/original/esos.itbへコピーする。ESOSが別パッケージで配布されている場合は、使用する販売元SDK／OSに対応する版を取り出す。公開ガイドにある別版のダウンロードURLを無条件に流用しない。
+
+開発PCで次を実行し、構成一覧にdescriptionがk3-pico-itxのものがあることを確認する。
+
+```bash
+dumpimage -l work/jupiter2-ram-boot/original/esos.itb
+```
+
+一致する構成がなければ、別ボードの構成を強制指定せず、対応するESOSを用意する。スクリプトも一致する構成が一つだけ見つからない場合は停止する。
+
+#### --opensbi-bin：配布fw_dynamic.itbからfw_dynamic.binを抽出する
+
+販売元はfw_dynamic.binを単体配布していなくてもよい。販売元配布パッケージのfw_dynamic.itbを開発PCのwork/jupiter2-ram-boot/original/fw_dynamic.itbへコピーし、第7.1節の「販売元がfw_dynamic.itbだけを配布している場合」の手順で中のOpenSBIを抽出する。
+
+抽出先work/jupiter2-ram-boot/original/fw_dynamic.binを--opensbi-binへ指定する。SM版を作る場合だけ、この引数を本リポジトリでビルドしたOpenSBI＋SMのfw_dynamic.binへ変更する。入力ITBの改名や、ELFの指定ではない。
+
 ## 6. 段階A：ソース差分と互換性を確認する
 
 この段階は開発PCで行う。成果物は差分の一覧、採用コミット、ビルド条件、RAM配置表である。
@@ -249,6 +283,58 @@ max-download-size: 0x20000000
 **FDL直後はBootROM、FSBL起動後はSPL、u-boot.itb起動後はU-Bootのfastbootになる。今回必要なのはFSBL起動後・u-boot.itb転送前の値である。** getvarは容量の問合せであり、ファームウェアを取り出す操作ではない。未対応エラーが出た場合は、他段階の値で代用せず、FSBLのソース・設定から受信容量を確認する。
 
 確認だけで終了する場合は、ログを保存して電源を切り、FDLを押さずに通常起動する。永続領域を変更していない条件では元の起動経路へ戻る。FSBL自体の自動保存等の確認は第6章の条件を引き続き適用する。
+
+#### OpenSBI実行時領域：実機の通常起動ログから確認する
+
+ここでは--opensbi-reserve-bytesの値を決めるため、**実際に動作しているOpenSBIの起動ログ**を確認する。fastboot getvarで取得した最大転送サイズとは別の値である。Linuxのファイルサイズや空きメモリー量からは決めない。
+
+1. 開発PCでUART端末を開き、電源投入直後からのログをファイルへ保存する。
+2. **FDLを押さずに実機を通常起動する。** これにより、現在インストールされている販売元OpenSBIのログを採取する。既に動作中のLinuxで再起動する場合も、UARTの保存を先に開始する。
+3. OpenSBIのバナー、版、Build time、Platform Nameと、次の項目を保存する。ログは開発PCのwork/jupiter2-ram-boot/logsへ置く。
+
+```text
+Firmware Base
+Firmware Size
+Firmware RW Offset
+Firmware RW Size
+Firmware Heap Offset
+Firmware Heap Size
+Firmware Scratch Size
+```
+
+4. **ログのOpenSBIが、RAM用FITへ入れる販売元OpenSBIと同じビルド・同じ実機構成か確認する。** 通常起動のログは現在NORにある版の情報であり、別の配布ITBや開発版＋SMのサイズを証明するものではない。対応が確認できない場合は、対応ソース・ELF／mapで調べ、1 MiBを確認済みとは扱わない。
+5. 対応するOpenSBI実装でFirmware Sizeがどこまでを含むか確認する。参照した販売元実装では、コード・データ・BSSに加え、HART用stack／scratchとheapを含むfw_sizeを表示する。heapのusedだけを採用したり、Scratch Sizeを単純に一回加えたりしない。SM固有の別予約領域等がある場合は、さらに別途確認する。
+
+参照実装：[起動時の領域計算（fw_base.S）](https://github.com/spacemit-com/opensbi/blob/k3-br-v1.0.y/firmware/fw_base.S)、[表示処理（sbi_init.c）](https://github.com/spacemit-com/opensbi/blob/k3-br-v1.0.y/lib/sbi/sbi_init.c)。採用版が異なる場合は、その版のソースを確認する。
+
+例えばUARTに次の表示があった場合の計算を示す。**638 KBは計算例であり、今回の実機の測定値ではない。**
+
+```text
+Firmware Base               : 0x100000000
+Firmware Size               : 638 KB
+```
+
+この実装のKB表示は1024で割った整数で、小数部分を切り捨てる。638×1024を必要量の厳密な上限とせず、次のように1 KiB多い上限を取り、さらに4 KiB単位へ切り上げて比較する。以下は開発PCで実行する。FIRMWARE_SIZE_KIBを実際のUART表示へ変更する。
+
+```bash
+python3 - <<'PY'
+# UARTのFirmware SizeのKB表示。638は例なので実測値へ変更する。
+FIRMWARE_SIZE_KIB = 638
+# 手順書の候補値：1 MiB。これが計算した上限以上か調べる。
+RESERVE_BYTES = 0x00100000
+upper_bytes = (FIRMWARE_SIZE_KIB + 1) * 1024
+required_bytes = (upper_bytes + 4095) // 4096 * 4096
+print(f"表示から求めた保守的上限: {required_bytes} bytes ({required_bytes:#x})")
+print(f"指定する実行時領域: {RESERVE_BYTES} bytes ({RESERVE_BYTES:#x})")
+print("サイズ条件: OK" if RESERVE_BYTES >= required_bytes else "サイズ条件: 不足・要変更")
+PY
+```
+
+この例なら表示から求めた上限は655360 bytes（0xa0000）であり、1 MiBの候補値に収まる。ただし、これは同じビルドについてのサイズ条件だけである。ロード先から確保する範囲が他のイメージ・転送バッファー・予約領域と重ならないことを第6章で確認して採用する。Firmware Baseも統合FITのOpenSBIロード先と一致することを確認する。
+
+バナーやFirmware Sizeが出ない場合、Linuxのdmesgだけでは起動前の全情報を取得できないことがある。UARTログの取りこぼしと起動ログ抑制の設定を確認し、必要なら対応するソース・ELF／mapで調べる。表示されないことを理由にBINのファイル長で代用しない。
+
+開発版＋SMについては、販売元版の測定値を流用しない。最初のRAM起動前は候補ビルドのソースとELF／mapから必要量を求め、RAM起動後に同じUART項目を採取して照合する。現在起動している販売元OpenSBIから、まだ動かしていないSM版の実行時領域を問い合わせることはできない。
 
 以下の例ではシェル変数へ数値を直接代入する。0xから始まる16進数、または10進数を指定できる。転送上限は実測値、OpenSBI実行時領域は未確認の仮置き値である。実行時領域を確認するまでは実機起動へ進めない。
 
