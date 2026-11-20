@@ -86,7 +86,7 @@ class PackagingTests(unittest.TestCase):
         root, _, _ = builder.read_fit(fit)
         config = root.children['configurations'].children['conf_11']
         self.assertEqual(builder.string(config, 'firmware'), 'opensbi')
-        self.assertEqual(builder.strings(config.props['loadables']), ['uboot', 'esos-0'])
+        self.assertEqual(builder.strings(config.props['loadables']), ['uboot', 'rt'])
         self.assertEqual(builder.number(root.children['images'].children['uboot'].props['entry']),
                          0x102000000)
         for index, source in [(0, 'opensbi.bin'), (1, 'uboot.bin'), (2, 'board.dtb'), (3, 'esos.bin')]:
@@ -183,6 +183,83 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('already exists', result.stderr)
         self.assertTrue(output.is_symlink())
 
+    def dual_fit(self, overlap=False):
+        names = ['rcpu-data-null']
+        names += ['rcpu0-dtb-' + b for b in ('com260', 'deb1', 'evb', 'evb2_1', 'evb2_2')]
+        names += ['rcpu1-dtb-' + b for b in ('com260', 'deb1', 'evb', 'evb2_1', 'evb2_2')]
+        for b in ('dc-board', 'com260-kit-v02', 'gemini-c0', 'gemini-c1',
+                  'pico-itx', 'BS01DCMA', 'com260_ifx'):
+            names += ['rcpu0-dtb-' + b, 'rcpu1-dtb-' + b]
+        names += ['rcpu0-fw', 'rcpu1-fw']
+        self.assertEqual(len(names), 27)
+        addresses = [0x100e04000] + [0x100e05000 + i * 0xc800 for i in range(24)]
+        addresses += [0x100200000, 0x100804000]
+        images = []
+        for index, (name, address) in enumerate(zip(names, addresses)):
+            raw = (name.encode() + b'!') * (512 if overlap and index == 0 else 16)
+            if overlap and index == 0:
+                raw = b'x' * 8192
+            payload = self.base / f'dual-{index}.bin'
+            payload.write_bytes(raw)
+            compressed = index not in (21, 22, 23, 24)
+            if compressed:
+                packed = subprocess.run(['lzop', '-c', str(payload)], capture_output=True, check=True)
+                payload = self.base / f'dual-{index}.lzo'
+                payload.write_bytes(packed.stdout)
+            compression = 'lzo' if compressed else 'none'
+            images.append(f'{name} {{ data = /incbin/("{payload.name}"); '
+                          f'type = "standalone"; arch = "riscv"; compression = "{compression}"; '
+                          f'load = <{address >> 32} {address & 0xffffffff}>; '
+                          f'entry = <{address >> 32} {address & 0xffffffff}>; '
+                          'hash-1 { algo = "crc32"; }; };')
+        refs = ', '.join('"' + name + '"' for name in names)
+        dts = ('/dts-v1/; / { description = "ESOS dual-core image for K3"; '
+               '#address-cells = <2>; images {' + ''.join(images) + '}; '
+               'configurations { default = "conf_dual"; conf_dual { '
+               'description = "ESOS Dual Core Configuration"; '
+               'loadables = ' + refs + '; }; }; };')
+        self.make_fit('esos', dts)
+        return names
+
+    @unittest.skipUnless(shutil.which('lzop'), 'requires real lzop')
+    def test_dual_config_lzo_all_27_loadables_preserved(self):
+        names = self.dual_fit()
+        result = self.build(esos_configuration='conf_dual')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.base / 'release/records/manifest.json').read_text())
+        self.assertEqual(manifest['esos_configuration'], 'conf_dual')
+        self.assertEqual(manifest['esos_loadables'], names)
+        self.assertEqual(manifest['esos_selection'], 'explicit')
+        root, blob, total = builder.read_fit(self.base / 'release/images/ram-boot-vendor.itb')
+        self.assertEqual(len(root.children['images'].children), 30)
+        for i in range(27):
+            image = root.children['images'].children[names[i]]
+            actual = builder.image_data(image, blob, total)
+            suffix = 'bin' if i in (21, 22, 23, 24) else 'lzo'
+            self.assertEqual(actual, (self.base / f'dual-{i}.{suffix}').read_bytes())
+            self.assertEqual(builder.string(image, 'compression'), 'none' if suffix == 'bin' else 'lzo')
+            self.assertGreater(manifest['payloads'][names[i]]['load_bytes'], 0)
+
+    @unittest.skipUnless(shutil.which('lzop'), 'requires real lzop')
+    def test_lzo_expanded_overlap_rejected(self):
+        self.dual_fit(overlap=True)
+        result = self.build(esos_configuration='conf_dual')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('overlapping load/runtime ranges', result.stderr)
+        self.assertFalse((self.base / 'release').exists())
+
+    def test_unknown_explicit_esos_configuration(self):
+        result = self.build(esos_configuration='nonexistent')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unknown --esos-configuration; available: board', result.stderr)
+
+    def test_explicit_selection_is_recorded(self):
+        result = self.build(esos_configuration='board')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.base / 'release/records/manifest.json').read_text())
+        self.assertEqual(manifest['esos_configuration'], 'board')
+        self.assertEqual(manifest['esos_selection'], 'explicit')
+
     def test_truncated_input_rejected(self):
         (self.base / 'uboot.itb').write_bytes(b'\xd0\x0d\xfe\xed')
         result = self.build()
@@ -192,3 +269,4 @@ class PackagingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

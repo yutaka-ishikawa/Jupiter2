@@ -86,7 +86,7 @@ Ubuntu／Debian系PCの例。PC用ツールを実機へコピーする必要は�
 
 ```bash
 sudo apt update
-sudo apt install fastboot u-boot-tools device-tree-compiler git \
+sudo apt install fastboot u-boot-tools device-tree-compiler lzop git \
   build-essential python3 bc bison flex libssl-dev dpkg-dev picocom
 mkdir -p work/jupiter2-ram-boot/{original,source,build,records,logs}
 ```
@@ -166,13 +166,32 @@ dumpimage -l work/jupiter2-ram-boot/original/u-boot.itb
 
 販売元OS／ファームウェア配布パッケージのesos.itbを使用し、開発PCのwork/jupiter2-ram-boot/original/esos.itbへコピーする。ESOSが別パッケージで配布されている場合は、使用する販売元SDK／OSに対応する版を取り出す。公開ガイドにある別版のダウンロードURLを無条件に流用しない。
 
-開発PCで次を実行し、構成一覧にdescriptionがk3-pico-itxのものがあることを確認する。
+開発PCで次を実行し、ESOSの構成名とloadablesを確認する。今回の販売元ESOSは、ボード別ではなく全ボード共通のconf_dual構成である。
 
 ```bash
 dumpimage -l work/jupiter2-ram-boot/original/esos.itb
 ```
 
-一致する構成がなければ、別ボードの構成を強制指定せず、対応するESOSを用意する。スクリプトも一致する構成が一つだけ見つからない場合は停止する。
+今回提供された2026-04-30版の一覧は次の構成である。
+
+```text
+Default Configuration: 'conf_dual'
+Configuration 0 (conf_dual)
+  Description: ESOS Dual Core Configuration
+  Loadables: rcpu-data-null
+             ...
+             rcpu0-dtb-pico-itx
+             rcpu1-dtb-pico-itx
+             ...
+             rcpu0-fw
+             rcpu1-fw
+```
+
+このため**--esos-configuration conf_dual**を指定する。これは--configuration conf_11とは独立したESOS側の構成名である。--board k3-pico-itxはU-Boot側の検査に引き続き使用し、ESOSに合わせて変更しない。
+
+この構成は27個のloadablesを持ち、多くはLZO圧縮である。スクリプトはpico-itx以外のDTBも含めた27個すべてを元の順序で取り込み、圧縮データとcompression属性を保持する。任意にDTBを間引かない。ホストのlzopで展開して配置検査用のサイズを求めるため、開発PCにlzopをインストールする。[販売元SPL](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/board/spacemit/k3/spl.c)はimage名によるremoteproc／data処理を行うため、元の名前も保持する。実機のFSBLにもLZO展開・ESOS初期化への対応が必要であり、FIT生成の成功だけでは確認済みとしない。
+
+別版では、実際の一覧でボード適合性を確認してから構成名を指定する。--esos-configurationを省略した場合だけ、従来どおりDescriptionが--boardと完全一致する構成を探す。defaultや唯一の構成という理由だけで自動的にconf_dualを選ばない。
 
 #### --opensbi-bin：配布fw_dynamic.itbからfw_dynamic.binを抽出する
 
@@ -188,7 +207,7 @@ dumpimage -l work/jupiter2-ram-boot/original/esos.itb
 2. SPLのfastboot受信、FIT展開、OpenSBI起動処理を比較する。販売元4月版FSBLをそのまま使えるか、改修版FSBLが必要かを判断する。公開例のFSBLも改修版なので、販売元版の互換性は未確認である。
 3. OpenSBIをFITのfirmware、U-Boot等をloadablesとして扱う方法と、fw_dynamic_info、DTB、次段アドレスの受渡しを確認する。
 4. U-BootのS-mode設定、ボード選択、通常起動と書込み専用fastbootへの分岐を確認する。
-5. ESOSのボード別構成、ロード先、起動・初期化処理、OpenSBIとのインターフェースを確認する。公開合成スクリプトはdescriptionが一致する構成へloadablesを追加するため、k3-pico-itxにESOSが追加されたことを必ず確認する。
+5. ESOSのボード別構成、ロード先、起動・初期化処理、OpenSBIとのインターフェースを確認する。公開合成スクリプトのdescription一致という前提は、今回のconf_dual型にはそのまま適用できない。本スクリプトでは--esos-configuration conf_dualで明示選択し、その全loadablesが統合FITへ追加されたことを確認する。
 6. 各imageのload／entry、サイズ、DTB、展開バッファー、OpenSBIの実行時領域、SM予約領域の重複を調べる。OpenSBI候補の先頭は0x100000000、販売元U-Bootのloadは0x102000000だが、採用ソースと実際のリンク結果を優先する。
 7. DDR情報、環境変数、EEPROM等への自動保存を調べ、RAM試験用ビルドで停止する方法を確定する。変更箇所を差分として残す。
 
@@ -217,14 +236,14 @@ write 38912 byte to spinor @offset 65536
 | --- | --- |
 | --fsbl | 選定済みFSBL.bin。コピーするだけで、互換性・包装・DDR設定は変更しない。 |
 | --uboot-itb | U-Boot＋DTBを含む販売元形式FIT。今回のconf_11のようにloadablesがU-Boot一つの構成。S-mode起動に必要な改修がある場合は、そのビルド済みFIT。 |
-| --esos-itb | 同じボードに対応するESOS FIT。選択構成はdescriptionが--boardと完全一致するものを一つだけ採用する。 |
+| --esos-itb | 対応するESOS FIT。今回は--esos-configuration conf_dualを明示する。省略時だけdescriptionが--boardと完全一致する構成を一つ採用する。 |
 | --opensbi-bin | 生のfw_dynamic.bin。販売元のfw_dynamic.itbから抽出したBIN、次に開発版＋SMのBINを渡す。ELFやITB自体は渡さない。 |
 
 --configuration conf_11と--board k3-pico-itxを明示する。U-Boot構成のdescriptionが一致しなければ停止する。出力には選択した構成だけを残し、defaultも同じ構成にする。元FITは変更しない。
 
-ESOSの全loadablesをハッシュ検査後に取り込み、名前の衝突を避けて参照を付け直す。OpenSBIをfirmware、U-BootとESOSをloadablesに指定する。U-Bootにosがない場合はu-bootを設定し、entryがなければ元のloadを設定する。これによってバイナリー自体がS-mode用に変換されるわけではない。
+ESOSの全loadablesをハッシュ検査後に取り込み、元のimage名と順序を保持する。販売元SPLにはrcpu0-fw／rcpu1-fw／rcpu-data-null等の名前で分岐する処理があるため、ESOSの名前を変更しない。出力のOpenSBI等の名前と衝突した場合は停止する。OpenSBIをfirmware、U-BootとESOSをloadablesに指定する。U-Bootにosがない場合はu-bootを設定し、entryがなければ元のloadを設定する。これによってバイナリー自体がS-mode用に変換されるわけではない。
 
-対応範囲は署名・暗号化のないFIT、非圧縮の選択image、CRC32／SHA-1／SHA-256／SHA-384／SHA-512の入力ハッシュである。inline dataとexternal dataの両方を取り込める。未知の形式、ハッシュ不一致、ESOSボード不一致等では、完成出力を残さず停止する。
+対応範囲は署名・暗号化のないFIT、非圧縮のU-Boot／DTB、非圧縮またはLZO（lzop形式）のESOS image、CRC32／SHA-1／SHA-256／SHA-384／SHA-512の入力ハッシュである。inline dataとexternal dataの両方を取り込める。未知の形式、ハッシュ不一致、ESOS構成が特定できない場合等では、完成出力を残さず停止する。
 
 ### 販売元がfw_dynamic.itbだけを配布している場合
 
@@ -383,6 +402,7 @@ python3 scripts/build-jupiter2-ram-boot-image.py \
   --esos-itb work/jupiter2-ram-boot/original/esos.itb \
   --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
   --configuration conf_11 \
+  --esos-configuration conf_dual \
   --board k3-pico-itx \
   --variant vendor \
   --opensbi-reserve-bytes "$VENDOR_SBI_RESERVE_BYTES" \
@@ -407,7 +427,7 @@ work/jupiter2-ram-boot/vendor-release/
     └── ram-boot-vendor.itb.sha256
 ```
 
-manifest.jsonは入力ファイル名・SHA-256、格納payload、ボード、構成、検査対象のload領域、指定した制約、ツール版、未検証項目を記録する。入力の絶対パスや実機serialは収録しない。ram-boot.itsとpayload-*.binは生成内容を調べるための資料で、実機へ送るのはimages内の二ファイルだけである。
+manifest.jsonは入力ファイル名・SHA-256、格納payload、ボード、構成、ESOS構成名・description・選択方法・元のloadables一覧、圧縮後サイズ・展開後サイズ、検査対象のload領域、指定した制約、ツール版、未検証項目を記録する。入力の絶対パスや実機serialは収録しない。ram-boot.itsとpayload-*.binは生成内容を調べるための資料で、実機へ送るのはimages内の二ファイルだけである。
 
 ```bash
 cd work/jupiter2-ram-boot/vendor-release
@@ -416,7 +436,7 @@ sha256sum -c records/ram-boot-vendor.itb.sha256
 cat records/fit-list.txt
 ```
 
-スクリプトは各ロードイメージのファイル範囲、および指定されたOpenSBI実行時領域について重複を拒否する。最終FITを再読込し、全payloadのハッシュと元データとの一致、SPL転送上限を検査する。ただしDTBの自動配置、転送バッファー、U-Boot等のBSS・動的領域、SM予約領域、FSBL互換性、ESOS起動、NOR自動保存の有無までは証明しない。manifestのhardware_verifiedはfalseである。
+スクリプトは各ロードイメージの展開後範囲（LZOは実際に展開して求める）、および指定されたOpenSBI実行時領域について重複を拒否する。最終FITを再読込し、全payloadのハッシュと元データとの一致、SPL転送上限を検査する。ただしESOSのremoteprocがELFをロードする場合の各segment配置、DTBの自動配置、転送バッファー、U-Boot等のBSS・動的領域、SM予約領域、FSBL互換性、ESOS起動、NOR自動保存の有無までは証明しない。manifestのhardware_verifiedはfalseである。
 
 ホスト側の検査は次で再実行できる。実際のmkimage、dumpimage、dtcを使用する。これはファイル生成・検査の試験であり、SBIやPMPの動作試験ではない。
 
@@ -435,8 +455,9 @@ python3 scripts/tests/test_jupiter2_ram_boot_image.py
 | --- | --- | --- |
 | --max-download-bytes | 0x20000000 | 536870912 bytes＝512 MiB。今回の実機で報告された最大転送サイズ。 |
 | --opensbi-reserve-bytes | 0x00100000 | 1048576 bytes＝1 MiB。OpenSBIのloadから確保する実行時領域。 |
-| --configuration | conf_11 | 今回の販売元FITでk3-pico-itxに対応する構成。 |
-| --board | k3-pico-itx | U-BootとESOSの構成descriptionに要求する値。 |
+| --configuration | conf_11 | 今回のU-Boot FITでk3-pico-itxに対応する構成。 |
+| --esos-configuration | conf_dual | 今回のESOS FITの全ボード共通構成。 |
+| --board | k3-pico-itx | U-Bootの構成descriptionに要求する値。ESOSはconf_dualを別途指定。 |
 
 #### 販売元OpenSBI版
 
@@ -461,6 +482,7 @@ python3 scripts/build-jupiter2-ram-boot-image.py \
   --esos-itb work/jupiter2-ram-boot/original/esos.itb \
   --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
   --configuration conf_11 \
+  --esos-configuration conf_dual \
   --board k3-pico-itx \
   --variant vendor \
   --opensbi-reserve-bytes 0x00100000 \
@@ -493,6 +515,7 @@ python3 scripts/build-jupiter2-ram-boot-image.py \
   --esos-itb work/jupiter2-ram-boot/original/esos.itb \
   --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
   --configuration conf_11 \
+  --esos-configuration conf_dual \
   --board k3-pico-itx \
   --variant keystone \
   --opensbi-reserve-bytes 0x00100000 \
@@ -590,6 +613,7 @@ python3 scripts/build-jupiter2-ram-boot-image.py \
   --esos-itb work/jupiter2-ram-boot/original/esos.itb \
   --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
   --configuration conf_11 \
+  --esos-configuration conf_dual \
   --board k3-pico-itx \
   --variant keystone \
   --opensbi-reserve-bytes "$KEYSTONE_SBI_RESERVE_BYTES" \
@@ -627,3 +651,4 @@ UARTが応答しない場合は、ログを保存し、電源を切る。FDLを�
 | D：OpenSBI＋SM | 同じ記録とSM初期化・hello等の実行結果 | 実機の基本機能と必要なEnclave動作を確認 |
 
 次に行う作業は段階Aのソース比較である。その結果を基に、実際に使うFSBLと各ファームウェアのビルド条件を確定し、第7章のスクリプトへ渡す入力を用意する。現時点で実機試験は未実施で、RAMブートの成功やNORへの無書込みを検証済みとはしていない。
+

@@ -81,6 +81,7 @@
 | KSB-054 | domain subset計算でXLEN幅shift | OpenSBI旧path・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-055 | RPMI CPPC要求のfield順序が上流修正前 | OpenSBI wire ABI／server互換性制約 | 修正候補・K3 server照合待ち |
 | KSB-056 | PMU FW counter探索失敗時の配列index | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
+| KSB-057 | RAM FIT作成が共通ESOS構成・LZOを扱えない | 本リポジトリの実機導入ツール | 修正済・ホスト検査のみ |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -814,3 +815,25 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
 - 上流修正：`ac16c6b6`（完全SHAは全件台帳）。現行にないhw_counters_data変更部分は機械的に追加せず、
   現行の探索結果と配列所有関係に合わせて移植する。
 - 状態：未修正、ソース照合のみ。BP02/T-PMUでFW counter枯渇・unsupported eventと正常割当を確認する。
+
+
+### KSB-057: RAM FIT作成が共通ESOS構成・LZOを扱えない
+
+- 登録日：2026-11-20。対象：scripts/build-jupiter2-ram-boot-image.py。
+- 条件・証拠：ユーザー提供の2026-04-30版ESOSのdumpimage一覧は、
+  DescriptionがESOS Dual Core Configurationのconf_dual一つに27個のloadablesを持ち、
+  LZO圧縮imageを含む。加えて販売元SPLのboard_fit_image_post_process等は
+  rcpu0-fw／rcpu1-fw／rcpu-data-null等のimage名で分岐するが、従来packagerは名前をesos-Nへ変更していた。従来コードはU-Bootのk3-pico-itxとDescriptionが一致する
+  ESOS構成を必須とし、さらに非圧縮以外を拒否するため生成に失敗する。
+- 由来：本リポジトリで作成したRAM起動用packagerの入力形式対応不足。
+  Keystone本体や販売元ESOSの欠陥とは扱わない。
+- 影響：販売元ファイルを用いた統合FITを作れない。単に圧縮を許可すると、圧縮後の
+  ファイル長による配置検査では展開後の重複を見逃すため、サイズ検査も同時に修正する。
+- 修正：本項追加と同一コミットで--esos-configurationによる独立した明示選択を追加。
+  全loadablesの元のimage名・順序・圧縮データを保持し、lzopで求めた展開後サイズで重複を検査する。
+  image名を使うhookは公開SPLソースで確認したが、使用中の4月版FSBLバイナリーとの照合は未実施。
+  構成選択と展開サイズをmanifestに記録する。省略時のボード一致検査は維持する。
+- 検証：実mkimage／dumpimage／dtc／lzopを用い、27 loadablesとLZO・非圧縮混在の
+  FIT生成、格納データ一致、構成指定、展開後の重複拒否を含むホスト試験を実施。
+  入力は再現用fixtureで、ユーザー実ESOSバイナリー自体は未入手。
+  Jupiter2実機起動・ESOS初期化・QEMU integration PASSは未確認。

@@ -166,12 +166,13 @@ def read_fit(path):
     return root, blob, total
 
 
-def imported_image(source, name, blob, total):
+def imported_image(source, name, blob, total, allow_lzo=False):
     node = copy.deepcopy(source)
     node.name = name
     data = image_data(source, blob, total)
-    if string(node, 'compression') != 'none':
-        fail(f'{source.name}: only uncompressed input images are supported')
+    compression = string(node, 'compression')
+    if compression != 'none' and not (allow_lzo and compression == 'lzo'):
+        fail(f'{source.name}: only uncompressed input images or LZO ESOS images are supported')
     for key in ('data-position', 'data-offset', 'data-size'):
         node.props.pop(key, None)
     node.props['data'] = data
@@ -248,11 +249,21 @@ def build(args):
     if string(fdt, 'type') != 'flat_dt':
         fail('selected FDT image is not a flat device tree')
     parse_fdt(fdt.props['data'])
-    matches = [c for c in eroot.children['configurations'].children.values()
-               if string(c, 'description') == args.board]
-    if len(matches) != 1:
-        fail('expected exactly one matching ESOS board configuration')
-    ec = matches[0]
+    econfs = eroot.children['configurations'].children
+    if args.esos_configuration:
+        if args.esos_configuration not in econfs:
+            fail('unknown --esos-configuration; available: ' + ', '.join(econfs))
+        ec = econfs[args.esos_configuration]
+        esos_selection = 'explicit'
+    else:
+        matches = [c for c in econfs.values() if string(c, 'description') == args.board]
+        if len(matches) != 1:
+            available = ', '.join(f'{c.name} ({string(c, "description")})' for c in econfs.values())
+            fail('expected exactly one matching ESOS board configuration; '
+                 'inspect dumpimage -l and select a compatible configuration with '
+                 '--esos-configuration; available: ' + available)
+        ec = matches[0]
+        esos_selection = 'board-description'
     if ec.children or any(k in ec.props for k in ('firmware', 'kernel', 'fdt')):
         fail('unsupported ESOS configuration: expected loadables only')
     enames = strings(ec.props['loadables'])
@@ -263,16 +274,32 @@ def build(args):
                           os=text('opensbi'), load=cells(args.opensbi_load), entry=cells(args.opensbi_load))
     for node in (firmware, uboot, fdt):
         images.children[node.name] = node
-    for index, name in enumerate(enames):
-        node = imported_image(eroot.children['images'].children[name], f'esos-{index}', eb, etotal)
+    for name in enames:
+        if name in images.children:
+            fail(f'ESOS image name conflicts with output image: {name}')
+        # K3 SPL dispatches remoteproc/data fixup hooks by these exact names.
+        node = imported_image(eroot.children['images'].children[name], name, eb, etotal, allow_lzo=True)
         images.children[node.name] = node
     regions = []
+    load_sizes = {}
     for node in images.children.values():
         if node is not fdt and 'load' not in node.props:
             fail(f'{node.name}: missing load address')
         if 'load' in node.props:
             start = number(node.props['load'])
             size = len(node.props['data'])
+            if string(node, 'compression') == 'lzo':
+                lzop = shutil.which('lzop')
+                if not lzop:
+                    fail('LZO ESOS input requires lzop on PATH (install lzop)')
+                tools['lzop'] = lzop
+                decoded = subprocess.run([lzop, '-d', '-c'], input=node.props['data'],
+                                         capture_output=True)
+                if decoded.returncode != 0 or not decoded.stdout:
+                    fail(f'{node.name}: invalid LZO/lzop payload: '
+                         + decoded.stderr.decode('utf-8', errors='replace'))
+                size = len(decoded.stdout)
+            load_sizes[node.name] = size
             if node is firmware:
                 if args.opensbi_reserve_bytes < size:
                     fail('OpenSBI reserved runtime size is smaller than its BIN')
@@ -292,7 +319,7 @@ def build(args):
     configs.props['default'] = text(args.configuration)
     selected = Node(args.configuration)
     selected.props = {'description': text(args.board), 'firmware': text('opensbi'), 'fdt': text('fdt'),
-                      'loadables': text('uboot') + b''.join(text(f'esos-{i}') for i in range(len(enames)))}
+                      'loadables': text('uboot') + b''.join(text(name) for name in enames)}
     configs.children[selected.name] = selected
     root.children[configs.name] = configs
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -321,18 +348,24 @@ def build(args):
         (outimages / 'FSBL.bin').write_bytes(inputs['fsbl'])
         manifest = {'format': 1, 'variant': args.variant, 'board': args.board,
                     'configuration': args.configuration, 'hardware_verified': False,
+                    'esos_configuration': ec.name,
+                    'esos_description': string(ec, 'description'),
+                    'esos_selection': esos_selection,
+                    'esos_loadables': enames,
                     'limits': {'spl_max_download_bytes': args.max_download_bytes,
                                'opensbi_reserve_bytes': args.opensbi_reserve_bytes},
                     'load_regions': regions,
                     'unchecked': ['FSBL compatibility and FSBL ROM size limit', 'S-mode U-Boot build',
-                                  'ESOS startup', 'DTB placement and fixups', 'FIT transfer buffer overlap',
+                                  'ESOS startup and remoteproc ELF segment placement', 'DTB placement and fixups', 'FIT transfer buffer overlap',
                                   'SM reservations and dynamic allocations', 'automatic persistent writes'],
                     'inputs': {k: {'filename': p.name, 'bytes': len(inputs[k]),
                                    'sha256': hashlib.sha256(inputs[k]).hexdigest()} for k, p in paths.items()},
                     'payloads': {k: {'bytes': len(n.props['data']),
-                                     'sha256': hashlib.sha256(n.props['data']).hexdigest()}
+                                     'sha256': hashlib.sha256(n.props['data']).hexdigest(),
+                                     'compression': string(n, 'compression'),
+                                     'load_bytes': load_sizes.get(k)}
                                  for k, n in images.children.items()},
-                    'tools': {k: subprocess.run([v, '-V'],
+                    'tools': {k: subprocess.run([v, '--version'] if k == 'lzop' else [v, '-V'],
                                                 capture_output=True, text=True).stdout.strip()
                               for k, v in tools.items()}}
         for file in outimages.iterdir():
@@ -354,6 +387,8 @@ def main():
     for key in ('uboot-itb', 'esos-itb', 'opensbi-bin', 'fsbl', 'output'):
         parser.add_argument('--' + key, type=Path, required=True)
     parser.add_argument('--configuration', required=True, help='e.g. conf_11 (must match --board)')
+    parser.add_argument('--esos-configuration',
+                        help='explicit ESOS config, e.g. conf_dual; retains ALL its loadables')
     parser.add_argument('--board', default='k3-pico-itx')
     parser.add_argument('--variant', choices=('vendor', 'keystone'), required=True)
     parser.add_argument('--opensbi-load', type=positive, default=0x100000000)
@@ -375,3 +410,4 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
+
