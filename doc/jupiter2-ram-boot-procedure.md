@@ -223,6 +223,83 @@ cat records/fit-list.txt
 python3 scripts/tests/test_jupiter2_ram_boot_image.py
 ```
 
+
+### 7.4 数値とファイル名を直接指定する実行例
+
+以下は対話入力やシェル変数を使わず、引数をすべて記載した例である。publicリポジトリのルートで実行する。
+
+**この例の転送上限16 MiBとOpenSBI実行時領域1 MiBは説明用の条件であり、今回の実機で確認済みの値ではない。採用するFSBLの受信容量が16 MiBであり、OpenSBIの全実行時領域が1 MiB以内であることを第6章・第7.2節で確認した場合に使用する。異なる場合は二つの数値を確認値へ変更する。** スクリプトへ数値を指定して成功しても、その数値自体の正しさや実機起動の成功を証明するものではない。
+
+| 引数 | この例で指定する値 | 意味 |
+| --- | --- | --- |
+| --max-download-bytes | 0x01000000 | 16777216 bytes＝16 MiB。SPLの受信容量。 |
+| --opensbi-reserve-bytes | 0x00100000 | 1048576 bytes＝1 MiB。OpenSBIのloadから確保する実行時領域。 |
+| --configuration | conf_11 | 今回の販売元FITでk3-pico-itxに対応する構成。 |
+| --board | k3-pico-itx | U-BootとESOSの構成descriptionに要求する値。 |
+
+#### 販売元OpenSBI版
+
+まずoriginalへ、対応を確認した販売元ファイル四つを次の名前で配置する。
+
+```text
+work/jupiter2-ram-boot/original/
+├── FSBL.bin
+├── u-boot.itb
+├── esos.itb
+└── fw_dynamic.bin
+```
+
+fw_dynamic.binは販売元OpenSBIの生BINである。fw_dynamic.itbを改名して置かない。ファイルの入手元とSHA-256も別途記録する。
+
+```bash
+# publicリポジトリのルートで実行する
+python3 scripts/build-jupiter2-ram-boot-image.py \
+  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
+  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
+  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  --configuration conf_11 \
+  --board k3-pico-itx \
+  --variant vendor \
+  --opensbi-reserve-bytes 0x00100000 \
+  --max-download-bytes 0x01000000 \
+  --output work/jupiter2-ram-boot/vendor-release
+```
+
+**成功すると、work/jupiter2-ram-boot/vendor-release/images/ram-boot-vendor.itbが作成される。** 同じimages内にFSBL.binがコピーされ、records内に検査結果が出力される。出力先が既に存在する場合は停止するので、再生成する場合は--outputをvendor-release-02などの新しい名前へ変更する。
+
+生成後の確認もリポジトリのルートから次のように行える。
+
+```bash
+dumpimage -l work/jupiter2-ram-boot/vendor-release/images/ram-boot-vendor.itb
+(
+  cd work/jupiter2-ram-boot/vendor-release
+  sha256sum -c records/FSBL.bin.sha256
+  sha256sum -c records/ram-boot-vendor.itb.sha256
+)
+```
+
+#### 開発したOpenSBI＋SM版
+
+同じ入力のうちOpenSBIだけを標準ビルド先の開発版へ変更する例である。**SM版についても全実行時領域が1 MiB以内であると別途確認した場合の数値例**であり、販売元版の値を無条件に流用しない。
+
+```bash
+# publicリポジトリのルートで実行する
+python3 scripts/build-jupiter2-ram-boot-image.py \
+  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
+  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
+  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
+  --configuration conf_11 \
+  --board k3-pico-itx \
+  --variant keystone \
+  --opensbi-reserve-bytes 0x00100000 \
+  --max-download-bytes 0x01000000 \
+  --output work/jupiter2-ram-boot/keystone-release
+```
+
+成功するとwork/jupiter2-ram-boot/keystone-release/images/ram-boot-keystone.itbが作成される。この時点で行われるのはPC上のイメージ生成と検査だけであり、実機への転送・起動は第8章・第9章の別工程で行う。
+
 ## 8. 段階C：販売元OpenSBIをRAM起動する
 
 ### 8.1 開始前
