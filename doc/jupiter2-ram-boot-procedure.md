@@ -155,13 +155,46 @@ write 38912 byte to spinor @offset 65536
 | --fsbl | 選定済みFSBL.bin。コピーするだけで、互換性・包装・DDR設定は変更しない。 |
 | --uboot-itb | U-Boot＋DTBを含む販売元形式FIT。今回のconf_11のようにloadablesがU-Boot一つの構成。S-mode起動に必要な改修がある場合は、そのビルド済みFIT。 |
 | --esos-itb | 同じボードに対応するESOS FIT。選択構成はdescriptionが--boardと完全一致するものを一つだけ採用する。 |
-| --opensbi-bin | 生のfw_dynamic.bin。販売元版、次に開発版＋SMを渡す。ELFや単独ITBは渡さない。 |
+| --opensbi-bin | 生のfw_dynamic.bin。販売元のfw_dynamic.itbから抽出したBIN、次に開発版＋SMのBINを渡す。ELFやITB自体は渡さない。 |
 
 --configuration conf_11と--board k3-pico-itxを明示する。U-Boot構成のdescriptionが一致しなければ停止する。出力には選択した構成だけを残し、defaultも同じ構成にする。元FITは変更しない。
 
 ESOSの全loadablesをハッシュ検査後に取り込み、名前の衝突を避けて参照を付け直す。OpenSBIをfirmware、U-BootとESOSをloadablesに指定する。U-Bootにosがない場合はu-bootを設定し、entryがなければ元のloadを設定する。これによってバイナリー自体がS-mode用に変換されるわけではない。
 
 対応範囲は署名・暗号化のないFIT、非圧縮の選択image、CRC32／SHA-1／SHA-256／SHA-384／SHA-512の入力ハッシュである。inline dataとexternal dataの両方を取り込める。未知の形式、ハッシュ不一致、ESOSボード不一致等では、完成出力を残さず停止する。
+
+### 販売元がfw_dynamic.itbだけを配布している場合
+
+**販売元のfw_dynamic.binを別途入手する必要はない。配布されているfw_dynamic.itbからOpenSBIのBINを抽出して使用する。** 以下はすべて開発PCでのファイル操作であり、実機への転送・書込みは行わない。
+
+まず、対応する販売元のfw_dynamic.itbをwork/jupiter2-ram-boot/original/fw_dynamic.itbとして配置し、リポジトリのルートで内容を確認する。
+
+```bash
+dumpimage -l work/jupiter2-ram-boot/original/fw_dynamic.itb
+```
+
+Image 0がOpenSBIのfirmwareで、Compressionがuncompressedであることを確認した場合、次で格納データを取り出す。**-p 0はImage 0を意味する。** 実際のOpenSBIが別のImage番号なら、その番号を指定する。fw_dynamic.itbの名前だけで中身や番号を決めない。
+
+```bash
+# 開発PCのターミナルで、publicリポジトリのルートから実行する
+dumpimage -T flat_dt -p 0 \
+  -o work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  work/jupiter2-ram-boot/original/fw_dynamic.itb
+```
+
+-T flat_dtはFITのコンテナー形式を指定し、-oには抽出する生BINの保存先を指定する。単に拡張子を変更する操作ではない。Imageのload／entryも一覧で確認し、本スクリプトのOpenSBIロード先（既定0x100000000）と合うことを確認する。異なる場合は段階Aで配置を見直し、必要に応じて--opensbi-loadへ確認したアドレスを指定する。圧縮されている場合は、この抽出例をそのまま使わず、展開方法を確認する。
+
+抽出後は元ITBも残し、入手元の記録とともに両方のSHA-256を保存する。
+
+```bash
+mkdir -p work/jupiter2-ram-boot/records
+sha256sum \
+  work/jupiter2-ram-boot/original/fw_dynamic.itb \
+  work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  > work/jupiter2-ram-boot/records/vendor-opensbi-files.sha256
+```
+
+以後の--opensbi-binには、この抽出で作成したfw_dynamic.binを指定する。--opensbi-reserve-bytesはBINのサイズだけでは確定できない。販売元の対応ソース、ELF／mapが入手できる場合はその配置情報等を確認する。ITBからBINを抽出できたことだけで実行時領域の確認済みとは扱わない。
 
 ### 7.2 転送上限とOpenSBI実行時領域を確認する
 
@@ -249,17 +282,18 @@ python3 scripts/tests/test_jupiter2_ram_boot_image.py
 
 #### 販売元OpenSBI版
 
-まずoriginalへ、対応を確認した販売元ファイル四つを次の名前で配置する。
+まずoriginalへ、対応を確認した販売元ファイルを配置する。OpenSBIは公開されているfw_dynamic.itbを置き、第7.1節の抽出手順でfw_dynamic.binを作成する。
 
 ```text
 work/jupiter2-ram-boot/original/
 ├── FSBL.bin
 ├── u-boot.itb
 ├── esos.itb
-└── fw_dynamic.bin
+├── fw_dynamic.itb    配布された元ITB
+└── fw_dynamic.bin    元ITBから抽出して作成するBIN
 ```
 
-fw_dynamic.binは販売元OpenSBIの生BINである。fw_dynamic.itbを改名して置かない。ファイルの入手元とSHA-256も別途記録する。
+fw_dynamic.binは販売元OpenSBIの生BINであり、上記の抽出で用意する。fw_dynamic.itbを改名して置かない。ファイルの入手元とSHA-256も別途記録する。
 
 ```bash
 # 開発PCのターミナルで、publicリポジトリのルートから実行する
