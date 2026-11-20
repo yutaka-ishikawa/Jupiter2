@@ -70,7 +70,7 @@ preflight.shはOS導入用の条件も検査するためfirmware-only版の基�
 - `kernelrelease.txt`：同梱kernelのrelease。
 - `SHA256SUMS`：bundle内の通常ファイルの検査用hash一覧。
 
-詳しくは[同梱手順書の第5章](docs/milkv-jupiter2-stack-install.md#5-容量確認とインストールイメージ作成)を参照。
+詳しくは[同梱手順書の第4章](docs/milkv-jupiter2-stack-install.md#4-容量確認とインストールイメージ作成)を参照。
 
 ## OS標準ツールの依存
 
