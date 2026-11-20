@@ -458,13 +458,75 @@ sudo install -m 0755 apps/hello.ke apps/hello-native.ke "/opt/keystone/$KREL/"
 `build-linux-k3.sh`は毎回defconfigを再適用するため、`.config`だけを書き換えてから
 `make keystone`を再実行すると設定が戻る。固有releaseの導入はbuild設定にも反映して固定する。
 
-Bianbu等のDebian系で`initramfs-tools`を使用している場合は：
+### 配置したkernelのreleaseを確認する
+
+**`install-linux.sh`はinitrdを作成しない。次の確認・生成を済ませてから第7章のUART起動試験へ進む。**
+ここで使うreleaseは、現在動作中の旧kernelの`uname -r`ではなく、配置した新kernelのreleaseである。
+
+bundleの記録を確認する。
 
 ```bash
-sudo update-initramfs -c -k "$KREL"
-ls -l "/boot/initrd.img-$KREL"
+BUNDLE=/absolute/path/to/bundle
+cat "$BUNDLE/kernelrelease.txt"
+ls -l /usr/lib/modules/
+ls -ld /lib/modules /usr/lib/modules
 ```
 
+`/lib/modules`と`/usr/lib/modules`はOSのusr統合により同じ場所を指す場合がある。
+initramfs生成時に新releaseのmodulesが`/lib/modules/<release>/`から参照できることを確認する。
+複数releaseがある場合は、一覧の新しさだけで選ばず、bundleの`kernelrelease.txt`と照合する。
+
+今回提示された実機の配置は以下である。
+
+| 項目 | 今回の値 | 意味 |
+| --- | --- | --- |
+| 配置したkernelファイル | `/boot/Image-6.18.3-keystone` | U-Bootがロードするkernel本体 |
+| 新kernel用modules | `/usr/lib/modules/6.18.3/` | 新kernelのreleaseは`6.18.3`。bundleの記録とも一致することを確認 |
+| 旧kernel用modules | `/usr/lib/modules/6.18.3-generic/` | 従来のkernel用。削除しない |
+| 配置したbuild設定 | `/boot/config-6.18.3-keystone` | 新kernelのconfig |
+| これから作るinitrd | `/boot/initrd.img-6.18.3` | 新releaseに対応するinitramfs |
+
+**`Image-6.18.3-keystone`の末尾`-keystone`は配置用のファイル名であり、kernel releaseの一部ではない。**
+今回の`update-initramfs -k`には`6.18.3`を指定する。
+`6.18.3-keystone`や、起動中の旧release `6.18.3-generic`を指定しない。
+
+### 新kernel用initrdを生成する
+
+以下は**実機Linux上**で実行する。Bianbuのinitramfs-toolsを使い、PCのクロス環境では実行しない。
+`update-initramfs`が未導入なら、実機側で`sudo apt-get install initramfs-tools`を行う。
+
+まずkernelとmodulesの存在を確認し、module依存情報を更新する。
+initramfs-tools向けに、同じbuild設定を標準名`/boot/config-6.18.3`でも用意する。
+既存の標準名ファイルがあれば、同じ内容であることを確認し、異なる場合は上書きせず停止する。
+
+```bash
+set -euo pipefail
+KREL=6.18.3
+test -s "/boot/Image-$KREL-keystone"
+test -d "/lib/modules/$KREL"
+test -s "/lib/modules/$KREL/extra/keystone-driver.ko"
+if test -e "/boot/config-$KREL"; then
+    cmp "/boot/config-$KREL-keystone" "/boot/config-$KREL"
+else
+    sudo install -m 0644 "/boot/config-$KREL-keystone" "/boot/config-$KREL"
+fi
+sudo depmod -a "$KREL"
+```
+
+新規にinitrdを作る場合は次を実行する。
+
+```bash
+sudo update-initramfs -c -k 6.18.3
+ls -lh /boot/initrd.img-6.18.3
+test -s /boot/initrd.img-6.18.3
+```
+
+既に`initrd.img-6.18.3`を作成済みで、同じbuildのmodules等を反映して更新する場合は、
+`-c`ではなく`sudo update-initramfs -u -k 6.18.3`を使う。
+生成コマンドが失敗した場合や、出力が空の場合はU-Bootの起動試験へ進まない。
+旧`initrd.img-6.18.3-generic`で新kernelのmodulesを代用しない。
+
+別releaseを導入する場合は上記の`6.18.3`を、検証した`kernelrelease.txt`の値へ置き換える。
 別のinitramfs方式では、そのOSの生成コマンドを使う。
 起動rootfsに必要なUFS/NVMe/USB、ファイルシステム等のdriverがImageまたはinitramfsに
 含まれることを確認する。実機rootfsは既存OSを使い、QEMU用ext4イメージをUFS/NVMe全体へ書かない。
@@ -510,20 +572,36 @@ printenv knl_name ramdisk_name dtb_dir dtb_name
 ```
 
 次に、新kernel用の値をRAM上に設定する。
-以下の`NEW-RELEASE`とDTB directoryは実際に記録した値へ置き換える。
-ファイル名はU-Bootが読むbootfsを基準とし、通常は先頭に`/boot/`を付けない。
+第6章でinitrd生成に成功し、旧Linux上で次の実ファイル・directoryを確認してから実施する。
+
+```bash
+ls -lh /boot/Image-6.18.3-keystone /boot/initrd.img-6.18.3
+find /boot/spacemit/6.18.3-generic -type f -name '*.dtb'
+```
+
+上記はLinux上の確認コマンド。以下の`setenv`は**UARTで停止したU-Bootプロンプト**で実行する。
+
+| U-Boot変数 | 今回設定する値 | 対応する実機Linux上の場所 |
+| --- | --- | --- |
+| `knl_name` | `Image-6.18.3-keystone` | `/boot/Image-6.18.3-keystone` |
+| `ramdisk_name` | `initrd.img-6.18.3` | 第6章で生成した`/boot/initrd.img-6.18.3` |
+| `dtb_dir` | `spacemit/6.18.3-generic` | 継続利用する既存DTBの`/boot/spacemit/6.18.3-generic/` |
 
 ```text
-setenv knl_name Image-NEW-RELEASE-keystone
-setenv ramdisk_name initrd.img-NEW-RELEASE
-setenv dtb_dir spacemit/NEW-RELEASE
+setenv knl_name Image-6.18.3-keystone
+setenv ramdisk_name initrd.img-6.18.3
+setenv dtb_dir spacemit/6.18.3-generic
 printenv knl_name ramdisk_name dtb_dir
 ```
 
-既存の実機DTBを継続利用する場合、`dtb_dir`はその実在するdirectoryを指定する。
-例えば従来の`spacemit/6.18.3-generic`を使うなら、そこを指定する。
+U-Bootのファイル指定はbootfsを基準とするため、上記変数に`/boot/`は付けない。
+今回のkernelとinitrdのreleaseは`6.18.3`だが、DTB directoryは既存の`6.18.3-generic`を使う。
+このDTBの継続利用は新kernelとの適合確認が前提であり、動作確認済みという意味ではない。
 新release名のDTB directoryが自動作成されるわけではない。
-`dtb_name`を機種情報から決定する既存処理も維持し、実際に読み込むDTBをUARTログで確認する。
+`dtb_name`を機種情報から決定する既存処理を維持し、実際に読み込むDTBをUARTログで確認する。
+
+別releaseのkernelを使う場合も、kernelファイル名、modulesのrelease、生成したinitrd名、
+実在するDTB directoryをこの表のように照合して指定する。
 
 **`saveenv`は実行しない。** NOR上の環境やbootfsのファイルへ保存せず、その起動だけに適用する。
 表示した`bootcmd`が通常のK3起動処理で、途中で設定を再読込み・上書きしないことを確認してから：
@@ -552,6 +630,13 @@ kernel・initramfs・DTBの実ファイル配置は、それ以前に完了し�
 `ramdisk_addr`、`loglevel`、`commonargs`は今回のkernel選択のためには変更しない。
 ファイルを保存後に`sync`し、次はUARTで変数を上書きせずに通常再起動する。
 新kernelが自動選択されて同じ条件で正常起動することを確認して、第2段階へ進む。
+今回の成功後の永続設定例は次のとおり。
+
+```text
+knl_name=Image-6.18.3-keystone
+ramdisk_name=initrd.img-6.18.3
+dtb_dir=spacemit/6.18.3-generic
+```
 永続化後の起動失敗は、第10章の永続化後のrollbackで戻す。
 
 [SpacemiT K3起動資料](https://github.com/spacemit-com/docs-buildroot/blob/main/en/k3_buildroot/device/boot.md)、
@@ -587,6 +672,7 @@ GRUB/extlinuxで別entryを追加する場合は、既定entryを旧環境のま
 
 既存OpenSBIのまま新Linuxを起動し、`uname -r`がbundleの`kernelrelease.txt`と一致すること、
 全16 CPU、storage、network、UART、通常のtimer動作を確認する。
+今回、新kernelでの`uname -r`の期待値は`6.18.3`であり、`6.18.3-keystone`ではない。
 Keystone driverを自動loadする設定は作らず、`insmod`・`modprobe keystone_driver`・
 `tools/run-hello.sh`・Enclave実行はまだ行わない。
 
