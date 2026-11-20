@@ -405,7 +405,7 @@ test "$(stat -c %s "$BACKUP")" -eq "$(cat "$OPENSBI_INFO/size.txt")"
 ```
 
 今回の実機では`opensbi-partition-before.bin`は393,216 bytesとなる。
-作成後は、このdirectory全体を実機外の作業PCにもコピーする。
+**作成後は、このdirectory全体を実機外の作業PCにもコピーする。**
 
 ```text
 opensbi-partition-info-YYYYMMDD-HHMMSS/
