@@ -250,14 +250,17 @@ max-download-size: 0x20000000
 
 確認だけで終了する場合は、ログを保存して電源を切り、FDLを押さずに通常起動する。永続領域を変更していない条件では元の起動経路へ戻る。FSBL自体の自動保存等の確認は第6章の条件を引き続き適用する。
 
-これらの確認値を入力する実行例を以下に示す。0xから始まる16進数、または10進数を入力できる。未確認の値を仮置きして実機へ進めない。
+以下の例ではシェル変数へ数値を直接代入する。0xから始まる16進数、または10進数を指定できる。転送上限は実測値、OpenSBI実行時領域は未確認の仮置き値である。実行時領域を確認するまでは実機起動へ進めない。
 
 ### 7.3 販売元OpenSBIを含むイメージを生成する
 
 ```bash
 # 開発PCのターミナルで、publicリポジトリのルートから実行する
-read -r -p '確認済みSPL転送上限(bytes): ' SPL_DOWNLOAD_BYTES
-read -r -p '確認済み販売元OpenSBI実行時領域(bytes): ' VENDOR_SBI_RESERVE_BYTES
+# SPLが実機で報告した最大転送サイズ：0x20000000＝512 MiB
+SPL_DOWNLOAD_BYTES=0x20000000
+# 販売元OpenSBIの実行時領域：0x00100000＝1 MiB（仮置き・未確認）
+# BSS・heap・scratch等を含む必要量を確認し、不足する場合は変更する。
+VENDOR_SBI_RESERVE_BYTES=0x00100000
 
 python3 scripts/build-jupiter2-ram-boot-image.py \
   --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
