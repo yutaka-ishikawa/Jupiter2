@@ -34,14 +34,16 @@ DTB配置、firmware書込み、driverロード、再起動は行わない。
 
 ## 2段階の起動確認
 
-1. **新Linux＋既存OpenSBI**：initramfs生成とkernel選択変更を行い、再起動して新kernelの通常動作を確認する。この段階ではKeystone driverをロードせず、helloも実行しない。
+1. **新Linux＋既存OpenSBI**：kernel配置とinitramfs生成後も`env_k3.txt`は変更しない。UARTでU-Bootを止め、RAM上の`knl_name`・`ramdisk_name`・`dtb_dir`を新kernel用にして起動する。`saveenv`は使わない。正常動作確認後に`env_k3.txt`へ同じ値を設定し、通常再起動でも新kernelが選ばれることを確認する。この段階ではKeystone driverをロードせず、helloも実行しない。
 2. **同じ新Linux＋新OpenSBI／SM**：第1段階の成功後にOpenSBIだけ更新し、同じkernelの起動を確認する。その後、以下のhelloを実行する。
 
 新kernelを選ぶ設定は第1段階の成功後も維持する。第2段階へ進むために旧kernelへ戻す必要はない。
 
 手順の詳細は[同梱手順書](docs/milkv-jupiter2-stack-install.md)の第6〜9章を参照。
 失敗した場合は[第10章のrollback](docs/milkv-jupiter2-stack-install.md#10-復旧と正式採用)に従う。
-第1段階では元のLinux起動設定へ戻し、第2段階ではまず元OpenSBIへ戻す。
+第1段階のRAM試験で失敗した場合は、再起動すれば未変更の`env_k3.txt`から旧kernelが選ばれる。
+永続化後の失敗はUARTから旧kernelを一時起動して元のファイルを復元する。
+第2段階ではまず元OpenSBIへ戻す。
 Linuxが起動しない場合の復旧用Linux／FDLの手順も同章に記載している。
 
 第2段階でSMと新kernelの起動を確認した後：
