@@ -81,6 +81,15 @@ Linuxが起動しない場合の復旧用Linux／FDLの手順も同章に記載�
 sudo bash tools/run-hello.sh
 ```
 
+## bundleからOpenSBIとSMを書き込む
+
+第1段階の新kernel起動確認後、実機Linux上で
+[同梱手順書の第8章](docs/milkv-jupiter2-stack-install.md#8-opensbiとsmを置換する)を実行する。
+今回のNOR `mtd5`に対して、bundle内の`firmware/fw_dynamic.itb`を`flashcp`で書き込む。
+同章に容量・checksum・backupの検査、実際の書込み、読戻し照合、再起動までのコマンドを記載している。
+`install-linux.sh`はfirmwareを書き込まない。
+失敗時の元OpenSBI復元は同梱手順書の第10章を参照する。
+
 容量の再確認だけなら：
 
 ```bash
