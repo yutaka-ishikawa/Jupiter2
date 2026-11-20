@@ -10,6 +10,8 @@ The `main` branch contains `qemu/`, `opensbi/`, `keystone/`, and `linux-k3/`. Or
 
 実機情報と現在のファームウェアの適合性は、[Milk-V Jupiter 2実機調査](doc/jupiter2-hardware-compatibility.md)にまとめています。
 
+PCとの配線とシリアル端末の設定は、[Milk-V Jupiter2 UART接続手順](doc/milkv-jupiter2-uart.md)を参照してください。
+
 実機への段階的な導入は、[Milk-V Jupiter2ソフトウェアスタック導入手順](doc/milkv-jupiter2-stack-install.md)を参照してください。
 ビルド・退避・kernel/driver配置・OpenSBI更新・復旧と、書き込み前の停止条件をまとめています。
 実機区画容量の確認は`scripts/check-jupiter2-install-capacity.py`、
