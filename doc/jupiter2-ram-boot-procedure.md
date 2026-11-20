@@ -226,16 +226,16 @@ sudo fastboot continue
 sudo fastboot devices
 ```
 
-例えば次のように表示された場合、左側のEXAMPLE123がserialである。これは説明用の架空の番号なので、実際の表示へ置き換える。
+今回の実機では、次のように表示される。左側のHW4MPK3321280144がserialである。別の実機では、その実機に表示されたserialを使用する。
 
 ```text
-EXAMPLE123    fastboot
+HW4MPK3321280144    fastboot
 ```
 
 6. 開発PCで、そのserialを-sに指定して問い合わせる。readで変数へ保存する必要はなく、直接指定してよい。
 
 ```bash
-sudo fastboot -s EXAMPLE123 getvar max-download-size
+sudo fastboot -s HW4MPK3321280144 getvar max-download-size
 ```
 
 例えば次の出力なら、SPLが報告した受信容量は0x01000000（16 MiB）である。この数値は出力例であり、実機の確認値ではない。
