@@ -32,7 +32,19 @@ initramfs生成は同梱手順書の第6章、起動kernelの選択は第7章、
 DTB配置、firmware書込み、driverロード、再起動は行わない。
 配置途中の失敗ではコピー済みファイルを自動削除しないため、再実行前に上表の配置先を確認する。
 
-`docs/milkv-jupiter2-stack-install.md`に従い新Linux単独確認、firmware更新、trial起動を行った後：
+## 2段階の起動確認
+
+1. **新Linux＋既存OpenSBI**：initramfs生成とkernel選択変更を行い、再起動して新kernelの通常動作を確認する。この段階ではKeystone driverをロードせず、helloも実行しない。
+2. **同じ新Linux＋新OpenSBI／SM**：第1段階の成功後にOpenSBIだけ更新し、同じkernelの起動を確認する。その後、以下のhelloを実行する。
+
+新kernelを選ぶ設定は第1段階の成功後も維持する。第2段階へ進むために旧kernelへ戻す必要はない。
+
+手順の詳細は[同梱手順書](docs/milkv-jupiter2-stack-install.md)の第6〜9章を参照。
+失敗した場合は[第10章のrollback](docs/milkv-jupiter2-stack-install.md#10-復旧と正式採用)に従う。
+第1段階では元のLinux起動設定へ戻し、第2段階ではまず元OpenSBIへ戻す。
+Linuxが起動しない場合の復旧用Linux／FDLの手順も同章に記載している。
+
+第2段階でSMと新kernelの起動を確認した後：
 
 ```bash
 sudo bash tools/run-hello.sh
