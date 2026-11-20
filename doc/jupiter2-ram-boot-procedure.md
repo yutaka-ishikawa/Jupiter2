@@ -203,12 +203,52 @@ sha256sum \
 - --max-download-bytes：**SPL段階**のfastboot受信バッファーの容量。使用するFSBLの設定と照合する。第8.2節で選定済みFSBLをRAM起動した後、PCから下記のgetvarで確認できる場合がある。BootROM段階の値と区別する。取得できない場合は採用FSBLのソース・設定から確認する。
 - --opensbi-reserve-bytes：OpenSBIのloadから必要な実行時領域末尾までのサイズ。BINのファイル長ではなく、ELFの配置、BSS、heap、scratch等を含めて段階Aで確定する。SM版では改めて求める。
 
+#### FDL起動からSPLの受信容量を問い合わせるまで
+
+**実機をFDLボタンを押しながら起動し、FSBLをRAMへ転送・起動した後、開発PCから容量を問い合わせる。u-boot.itbを転送する前に行う。** この確認では統合FITはまだ不要で、第6章で選定したFSBL.binを使う。
+
+1. 開発PCでUART端末を開き、実機のログを保存する。
+2. 実機の電源が切れている場合は、FDLボタンを押したまま電源を投入し、その後FDLを離す。既に給電している場合は、FDLを押したままRSTを短く押してからFDLを離す。
+3. データ通信対応USBケーブルで、実機のDRD Type-Cポートと開発PCを接続する。実機への電源は別途供給する。
+4. **開発PCのターミナルで、publicリポジトリのルートから**次を実行する。
+
 ```bash
-# 第8.2節でFSBL起動とUSB再認識を確認した後のPC操作
 sudo fastboot devices
-read -r -p 'SPLのserial: ' FASTBOOT_SERIAL
-sudo fastboot -s "$FASTBOOT_SERIAL" getvar max-download-size
+sudo fastboot stage work/jupiter2-ram-boot/original/FSBL.bin
+sudo fastboot continue
 ```
+
+最初のfastboot devicesでは、機器が認識されていることを確認する。この時点はBootROM側のfastbootであり、まだ今回調べたいSPLの容量を問い合わせない。FSBL.binのstageはRAMへの転送で、flashコマンドは使用しない。
+
+5. UARTでU-Boot SPLの起動とDDR初期化完了を確認する。USBが再認識されるまで待ち、開発PCで次を実行する。
+
+```bash
+sudo fastboot devices
+```
+
+例えば次のように表示された場合、左側のEXAMPLE123がserialである。これは説明用の架空の番号なので、実際の表示へ置き換える。
+
+```text
+EXAMPLE123    fastboot
+```
+
+6. 開発PCで、そのserialを-sに指定して問い合わせる。readで変数へ保存する必要はなく、直接指定してよい。
+
+```bash
+sudo fastboot -s EXAMPLE123 getvar max-download-size
+```
+
+例えば次の出力なら、SPLが報告した受信容量は0x01000000（16 MiB）である。この数値は出力例であり、実機の確認値ではない。
+
+```text
+max-download-size: 0x01000000
+```
+
+この場合、イメージ生成スクリプトには--max-download-bytes 0x01000000を指定する。実際に異なる値が出た場合は、その値を使い、採用FSBLの設定とも照合する。
+
+**FDL直後はBootROM、FSBL起動後はSPL、u-boot.itb起動後はU-Bootのfastbootになる。今回必要なのはFSBL起動後・u-boot.itb転送前の値である。** getvarは容量の問合せであり、ファームウェアを取り出す操作ではない。未対応エラーが出た場合は、他段階の値で代用せず、FSBLのソース・設定から受信容量を確認する。
+
+確認だけで終了する場合は、ログを保存して電源を切り、FDLを押さずに通常起動する。永続領域を変更していない条件では元の起動経路へ戻る。FSBL自体の自動保存等の確認は第6章の条件を引き続き適用する。
 
 これらの確認値を入力する実行例を以下に示す。0xから始まる16進数、または10進数を入力できる。未確認の値を仮置きして実機へ進めない。
 
