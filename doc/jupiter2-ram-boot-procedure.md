@@ -238,13 +238,13 @@ HW4MPK3321280144    fastboot
 sudo fastboot -s HW4MPK3321280144 getvar max-download-size
 ```
 
-例えば次の出力なら、SPLが報告した受信容量は0x01000000（16 MiB）である。この数値は出力例であり、実機の確認値ではない。
+今回の実機での問い合わせ結果は次のとおり。報告された最大転送サイズは0x20000000（536870912 bytes＝512 MiB）である。
 
 ```text
-max-download-size: 0x01000000
+max-download-size: 0x20000000
 ```
 
-この場合、イメージ生成スクリプトには--max-download-bytes 0x01000000を指定する。実際に異なる値が出た場合は、その値を使い、採用FSBLの設定とも照合する。
+今回のイメージ生成スクリプトには--max-download-bytes 0x20000000を指定する。FSBLを変更した場合は再度問い合わせ、使用するFSBL段階の値であることを確認する。
 
 **FDL直後はBootROM、FSBL起動後はSPL、u-boot.itb起動後はU-Bootのfastbootになる。今回必要なのはFSBL起動後・u-boot.itb転送前の値である。** getvarは容量の問合せであり、ファームウェアを取り出す操作ではない。未対応エラーが出た場合は、他段階の値で代用せず、FSBLのソース・設定から受信容量を確認する。
 
@@ -311,11 +311,11 @@ python3 scripts/tests/test_jupiter2_ram_boot_image.py
 
 以下は対話入力やシェル変数を使わず、引数をすべて記載した例である。**販売元版・SM版ともに、開発PCのターミナルで、開発PC上のpublicリポジトリのルートから実行する。Jupiter2実機で実行するコマンドではない。**
 
-**この例の転送上限16 MiBとOpenSBI実行時領域1 MiBは説明用の条件であり、今回の実機で確認済みの値ではない。採用するFSBLの受信容量が16 MiBであり、OpenSBIの全実行時領域が1 MiB以内であることを第6章・第7.2節で確認した場合に使用する。異なる場合は二つの数値を確認値へ変更する。** スクリプトへ数値を指定して成功しても、その数値自体の正しさや実機起動の成功を証明するものではない。
+**転送上限0x20000000（512 MiB）は今回の実機で報告された値を使用している。一方、OpenSBI実行時領域0x00100000（1 MiB）は引き続き説明用の値であり、未確認である。OpenSBIの全実行時領域が1 MiB以内であることを第6章・第7.2節で確認するか、実際に必要なサイズへ変更して使用する。** 最大転送サイズの取得とFIT生成の成功だけでは、RAM配置全体や実機起動の成功を証明するものではない。
 
 | 引数 | この例で指定する値 | 意味 |
 | --- | --- | --- |
-| --max-download-bytes | 0x01000000 | 16777216 bytes＝16 MiB。SPLの受信容量。 |
+| --max-download-bytes | 0x20000000 | 536870912 bytes＝512 MiB。今回の実機で報告された最大転送サイズ。 |
 | --opensbi-reserve-bytes | 0x00100000 | 1048576 bytes＝1 MiB。OpenSBIのloadから確保する実行時領域。 |
 | --configuration | conf_11 | 今回の販売元FITでk3-pico-itxに対応する構成。 |
 | --board | k3-pico-itx | U-BootとESOSの構成descriptionに要求する値。 |
@@ -346,7 +346,7 @@ python3 scripts/build-jupiter2-ram-boot-image.py \
   --board k3-pico-itx \
   --variant vendor \
   --opensbi-reserve-bytes 0x00100000 \
-  --max-download-bytes 0x01000000 \
+  --max-download-bytes 0x20000000 \
   --output work/jupiter2-ram-boot/vendor-release
 ```
 
@@ -378,7 +378,7 @@ python3 scripts/build-jupiter2-ram-boot-image.py \
   --board k3-pico-itx \
   --variant keystone \
   --opensbi-reserve-bytes 0x00100000 \
-  --max-download-bytes 0x01000000 \
+  --max-download-bytes 0x20000000 \
   --output work/jupiter2-ram-boot/keystone-release
 ```
 
