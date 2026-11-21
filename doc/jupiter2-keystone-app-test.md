@@ -182,41 +182,66 @@ Linuxが起動したら、第6節でunameとdriverの対応を確認してから
 
 ## 6. ドライバーとhello二種を試験する（実機Linux）
 
-次は実機のLinux端末で実行する。
-
-```bash
-uname -r
-ls -l /lib/modules/$(uname -r)/extra/keystone-driver.ko
-ls -l /opt/keystone/$(uname -r)/hello*.ke
-```
-
+実機のLinux端末で、以下のブロックを順番に実行する。
 今回の導入例のkernel releaseは6.18.3。Imageのファイル名末尾-keystoneをreleaseへ付けない。
 起動したSMのsource/build記録と、使用するdriver/SDK/appsが対応していることも確認する。
 単にrelease名が同じだけで異なるビルドが同一だとは扱わない。
 
-Linux/modules/apps配布用bundleを展開したディレクトリへ移動する。
-このbundleは、RAM用release（images/FSBL.bin等が入るもの）とは別。
+まず、カーネル・オンラインCPU・配置済みファイルを確認する。
 
 ```bash
-# 実機上の、apps/ modules/ kernelrelease.txt tools/run-hello.shがあるbundle内
-bash tools/verify.sh
-cat kernelrelease.txt
-set -o pipefail
-sudo bash tools/run-hello.sh 2>&1 | tee keystone-hello.log
-rc=${PIPESTATUS[0]}
-echo "run-hello.sh exit=$rc"
+uname -r
+cat /sys/devices/system/cpu/online
+ls -l /lib/modules/6.18.3/extra/keystone-driver.ko
+ls -l /opt/keystone/6.18.3/hello.ke
+ls -l /opt/keystone/6.18.3/hello-native.ke
+```
+
+今回の期待値はkernel releaseが6.18.3、online CPUが0-15である。
+異なる場合、ファイルがない場合は先へ進まない。
+次にドライバーをロードする。
+
+```bash
+sudo modprobe keystone_driver
+lsmod | grep keystone
+ls -l /dev/keystone_enclave
+```
+
+modprobeが成功し、/dev/keystone_enclaveがcharacter deviceとして存在することを確認して、
+最初のhelloを実行する。
+
+```bash
+sudo /opt/keystone/6.18.3/hello.ke
+echo "hello終了コード=$?"
 sudo dmesg | tail -n 100
 ```
 
-run-hello.shはbundle全体のhash、kernel release、配置済みdriverと同梱driverのバイト一致を確認する。
-modprobe keystone_driver、/dev/keystone_enclaveの確認後、hello.keとhello-native.keを順番に実行する。
-途中で失敗すれば後続へ進まない。test用のmock driverやSBI代替は使わない。
+**終了コードが0で、アプリが正常終了し、SMとLinuxにエラーがないことを確認してから**、
+もう一方を実行する。失敗した場合はそこで停止する。
 
-終了コード0、両アプリの正常終了、SM側CREATE/RUN/DESTROYとLinux側にエラーがないことを
-基本試験の合格条件とする。隔離違反・複数同時実行・署名/attestationの合格とは分ける。
+```bash
+sudo /opt/keystone/6.18.3/hello-native.ke
+echo "hello-native終了コード=$?"
+sudo dmesg | tail -n 100
+```
+
+echoは対象アプリの直後に実行する。他のコマンドを挟むと、そのコマンドの終了コードになる。
+どちらかが失敗した場合は後続の試験を止め、UARTログとdmesgを保存する。
+admission denied:が出た場合は、その具体的な理由も記録する。
+
+```bash
+sudo dmesg > ~/keystone-dmesg.txt
+```
+
+両アプリの終了コード0、期待するアプリ結果、SM側CREATE/RUN/DESTROYとLinux側に
+エラーがないことを基本試験の合格条件とする。
+隔離違反・複数同時実行・署名/attestationの合格とは分ける。
 現行のPMP予算はOS用1＋NAPOT UTM用1＋NAPOT EPM用1という最小構成で、
 TORやbacking、二つ同時保持は追加entryを要する。まず二種を一つずつ実行し、
 容量不足をPMP保護解除や割当失敗の無視で回避しない。
+
+配布bundleに含まれるtools/run-hello.shは、hash・kernel release・driver一致を確認して
+二種を順番に実行する補助ツールである。本章の手動実行では、配置済みの二種を直接起動する。
 
 ## 7. 失敗時の記録・戻し方
 
