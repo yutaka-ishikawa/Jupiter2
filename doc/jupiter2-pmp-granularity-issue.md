@@ -1,6 +1,6 @@
 # Jupiter2 RAM起動：RPMI領域とPMP粒度の不一致（KSB-058）
 
-登録日：2026-11-21。状態：実機で原因を確認。K3限定の修正候補を実装・クロスリンク済み。修正後の実機起動と別Linux DTの整合は未検証。
+登録日：2026-11-21。状態：KSB-058の粒度拒否は修正後の実機ログで通過を確認。続くPMP容量検査で停止（KSB-059）。U-Boot到達と別Linux DTの整合は未検証。
 
 ## 1. 確認できた到達点と停止箇所
 
@@ -236,3 +236,53 @@ Linuxへ進む前に実際のLinux用DTとの整合を確認する。
 
 これらは開発環境内のビルド成果物の記録であり、ユーザーの実機へ転送済みの値ではない。
 統合FITの再生成と修正後の実機ログは未取得。新しい実QEMUゲストのPASSも主張しない。
+
+## 7. 修正後の実機結果：粒度を通過し、PMP容量で停止（KSB-059）
+
+2026-11-21、ユーザー提供の再試験UARTログで次を確認した。
+
+```text
+[K3-RPMI] doorbell 0xcac90c00/0x100 protected by M-only page 0xcac90000/0x1000
+Domain0 Region00 : 0x00000000cac90000-0x00000000cac90fff M: (I,R,W) S/U: ()
+[K3-PMP] region base=0xcac90000 order=12 flags=0x80000003 pmp=0x0
+...
+[K3-PMP] REJECT root PMP capacity/order regular=13 broad=1 count=16
+init_coldboot: PMP configure failed (error -2)
+```
+
+### 7.1 前回からの変化
+
+256-byte領域のorder=8は4 KiBのorder=12へ変わり、表現不能という拒否は発生していない。
+KSB-058の対象箇所は改善した。ただしPMP全体の設定、readback、SM admissionまで成功したわけではない。
+停止位置は、PMPのハードウェアentryをプログラムする前のslot計画検査である。
+
+### 7.2 なぜ容量不足になるか
+
+| 用途 | 必要なentry数 |
+| --- | --- |
+| root domainの通常領域 | 13 |
+| 全アドレスのS/U fallback | 1（最終slot 15） |
+| 現行Keystoneの最低必要数 | 3 |
+| 合計 | 17。実機は16個なので一つ不足 |
+
+根拠はopensbi/include/sbi/k3_keystone_boot_slots.hのK3_BOOT_MIN_KEYSTONE=3と、
+keystone/sm/src/pmp.cのk3_pmp_boot_partition_admit()の最低3個という検査である。
+実機に残るのは2個。headerの数値だけを2へ変えてもSM側の契約と一致せず、解決にはならない。
+現在の拒否は検査の故障ではなく、実機のroot領域数が現行の割当条件を満たさないためである。
+
+### 7.3 次に進める調査
+
+1. 今回の14個のdomain領域を固定した証拠として保存し、必要な保護と優先順位を確認する。
+2. domainのメタデータを残したまま、実ハードウェアPMPへ変換したときに完全に冗長となるentryがあるか調べる。
+3. 最初の候補はFirmware RXの0x100000000／order=18と、その包含領域の同base／order=20である。
+   このログでは両方ともlegacy PMPへ変換した値がpmp=0で、Lはない。
+   ただしdomain上のM権限は異なるため、単純にdomain登録そのものを消す案にはしない。
+4. ハードウェア上の同値化を行う場合は、first-matchの優先順位、S/U権限、M-modeの扱い、L、
+   Smepmpの有無、間にある他entry、readbackとSMへ渡すmaskの整合を確認する。
+5. 特にRPMI共有領域とENF_PERMISSIONS付きのRCPU予約領域の包含関係を、
+   「両方S/U禁止」という理由だけで整理しない。後者はM-modeも禁止するロック付きentryであり、保護の意味が異なる。
+6. 同値性を説明できた範囲に限って割当を修正し、クロスビルド、可能なら対象条件を再現する実ゲスト、
+   最終的には同じ実機RAM起動で確認する。検査を弱めて起動だけ通す変更は行わない。
+
+この更新では容量問題に対するファームウェア変更はまだ行っていない。
+getvarや追加continueで解決する停止ではないため、現在のログを保存し、容量割当の検討へ進む。

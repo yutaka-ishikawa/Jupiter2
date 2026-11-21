@@ -82,7 +82,8 @@
 | KSB-055 | RPMI CPPC要求のfield順序が上流修正前 | OpenSBI wire ABI／server互換性制約 | 修正候補・K3 server照合待ち |
 | KSB-056 | PMU FW counter探索失敗時の配列index | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-057 | RAM FIT作成が共通ESOS構成・LZOを扱えない | 本リポジトリの実機導入ツール | 修正済・ホスト検査のみ |
-| KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 修正候補・クロスリンク済・実機未検証 |
+| KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 粒度検査通過を実機確認・後続KSB-059で停止 |
+| KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | 要対応・実機再現 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -861,5 +862,23 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   実機でのPMP成功、U-Boot／Linux／Enclave到達、実QEMU integration PASSは未検証。
 - 修正履歴：候補実装は[995c9c1ad9b765ed9a66c1186f96023f1a3779ad](https://github.com/yutaka-ishikawa/public/commit/995c9c1ad9b765ed9a66c1186f96023f1a3779ad)。初回の実機失敗記録と
   調査計画のコミットは384e4b1e2cc6f14de313f6138617417a47b1c7b4。
+- 2026-11-21実機再試験：K3-RPMIのpage登録とorder=12を確認し、粒度拒否は解消。
+  続くslot計画でKSB-059が発生した。PMP全体や次段起動の成功とは区別する。
 - 詳細・検証計画：[Jupiter2 PMP粒度問題](jupiter2-pmp-granularity-issue.md)。
 
+
+
+### KSB-059: 実機domain領域数がKeystoneのPMP割当上限を超える
+
+- 登録日：2026-11-21。対象：opensbi/include/sbi/k3_keystone_boot_slots.h、
+  opensbi/lib/sbi/sbi_hart.cのK3 root配置、keystone/sm/src/pmp.cのboot admission。
+- 証拠：KSB-058修正後の実機ログでorder=12のRPMI領域を通過し、
+  REJECT root PMP capacity/order regular=13 broad=1 count=16で停止した。
+- 条件・影響：rootの13個＋fallback一つで14個を使用するため、Keystoneには2個しか残らない。
+  OpenSBI側のslot計画とSM側のadmissionはいずれも最低3個を要求し、次段へ進めない。
+- 分類・由来：K3実機のdomain構成と現行16-PMP割当契約の不整合・移植制約。
+  拒否自体は設計どおりであり、上流Keystoneの欠陥やPMP検出不良と断定しない。
+- 状態：未修正。domainの保護を維持したハードウェア上の冗長entry整理等を検討する。
+  最低数の一方だけを変更する、必要領域を削除する、L付き保護を外す方法は採らない。
+- 検証限界：今回の実機ログではslot計画の拒否まで。PMP書込み・readback、U-Boot、
+  Linux、Enclaveの成功は未確認。詳細：[PMP実機再試験結果](jupiter2-pmp-granularity-issue.md#7-修正後の実機結果粒度を通過しpmp容量で停止ksb-059)。
