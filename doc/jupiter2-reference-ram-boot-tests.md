@@ -402,3 +402,29 @@ UFS列挙の段階を合格とする。エラーなら反復せずログを保�
 今回のdp cannot get HPD signal/display devices not foundはディスプレイ側の診断で、
 UARTプロンプトへの到達を妨げていない。これをUFSエラーと扱わない。
 Loading Environment from nowhereは試験設定の結果であり、起動時に永続envを読まない動作である。
+
+## 14. 修正後のUFS列挙成功とパーティション確認
+
+2026-11-21のユーザー実機でscsi scanとscsi infoの両方が成功した。
+
+```text
+Device 0: (0:0) Vendor: YMTC Prod.: YMUS8B5TH1A1C1 Rev: 0303
+Type: Hard Disk
+Capacity: 122056.0 MB = 119.1 GB (31246336 x 4096)
+```
+
+gear 3、lane 2、FAST MODE、rate 2の表示があり、今回のログにdescriptor失敗やUTP timeoutはない。
+販売元OpenSBIを使う新しい参照RAM起動構成のUFS列挙段階を合格とする。
+この結果だけでファイル読出し、Linux起動、Keystone版の動作も合格とはしない。
+
+次はUARTのU-Bootで次を実行し、パーティション一覧を保存する。
+
+```text
+part list scsi 0
+```
+
+この一覧からbootファイルを置くパーティションとファイルシステムを確認して、
+そのパーティションのenv_k3.txt、kernel、initrd、DTBを読取り確認する。
+パーティション番号やLinuxのroot=を推測してbootコマンドを実行しない。
+既存Bianbuの起動設定に合わせ、UARTで一時指定して販売元OpenSBIとのLinux起動を確認してから、
+OpenSBIだけを開発版へ差し替える比較へ進む。
