@@ -23,7 +23,7 @@
 
 #define INVALID_ADDR		(-1U)
 #define IS_SHMEM_ADDR_VALID(ms) \
-		((ms)->shmem.shmem_addr_lo != INVALID_ADDR && \
+		((ms) && (ms)->shmem.shmem_addr_lo != INVALID_ADDR && \
 		 (ms)->shmem.shmem_addr_hi != INVALID_ADDR)
 
 /** Get hart shared memory base address */
@@ -47,7 +47,6 @@ struct abi_entry_vectors {
 struct abi_entry_vectors *entry_vector_table = NULL;
 
 #define ABI_ENTRY_TYPE_FAST		1
-#define ABI_ENTRY_TYPE_YIELD		0
 #define FUNCID_TYPE_SHIFT		31
 #define FUNCID_TYPE_MASK		0x1
 #define GET_ABI_ENTRY_TYPE(id)		(((id) >> FUNCID_TYPE_SHIFT) & \
@@ -106,74 +105,86 @@ static struct sbi_domain *__get_udomain(void)
 
 static int sbi_ecall_tee_domain_enter(unsigned long entry_point)
 {
-	sbi_domain_context_set_mepc(tdomain, entry_point);
-	sbi_domain_context_enter(tdomain);
-	return 0;
+    int rc;
+
+    rc = sbi_domain_context_set_mepc(tdomain, entry_point);
+    if (rc) {
+	return rc;
+    }
+    return sbi_domain_context_enter(tdomain);
 }
 
 static int sbi_ecall_tee_domain_exit(void)
 {
-	sbi_domain_context_exit();
-	return 0;
+    return sbi_domain_context_exit();
 }
 
 static int mpxy_opteed_send_message_withresp(
-	struct sbi_mpxy_channel *channel, u32 msg_id, void *msgbuf, u32 msg_len,
-	void *respbuf, u32 resp_max_len, unsigned long *resp_len)
+    struct sbi_mpxy_channel *channel, u32 msg_id, void *msgbuf, u32 msg_len,
+    void *respbuf, u32 resp_max_len, unsigned long *resp_len)
 {
-	u32 hartidx = current_hartindex();
-	struct hart_mpxy_state *ms;
-	void *shmem_base;
-	u32 funcid_type;
+    u32 hartidx = current_hartindex();
+    struct hart_mpxy_state *ms;
+    const ulong *words = msgbuf;
+    ulong entry_point;
 
-	if (msg_id == OPTEED_MSG_COMMUNICATE) {
-		/* Get per-hart MPXY share memory with tdomain */
-		ms = hart_mpxy_state_get(tdomain, hartidx);
-		shmem_base = hart_shmem_base(ms);
+    /*
+     * Reject traffic before touching either domain's state until the
+     * Keystone-owned PMP transition is available.
+     */
+#ifdef CONFIG_K3_KEYSTONE_SM
+    return SBI_ENOTSUPP;
+#endif
+    if (!tdomain || !udomain || tdomain == udomain) {
+	return SBI_ENOTSUPP;
+    }
 
-		if (!IS_SHMEM_ADDR_VALID(ms)) {
-			sbi_printf("%s: hart%d trusted domain MPXY shared memory is invalid\n",
-				   __func__,
-				   current_hartid());
-			return SBI_EINVAL;
-		}
-
-		sbi_memcpy(shmem_base, msgbuf, msg_len);
-
-		funcid_type = GET_ABI_ENTRY_TYPE(((ulong *)shmem_base)[0]);
-		sbi_ecall_tee_domain_enter((funcid_type == ABI_ENTRY_TYPE_FAST) ?
-					   (ulong)&entry_vector_table->fast_abi_entry :
-					   (ulong)&entry_vector_table->yield_abi_entry);
-	} else if (msg_id == OPTEED_MSG_COMPLETE) {
-		/* Get per-hart MPXY share memory with udomain */
-		ms = hart_mpxy_state_get(udomain, hartidx);
-
-		if (!IS_SHMEM_ADDR_VALID(ms)) {
-			if (((ulong *)msgbuf)[0] == TEEABI_OPTEED_RETURN_CALL_DONE) {
-				/* RETURN_INIT_DONE */
-				entry_vector_table = (struct abi_entry_vectors *)(((ulong *)msgbuf)[1]);
-				sbi_printf("Registered OP-TEE entry table: %#lx\n", (ulong)entry_vector_table);
-			}
-		} else {
-			if (!resp_len) {
-				sbi_printf("ERROR %s: send data without response.\n", __func__);
-				return SBI_EINVAL;
-			}
-			/* tx has a0~a4. Just skip a0 and copy a1~a4 here */
-			sbi_memcpy(hart_shmem_base(ms),
-				   &(((ulong *)msgbuf)[1]),
-				   msg_len - sizeof(ulong));
-			*resp_len = msg_len - sizeof(ulong);
-		}
-
-		sbi_ecall_tee_domain_exit();
-	} else {
-		sbi_printf("%s: message id %d not supported by channel%d\n",
-			   __func__, msg_id, channel->channel_id);
-		return SBI_EINVAL;
+    if (msg_id == OPTEED_MSG_COMMUNICATE) {
+	if (sbi_domain_thishart_ptr() != udomain) {
+	    return SBI_EDENIED;
+	}
+	if (msg_len != 8 * sizeof(ulong) || !entry_vector_table) {
+	    return SBI_EINVAL;
+	}
+	ms = hart_mpxy_state_get(tdomain, hartidx);
+	if (!IS_SHMEM_ADDR_VALID(ms)) {
+	    return SBI_EINVAL;
 	}
 
-	return SBI_SUCCESS;
+	entry_point = (ulong)&entry_vector_table->yield_abi_entry;
+	if (GET_ABI_ENTRY_TYPE(words[0]) == ABI_ENTRY_TYPE_FAST) {
+	    entry_point = (ulong)&entry_vector_table->fast_abi_entry;
+	}
+	sbi_memcpy(hart_shmem_base(ms), msgbuf, msg_len);
+	return sbi_ecall_tee_domain_enter(entry_point);
+    }
+
+    if (msg_id == OPTEED_MSG_COMPLETE) {
+	if (sbi_domain_thishart_ptr() != tdomain) {
+	    return SBI_EDENIED;
+	}
+	if (msg_len != 5 * sizeof(ulong) || !resp_len ||
+	    resp_max_len < msg_len - sizeof(ulong)) {
+	    return SBI_EINVAL;
+	}
+	ms = hart_mpxy_state_get(udomain, hartidx);
+	if (!IS_SHMEM_ADDR_VALID(ms)) {
+	    if (words[0] == TEEABI_OPTEED_RETURN_CALL_DONE) {
+		entry_vector_table = (struct abi_entry_vectors *)words[1];
+		sbi_printf("Registered OP-TEE entry table: %#lx\n",
+			   (ulong)entry_vector_table);
+	    }
+	} else {
+	    /* Skip a0 and transfer the a1 through a4 response. */
+	    sbi_memcpy(hart_shmem_base(ms), &words[1], msg_len - sizeof(ulong));
+	    *resp_len = msg_len - sizeof(ulong);
+	}
+	return sbi_ecall_tee_domain_exit();
+    }
+
+    sbi_printf("%s: message id %d not supported by channel%d\n",
+	       __func__, msg_id, channel->channel_id);
+    return SBI_EINVAL;
 }
 
 static int mpxy_opteed_init(const void *fdt, int nodeoff,
