@@ -1,7 +1,7 @@
 # Milk-V Jupiter2へのOP-TEE・fTPM TA移植計画
 
 対象はSpacemiT K3（RV64）搭載のMilk-V Jupiter2 SBC。調査基準はJupiter2の
-`main`（`19cd12988`）。本書は実装・試験の計画であり、ビルド、QEMU起動、
+`main`（`cf42df851`）。本書は実装・試験の計画であり、ビルド、QEMU起動、
 実機動作の結果は未取得。
 
 ## 目標と進め方
@@ -26,40 +26,48 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
 
 ## 実装順序と完了条件
 
-### 1. 現行Keystone構成を再現し、基準を固定する
+### 1. 改造OpenSBIでOP-TEE通信を有効にし、K3 QEMUで確認する
 
-- Jupiter2のコミット、cross toolchain、ビルド設定、実機のFSBL/U-Boot、
-  稼働中DTB、FIT、起動媒体・区画、UARTログ、成果物のSHA-256を記録する。
-  現行のビルド・RAM起動手順で改造OpenSBI＋SMと `linux-k3` を起動し、
-  Keystone既存検証の結果と既知の失敗を記録する。元の起動構成と復旧手順も確保する。
-- [SDK調査資料](optee-milk-v-jupiter2.md)の固定manifestから、必要な
-  OP-TEE本体、MPXY通信、FSBL/SPL・U-Bootのロード処理、domain/DTの差分を抽出する。
-  採用したコンポーネントのコミットと適用差分を記録する。
-- 完了条件は、既存構成の起動とKeystone回帰の基準を確定し、
-  OP-TEE追加に必要なソース、ロード経路、MPXY ABIを特定できること。
+- 現行の改造OpenSBI＋Keystone SM、`linux-k3`、K3 QEMUのコミットと設定を固定し、
+  基準構成を起動してKeystone既存検証の結果を記録する。SpacemiT SDKから、
+  現行MPXY ABIに対応するOP-TEE本体と必要なブート・DT差分を特定する。
+- [同居設計](keystone-optee-coexistence-design.md)に沿って、既存MPXY dispatcherを
+  Linux・Enclave・OP-TEEの共通PMPポリシーとドメイン切替に接続する。
+  hart間同期、CPU状態の保存・復帰、呼出元の認可、RPC・割込み・タイマー、
+  切替失敗時の復旧を扱う。保護を維持できる切替経路の実装後にドメイン切替を有効にする。
+- K3 QEMUのpayloadロード・DT生成、LinuxのMPXY/mailboxとTEE設定、
+  rootfsのlibteecと `tee-supplicant` を揃える。固定したOP-TEEをQEMU用にビルドし、
+  同一ゲストでOP-TEE初期化、LinuxのTEE登録、既存Hello World TAの呼出し、
+  Keystone Enclaveの動作を確認する。
+- **成果物・完了条件**。改造OpenSBIの変更、再現用のビルド・起動手順とUARTログを残す。
+  QEMU上で実Linux → SBI MPXY → 改造OpenSBI → OP-TEEの往復が成功し、
+  Keystoneの基準試験を再実行できること。
 
-### 2. 改造OpenSBI・起動手順・LinuxにOP-TEEを組み込む
+### 2. 通信・同居のテストプログラムを作り、K3 QEMUで確認する
 
-- [同居設計](keystone-optee-coexistence-design.md)のC1/C2に沿って、
-  Linux・Enclave・OP-TEEで共通のPMPポリシー、hart間の同期、呼出元認可、
-  GPR/CSR・FP/Vector状態、RPC・割込み・タイマーと復帰先の管理を実装する。
-  異種hartのPMP能力と切替失敗時の復旧を確認し、既存のドメイン切替禁止を
-  安全な遷移に置き換える。
-- 既存の統合FIT生成とRAM起動経路にOP-TEE payloadを追加する。
-  FSBL/SPLとU-Bootがpayloadを渡せるかを確認し、必要な場合は対象の処理を追加する。
-  ロード先・entry、SM・OP-TEE・Linuxの予約領域、TEE共有領域、domain/MPXY
-  記述を照合する。OpenSBI用DTとLinux用DTB双方への伝達を検証する。
-  実機はRAM起動で確認し、永続媒体への配置は対応区画と復旧手順の確定後に行う。
-- 同居用のbuild/install/run構成を既存のビルドに追加する。K3 QEMUのpayloadロードと
-  DT生成、LinuxのMPXY/mailbox、`CONFIG_TEE`、`CONFIG_OPTEE`、
-  `CONFIG_TCG_TPM`、`CONFIG_TCG_FTPM_TEE`、Keystone driverを確認する。
-  rootfsにlibteec、`tee-supplicant`、TA、試験ツールを配置する。
-- 完了条件は、現行K3 QEMUと実機RAM起動で、同一のOpenSBI＋SM・Linuxの起動中に
-  Keystone EnclaveとHello World TAを呼び出せること。UART、TEE登録、
-  `xtest` の対象試験、Keystone回帰の結果を記録する。失敗、スキップ、モデルで
-  検証できない項目は個別に記録する。
+- `verifications/` にLinux側テストプログラムと検証用TAを追加する。
+  同じプロセスでTAセッションとKeystone Enclaveを開き、TAへの入力と応答を照合し、
+  Enclave呼出しと交互に反復する。必要なRPC・OCALL後の復帰も確認する。
+- 1 hartの逐次試験から複数hartの並行試験へ進む。共有領域の正常アクセス、
+  保護領域の隔離、通信・遷移の失敗時の復帰、既存Keystoneの回帰を確認する。
+  試験は実K3 QEMUゲスト、Linuxドライバー、OpenSBI/SM、EnclaveとTAを通して実行する。
+- **成果物・完了条件**。テストソース、ビルド・ゲスト内実行手順、期待値、
+  実行結果を揃える。失敗・スキップと、QEMUで検証できる範囲を記録する。
 
-### 3. fTPM TAをRV64向けにビルドしてLinuxへ公開する
+### 3. 改造OpenSBIの実機テスト手順書を作成する
+
+- [既存のKeystone RAM起動手順](jupiter2-ram-boot-procedure.md)を基に、
+  対象機材・起動媒体の確認、現行環境のバックアップ、成果物のハッシュ照合、
+  統合FITの生成・RAM転送、UARTでの起動確認、元の構成への復帰を記載する。
+  既存のFSBL/SPLとU-BootがOP-TEE試験用payloadを渡せるかを確認し、
+  必要な場合は対応するローダー、ロード先、OpenSBI用DTとLinux用DTBを指定する。
+- 第2段階のテストプログラム・検証用TAを使い、改造OpenSBIの通信、ドメイン切替、
+  Keystone回帰を実機で確認できるようにする。コマンドの実行場所、期待ログ、
+  合否・中止条件、採取するUARTログと `dmesg` を明記する。
+- **担当と成果物**。Codexが実機テスト手順書と試験に必要な成果物一覧を作成する。
+  実機での操作・試験はユーザーが実施する。実機の合否は提供されたログに基づいて記録する。
+
+### 4. OP-TEEとfTPM TAをクロスコンパイルし、実機への配置手順を示す
 
 - 固定したK3 OP-TEEから、実行環境と同じABIのTA dev kitを出力する。
   `TA_DEV_KIT_DIR` と `CFG_MS_TPM_20_REF` を指定してTAをビルドし、
@@ -79,7 +87,15 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   `/dev/tpmrmN` をLinuxが登録すること。既存の別TPMがある環境ではsysfsで
   ドライバーを確認し、試験時は `-T device:/dev/tpmrmN` で対象を明示する。
 
-### 4. 同居構成でfTPMとKeystoneの受入試験を行う
+- 開発ホストでRV64向けOP-TEE本体とfTPM TAをクロスコンパイルする。
+  統合FITに組み込むOP-TEE payload、署名済みTA、対応のLinux Image・DTB・必要な
+  モジュール、libteec・`tee-supplicant` の版、配置先とハッシュを一覧化する。
+  実機手順には、ホストでのビルド、FITへの組み込み、実機への転送・RAM起動、
+  rootfsへのTA配置、サービス・ドライバーの起動順、元の構成への復帰を含める。
+  永続媒体へ配置する場合は対応区画と復旧手順を確定する。
+- **担当と成果物**。Codexがクロスコンパイル済み成果物と実機deploy手順を揃える。
+  実機への配置と下表の確認はユーザーが実施する。第3段階の結果を確認してから、
+  fTPMを含む構成の実機試験へ進む。
 
 | 試験 | 合格条件 |
 | --- | --- |
