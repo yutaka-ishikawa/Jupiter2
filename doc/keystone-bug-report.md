@@ -95,6 +95,7 @@
 | KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | KSB-069修正後にU-Boot到達を実機確認 |
 | KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 整合修正後のU-Boot・UFS・Linux起動を実機確認 |
 | KSB-070 | Linux用DTがSMのM-only mailboxページ内の直接controllerを有効化 | Bianbu Linux DTとK3 SMの所有契約 | 提供DTBで不整合確認・別名DTBで限定修正候補 |
+| KSB-071 | X100/A100のPMP数混在を16個固定の移植処理が拒否 | K3 Keystone移植のroot配置・PMP証拠管理 | 実機UARTとソースで原因確認・修正計画作成、未実装 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1142,3 +1143,12 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   新しいDTホスト試験6件で有効利用者の拒否、元ファイル保持、他ノード保持、再実行を確認。
   新DTBによる販売元/SM版Linuxの実機起動、hello二種、QEMU guest統合は未検証。
   [SM起動からアプリ試験までの手順](jupiter2-keystone-app-test.md)に段階と判定を記載。
+
+### KSB-071: X100/A100のPMP数混在を16個固定の移植処理が拒否
+
+- 起源：本リポジトリのK3 Keystone向け追加処理。上流Keystone/OpenSBI一般の欠陥とはしない。
+- 条件・証拠：2026年11月21日提供のUART log.txtの末尾側起動で、Hart0〜7はPMP16個でSM初期化成功、Hart8〜15は32個を検出直後にPMP configure rc=-2、Linuxは8 CPUのみ起動。
+- 直接原因：opensbi/lib/sbi/sbi_hart.c の k3_root_pmp_layout_build() が count != K3_BOOT_PMP_COUNT（16）を拒否する。関連するboot slot計算、snapshot、preflight、partition evidenceにも16個固定の表現がある。
+- 影響：A100がLinuxへ到達せず、sm_is_ready()の全16 Hart STARTED条件を満たせない。CPU3へのtasksetでもhello CREATEが100100で拒否される。SM not initializedという共通診断は実際の拒否条件を区別できない。
+- 方針：[混在PMP対応計画](jupiter2-heterogeneous-pmp-plan.md)。共通16個の配置を維持し、32個側の追加範囲は全数検証して無効状態を要求する。追加範囲の実態を未確認のまま無視・解除しない。
+- 状態：原因と計画を記録。コード修正・修正commitはまだない。ビルド、QEMU guest、修正版実機起動、hello成功は未検証。提供ログには複数回の過去試行が含まれ、末尾側の起動を根拠としている。
