@@ -82,7 +82,7 @@
 | KSB-055 | RPMI CPPC要求のfield順序が上流修正前 | OpenSBI wire ABI／server互換性制約 | 修正候補・K3 server照合待ち |
 | KSB-056 | PMU FW counter探索失敗時の配列index | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-057 | RAM FIT作成が共通ESOS構成・LZOを扱えない | 本リポジトリの実機導入ツール | 修正済・ホスト検査のみ |
-| KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 実機再現・調査中 |
+| KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 修正候補・クロスリンク済・実機未検証 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -849,6 +849,17 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
 - 影響：OpenSBI＋SMへ到達するが、U-Boot・Linuxへ移行できない。
 - 由来：販売元domainの小領域登録と、本リポジトリのK3 Keystoneの厳密な表現可能性検査の
   組合せによる移植・統合問題。上流Keystone本体の欠陥とは扱わない。
-- 状態：登録元と同一4 KiBページの権限を調査中。検査無効化、domain entry削除、
-  汎用的な無条件の範囲拡大は行わない。修正後の実機検証は未実施。
+- 登録元：RPMI mailbox transportのdb-reg登録。公開K3 DTの0xcac90c00／0x100と一致。
+- 修正候補：K3＋SM構成のこの既知doorbellだけを4 KiBのM-onlyページとして登録する。
+  queue・doorbellの実アドレスは維持し、汎用PMP検査は変更しない。
+  明示S/U grant、引渡しDTの有効な直接mailboxとの競合は拒否する。
+- 互換性制約：包含ページにはmailbox0〜3があり、元の小窓の外3840 bytesもS/U禁止となる。
+  別途ロードするLinux DTを検査・修正したものではない。直接mailbox利用を継続する構成では
+  そのままLinux起動へ進めず、所有契約・SBI経由化／配置変更を別途確認する。
+- 検証：SMありのK3 audit構成とSMなしk3_defconfigの実クロスリンク成功、
+  RISC-V ELF・SMシンボル・mtvec整列を確認。模擬PMPテストは追加していない。
+  実機でのPMP成功、U-Boot／Linux／Enclave到達、実QEMU integration PASSは未検証。
+- 修正履歴：本項の候補実装を含むコミットで登録元を変更。初回の実機失敗記録と
+  調査計画のコミットは384e4b1e2cc6f14de313f6138617417a47b1c7b4。
 - 詳細・検証計画：[Jupiter2 PMP粒度問題](jupiter2-pmp-granularity-issue.md)。
+

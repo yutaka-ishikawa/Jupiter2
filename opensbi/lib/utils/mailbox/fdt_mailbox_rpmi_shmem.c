@@ -658,6 +658,84 @@ static void rpmi_shmem_mbox_free_chan(struct mbox_controller *mbox,
 
 extern struct fdt_mailbox fdt_mailbox_rpmi_shmem;
 
+#if defined(CONFIG_PLATFORM_SPACEMIT_K3) && defined(CONFIG_K3_KEYSTONE_SM)
+/* K3 mailbox3 user registers occupy a sub-page window. Legacy PMP on the
+ * measured K3 has a 4 KiB grain, so the containing mailbox0..3 page must
+ * belong to M-mode. Do not change the transport register/queue addresses.
+ * This policy is deliberately restricted to the known K3 doorbell window.
+ */
+static int k3_rpmi_add_doorbell_region(const void *fdt, u64 addr, u64 size)
+{
+    const unsigned long base = 0xcac90000UL;
+    const unsigned long end = base + PAGE_SIZE - 1;
+    const unsigned long flags = SBI_DOMAIN_MEMREGION_MMIO |
+	SBI_DOMAIN_MEMREGION_M_READABLE | SBI_DOMAIN_MEMREGION_M_WRITABLE;
+    struct sbi_domain_memregion *reg;
+    unsigned long last;
+    u64 node_addr, node_size;
+    int node = -1;
+    int rc;
+
+    if (addr != 0xcac90c00ULL || size != 0x100) {
+	return sbi_domain_root_add_memrange(addr, size, size, flags);
+    }
+
+    /* Refuse to consume an explicit S/U grant. The universal fallback is
+     * intentionally overridden by this M-only MMIO protection.
+     */
+    sbi_domain_for_each_memregion(&root, reg) {
+	if (reg->base == 0 && reg->order == __riscv_xlen &&
+	    reg->flags == SBI_DOMAIN_MEMREGION_SU_ACCESS_MASK) {
+	    continue;
+	}
+	last = (reg->order == __riscv_xlen) ? ~0UL :
+	    reg->base | ((1UL << reg->order) - 1);
+	if (reg->base <= end && base <= last &&
+	    (reg->flags & SBI_DOMAIN_MEMREGION_SU_ACCESS_MASK)) {
+	    sbi_printf("K3 RPMI: refuse mailbox page with explicit S/U grant\n");
+	    return SBI_EDENIED;
+	}
+    }
+
+    /* A direct Linux mailbox controller in this page is incompatible
+     * with M-only ownership. This checks the supplied firmware DT; a
+     * separate Linux DT must obey the same ownership contract.
+     */
+    while (true) {
+	node = fdt_next_node(fdt, node, NULL);
+	if (node == -FDT_ERR_NOTFOUND) {
+	    break;
+	}
+	if (node < 0) {
+	    return SBI_EINVAL;
+	}
+	if (fdt_node_check_compatible(fdt, node, "spacemit,k3-mailbox") &&
+	    fdt_node_check_compatible(fdt, node, "spacemit,k3-rmailbox")) {
+	    continue;
+	}
+	if (!fdt_node_is_enabled(fdt, node)) {
+	    continue;
+	}
+	rc = fdt_get_node_addr_size(fdt, node, 0, &node_addr, &node_size);
+	if (rc || !node_size || node_addr > (~0ULL - (node_size - 1))) {
+	    return SBI_EINVAL;
+	}
+	if (node_addr <= end && base <= node_addr + node_size - 1) {
+	    sbi_printf("K3 RPMI: enabled direct mailbox %s conflicts with M-only page\n",
+		       fdt_get_name(fdt, node, NULL));
+	    return SBI_EDENIED;
+	}
+    }
+
+    rc = sbi_domain_root_add_memrange(base, PAGE_SIZE, PAGE_SIZE, flags);
+    if (!rc) {
+	sbi_printf("[K3-RPMI] doorbell 0xcac90c00/0x100 protected by "
+		   "M-only page 0xcac90000/0x1000\n");
+    }
+    return rc;
+}
+#endif
+
 static int rpmi_shmem_transport_init(struct rpmi_shmem_mbox_controller *mctl,
 				     const void *fdt, int nodeoff)
 {
@@ -752,6 +830,17 @@ static int rpmi_shmem_transport_init(struct rpmi_shmem_mbox_controller *mctl,
 	ret = fdt_get_node_addr_size(fdt, nodeoff, qid, &reg_addr,
 				       &reg_size);
 	if (!ret && !(strncmp(name, "db-reg", strlen("db-reg")))) {
+#if defined(CONFIG_PLATFORM_SPACEMIT_K3) && defined(CONFIG_K3_KEYSTONE_SM)
+		ret = k3_rpmi_add_doorbell_region(fdt, reg_addr, reg_size);
+#else
+		ret = sbi_domain_root_add_memrange(reg_addr, reg_size, reg_size,
+						   (SBI_DOMAIN_MEMREGION_MMIO |
+						    SBI_DOMAIN_MEMREGION_M_READABLE |
+						    SBI_DOMAIN_MEMREGION_M_WRITABLE));
+#endif
+		if (ret) {
+			return ret;
+		}
 #ifdef CONFIG_PLATFORM_SPACEMIT_K3
 		mctl->mb_regs = (void *)((unsigned long)reg_addr + MAILBOX_DOORBALL_TRIGGER_OFFSET);
 		/* enable the user1's new irq */
@@ -759,12 +848,6 @@ static int rpmi_shmem_transport_init(struct rpmi_shmem_mbox_controller *mctl,
 #else
 		mctl->mb_regs = (void *)(unsigned long)reg_addr;
 #endif
-		ret = sbi_domain_root_add_memrange(reg_addr, reg_size, reg_size,
-						   (SBI_DOMAIN_MEMREGION_MMIO |
-						    SBI_DOMAIN_MEMREGION_M_READABLE |
-						    SBI_DOMAIN_MEMREGION_M_WRITABLE));
-		if (ret)
-			return ret;
 	}
 
 	return SBI_SUCCESS;
