@@ -288,3 +288,24 @@ python3 scripts/tests/test_jupiter2_ram_boot_image.py
 ```
 
 この修正候補のK3 GCC完全ビルド・実機再試験・QEMU guest統合は未実施。
+
+## 11. 両RCPU応答後、OpenSBI表示前で停止（KSB-068）
+
+その後のユーザー実機では、core 0 entry=0x100200000、core 1 entry=0x100804000で
+両方handshake acknowledgedとなった。KSB-066の表示とKSB-067の起動先修正を実機確認した。
+最後の表示は次のとおりで、OpenSBIのバナーはない。
+
+```text
+[RAMBOOT] combined FIT: skip persistent extra FIT loads
+[RAMBOOT] OpenSBI entry=0x100000000 next=0x102000000 dtb=102153cf0 hart=0
+```
+
+これはOpenSBI関数呼出し直前の表示である。OpenSBIに入ったか、初期化で待っているか、
+consoleだけ無出力かはこのログだけでは分からない。
+またRCPUの起動応答はRPMI全機能の確認ではない。U-Boot/UFS試験へは進めない。
+
+次は今回実際に転送したrelease/images/ram-boot-vendor.itbを開発側で解析する。
+このFITから同梱OpenSBI、U-Boot用DTB、ESOSと配置・ハッシュを確認できる。
+OpenSBIの起動コードとリンク先、DTのconsole/RPMI/CPU設定、引渡しABIとの整合性を調べる。
+SPLによるfixup後の実行時DTと一致するとは扱わず、必要なら追加の採取を行う。
+現段階では原因を推測してPMPを解除したり、cache設定を変更して再試験を反復したりしない。

@@ -90,8 +90,9 @@
 | KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 原因未確定・ユーザー実機観測 |
 | KSB-064 | 参照ESOS結合スクリプトのdescription一致とconf_dualが不一致 | 第三者K3手順を今回の入力へ適用する場合 | 統合上の制約・明示構成による回避実装、ホスト検査済 |
 | KSB-065 | 参照FSBLがESOS開始失敗を成功として扱いRAM追加FITも誤判定 | 参照U-Bootと販売元ESOSの統合 | core 1応答待ち失敗を実機観測・診断修正候補 |
-| KSB-066 | 診断版のRCPU entryがSPLで0xxと表示される | 本リポジトリの診断パッチとtiny printf | %lxとulongへ修正・実機表示の再確認待ち |
-| KSB-067 | 参照SPL DTのcore 1起動先が販売元ESOS ELF entryと不一致 | 固定参照FSBLと今回の販売元ESOSの統合 | 実ELFで不一致確認・ELFからDTへ反映する修正候補 |
+| KSB-066 | 診断版のRCPU entryがSPLで0xxと表示される | 本リポジトリの診断パッチとtiny printf | 表示修正を実機確認 |
+| KSB-067 | 参照SPL DTのcore 1起動先が販売元ESOS ELF entryと不一致 | 固定参照FSBLと今回の販売元ESOSの統合 | 修正後の両core応答を実機確認・後段KSB-068で停止 |
+| KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | 実機観測・原因未確定 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1022,8 +1023,7 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
 - 修正：RV64 K3ではulongが64 bitなので、%lxと(ulong)キャストへ変更する。
   実際の起動アドレス設定、RCPUのリセット、応答待ち処理は変更しない。
 - 検証：固定ソースの書式処理と設定を確認。git apply --checkで適用確認する。
-  修正後の実機表示・完全ビルドは未確認。表示確認だけのために再起動を要求せず、
-  先にホストでESOS ELFを調べる。
+  その後のユーザー実機でcore 0=0x100200000、core 1=0x100804000の表示を確認。
 
 ### KSB-067: 参照SPL DTと販売元RCPU core 1のELF entry不一致
 
@@ -1048,4 +1048,22 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
   実LZO FITからのprepare-only CLIでcore 1のユーザー実ELFを展開・反映・ハッシュ記録。
   core 0はこのホスト試験に限りLLVM生成の形式試験用ELFを使用した。
   新しいELF/DTホスト試験3件、既存FITホスト試験23件が合格。
-  K3 GCC完全ビルド・修正後の実機・QEMU統合は未検証。
+  その後のユーザー実機でcore 1 entry=0x100804000、両core handshake acknowledgedを確認。
+  ユーザー環境でビルド・実機実行された。ESOS/RPMI全機能やUFSの成功を意味しない。
+  開発環境でのK3 GCC完全ビルドとQEMU guest統合は未実施。後段はKSB-068で追跡する。
+
+### KSB-068: RCPU応答後のOpenSBI引渡し前表示で無出力
+
+- 登録日：2026-11-21。KSB-067修正後のユーザー実機ログで、core 0/1とも
+  handshake acknowledged。RAM統合FITの追加読込み省略も通過。
+  最後の表示はOpenSBI entry=0x100000000 next=0x102000000 dtb=102153cf0 hart=0。
+  OpenSBIバナー、U-Bootプロンプトは出ていない。
+- 到達判定：最後の診断表示はspl_invoke_opensbi()の呼出し直前にあり、
+  OpenSBI内部へ入った証拠ではない。RCPUの応答もRPMI全サービスの健全性の証明ではない。
+- 原因：未確定。引渡しABI、実際のOpenSBI BINのリンク先・初期コード、同梱DTと
+  販売元OpenSBIの組合せ、初期化待ち・UART経路を照合する。
+  SPLのFITコピー経路には既にD-cache flushがあり、無出力だけを根拠にcacheやPMPを変更しない。
+- 次の資料：今回転送したrelease/images/ram-boot-vendor.itbを解析する。
+  同梱OpenSBI/DTB/ESOSのハッシュと配置、OpenSBI初期命令とヘッダー、console/RPMI設定を確認する。
+  FIT内のDTはSPLによる実行時fixup前であり、必要なら次に実行時FDT/引渡し情報を採取する。
+- 状態：未修正・調査中。UFS試験へは進まない。詳細は参照RAM起動テスト手順の第11節。
