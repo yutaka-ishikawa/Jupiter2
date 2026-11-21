@@ -98,6 +98,7 @@
 | KSB-071 | X100/A100のPMP数混在を16個固定の移植処理が拒否 | K3 Keystone移植のroot配置・PMP証拠管理 | 混在対応候補・QEMU実Linuxで二種成功、実機helloはKSB-073で停止 |
 | KSB-072 | QEMU回帰試験が実機の混在PMP・粒度・domain条件を含まない | Jupiter2部分モデルと試験範囲の制約 | 混在PMP/4 KiBオプション実装、実機相当domain等は未実装 |
 | KSB-073 | 全16 CPU起動後、hello二種のhost runnerがload access faultで停止 | K3の独立UTM割当てとホストPMP復帰の不整合 | SM修正・実QEMUで旧版の障害再現、修正版hello二種8回PASS、実機再試験待ち |
+| KSB-074 | OPTEEDの呼出元・メッセージ長・切替結果の検査不足 | OpenSBI取込コードとK3 Keystone切替ガードの接続 | 修正済み（`4b0f75220`）、実ゲストのMPXYは未検証 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1174,3 +1175,16 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 検証：SM全30単位クロスコンパイル、OpenSBIリンクとmtvec整列に成功。実QEMU＋Linux 6.18.3＋実driver＋提供SDK/Eyrie/sampleで比較し、修正前は一律/混在の両構成でhelloのrunner+0x529c、cause=5、終了139を再現。修正後は両構成×CPU3/8×hello/nativeの計8回が正常出力・終了0・DESTROY。全12 sample、run-all全体、EPM拒否の負の試験、修正版の実機試験は未実施。
 - 過去のPASSとの関係：保存済みsample成功記録は11月9日。UTM独立slot化は11月21日で、その後の同一成果物のsample回帰確認が不足していた。今回QEMUでも障害を再現し、修正前後の比較を記録した。
 - 詳細・package/runner hash・再試験手順：[UTMホスト復帰の解析](jupiter2-utm-host-access-issue.md)。修正commit：[76fd41362565](https://github.com/yutaka-ishikawa/public/commit/76fd41362565e0f53f7216a42fa95ac41df1271e)。
+
+### KSB-074: OPTEEDの呼出元・メッセージ長・切替結果の検査不足
+
+- 対象は [K3のOPTEED dispatcher](../opensbi/lib/utils/mpxy/fdt_mpxy_opteed.c)。
+  ベンダー取込コードでCOMMUNICATE/COMPLETEの呼出元domainとABI長の検査がなく、
+  context切替の戻り値も破棄していた。K3 Keystone構成では未対応の切替経路に
+  到達すると、ガードがhartを停止する。
+- `4b0f75220` で呼出元domain、ABI長、共有領域と応答長を検査し、
+  切替エラーをMPXYに返す。Keystone構成では共通PMP切替を実装するまで
+  dispatcherが処理を拒否し、共有領域やdomain contextを更新しない。
+- 通常K3構成とK3 Keystone構成のOpenSBIをビルドした。16 hartのK3 QEMUで
+  Keystone構成のファームウェアの起動ログを確認した。OP-TEEとLinuxを含む
+  実ゲストのMPXY経路、domain切替、実機は未検証。
