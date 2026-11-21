@@ -1151,7 +1151,7 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 直接原因：opensbi/lib/sbi/sbi_hart.c の k3_root_pmp_layout_build() が count != K3_BOOT_PMP_COUNT（16）を拒否する。関連するboot slot計算、snapshot、preflight、partition evidenceにも16個固定の表現がある。
 - 影響：A100がLinuxへ到達せず、sm_is_ready()の全16 Hart STARTED条件を満たせない。CPU3へのtasksetでもhello CREATEが100100で拒否される。SM not initializedという共通診断は実際の拒否条件を区別できない。
 - 方針：[混在PMP対応計画](jupiter2-heterogeneous-pmp-plan.md)。共通16個の配置を維持し、32個側の追加範囲は全数検証して無効状態を要求する。追加範囲の実態を未確認のまま無視・解除しない。
-- 状態：共通16個と実装16/32個の分離、全追加範囲の検査、32個snapshot/証拠管理、SM拒否理由の診断を実装。SMのmixed/qemu16各30単位コンパイルとmixedのOpenSBIリンクを確認。QEMU専用S-mode guestで一律16個と16/32混在の全16 Hart readback・HSM到達を確認。Linux/SDKのguest統合、修正版実機起動、hello成功は未検証。提供ログには複数回の過去試行が含まれ、末尾側の起動を根拠としている。修正commitは本更新を含むcommit。
+- 状態：共通16個と実装16/32個の分離、全追加範囲の検査、32個snapshot/証拠管理、SM拒否理由の診断を実装。SMのmixed/qemu16各30単位コンパイルとmixedのOpenSBIリンクを確認。QEMU専用S-mode guestで一律16個と16/32混在の全16 Hart readback・HSM到達を確認。Linux/SDKのguest統合、修正版実機起動、hello成功は未検証。提供ログには複数回の過去試行が含まれ、末尾側の起動を根拠としている。修正commit：[9bfb8bf74f62](https://github.com/yutaka-ishikawa/public/commit/9bfb8bf74f62f1c253be9fd11f6bc36a03b02105)。
 
 ### KSB-072: QEMU試験条件と実機のPMP・起動契約が不一致
 
@@ -1160,4 +1160,4 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 影響：KSB-058〜060/071等の実機固有条件を従来のQEMU PASSから判断できない。既存の部分モデルという説明だけで回帰試験の不足を補えない。
 - 候補：QEMUのCPU realize前に実PMP CSR backendのHart別個数と粒度を設定するmixed-pmpオプションを追加。一律16個の既定構成も維持。CPU ISAは同一rva23s64のままで、X100/A100全体の再現とはしない。
 - 残課題：[QEMU差分一覧](jupiter2-qemu-hardware-test-gaps.md)に優先順位、実機domain fixture、上位PMPの負の試験、mailbox/RPMI/ESOS/UFSの未再現範囲を記載。
-- 検証：QEMUビルド成功。実QMPで両構成の全CPU設定を確認し、実OpenSBI/SM＋専用S-mode guestで全16 HartのreadbackとHSM到達を確認。ただし実測root7個・空き9個・PMPADDR幅54ビットであり実機の13個・3個・38ビットとは異なる。Linux/SDKのguest統合と実機試験は未実施。修正commitは本更新を含むcommit。
+- 検証：QEMUビルド成功。実QMPで両構成の全CPU設定を確認し、実OpenSBI/SM＋専用S-mode guestで全16 HartのreadbackとHSM到達を確認。ただし実測root7個・空き9個・PMPADDR幅54ビットであり実機の13個・3個・38ビットとは異なる。Linux/SDKのguest統合と実機試験は未実施。修正commit：[9bfb8bf74f62](https://github.com/yutaka-ishikawa/public/commit/9bfb8bf74f62f1c253be9fd11f6bc36a03b02105)。
