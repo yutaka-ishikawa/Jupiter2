@@ -214,8 +214,8 @@ int sbi_mpxy_register_channel(struct sbi_mpxy_channel *channel)
 
 	/* Update shared memory size if required */
 	if (mpxy_shmem_size < channel->attrs.msg_data_maxlen) {
-		mpxy_shmem_size = channel->attrs.msg_data_maxlen;
-		mpxy_shmem_size = (mpxy_shmem_size + (PAGE_SIZE - 1)) / PAGE_SIZE;
+		mpxy_shmem_size = ROUNDUP((unsigned long)channel->attrs.msg_data_maxlen,
+					  PAGE_SIZE);
 	}
 
 	SBI_INIT_LIST_HEAD(&channel->head);
