@@ -377,3 +377,28 @@ regは次の20 cellsに対応する。
 両coreのhandshake acknowledgedの後、OpenSBIバナーとU-Bootプロンプトを確認する。
 両方が出てからUFS列挙へ進む。無出力なら全UARTログと今回のmanifestを保存して停止する。
 修正候補の実機成功・QEMU guest統合は未検証である。
+
+## 13. RPMI整合修正後のU-Boot到達とUFS列挙
+
+2026-11-21のユーザー実機で、U-Boot 2022.10-g4c294a06-dirty
+（Nov 21 2026 13:06:35 +0900）が起動し、UARTの=>へ到達した。
+Modelはspacemit k3 pico itx board、envはnowhere、入出力はserial。
+修正後のRAM起動経路でOpenSBIからU-Bootへの引渡しが進んだと判定する。
+OpenSBIのバナーを含む全ログはこの報告にはなく、SBI/RPMI全機能の成功とは扱わない。
+
+次はUARTのU-Bootプロンプトで以下を一度実行する。
+
+```text
+scsi scan
+scsi info
+```
+
+UFSのデバイス名と容量が表示され、UIC_ERROR/descriptor失敗/UTP timeoutがなければ
+UFS列挙の段階を合格とする。エラーなら反復せずログを保存してKSB-063へ追記する。
+成功してもまだLinuxやKeystone Enclaveの合格には含めない。
+次にパーティションと起動ファイルを読取り確認し、既存Bianbuの起動方式に合わせて進める。
+参照記事のEFI/GRUBをそのままBianbuの起動に適用しない。
+
+今回のdp cannot get HPD signal/display devices not foundはディスプレイ側の診断で、
+UARTプロンプトへの到達を妨げていない。これをUFSエラーと扱わない。
+Loading Environment from nowhereは試験設定の結果であり、起動時に永続envを読まない動作である。

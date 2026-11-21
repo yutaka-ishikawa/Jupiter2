@@ -92,8 +92,8 @@
 | KSB-065 | 参照FSBLがESOS開始失敗を成功として扱いRAM追加FITも誤判定 | 参照U-Bootと販売元ESOSの統合 | core 1応答待ち失敗を実機観測・診断修正候補 |
 | KSB-066 | 診断版のRCPU entryがSPLで0xxと表示される | 本リポジトリの診断パッチとtiny printf | 表示修正を実機確認 |
 | KSB-067 | 参照SPL DTのcore 1起動先が販売元ESOS ELF entryと不一致 | 固定参照FSBLと今回の販売元ESOSの統合 | 修正後の両core応答を実機確認・後段KSB-068で停止 |
-| KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | 実機観測・原因未確定 |
-| KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 実FIT内の両DTで不一致確認・整合修正候補 |
+| KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | KSB-069修正後にU-Boot到達を実機確認 |
+| KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 整合修正後のU-Boot到達を実機確認・UFS試験待ち |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1094,3 +1094,10 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
   両entryと有効サーバーの契約・ハッシュ・ソース差分を記録した。
   ELF/RPMI DTホスト試験6件、FITホスト試験23件が合格。修正後のK3 GCC完全ビルド、
   OpenSBI/RPMI/UFSの実機成功、QEMU guest統合は未確認。
+
+KSB-068/069の実機追記（2026-11-21）：ユーザーからU-Boot 2022.10-g4c294a06-dirty
+（Nov 21 2026 13:06:35 +0900）の起動とUARTの=>を報告。
+Model=spacemit k3 pico itx board、Loading Environment from nowhere... OK、In/Out/Err=serial。
+今回の修正後RAM起動経路でOpenSBIからU-Bootへ引渡しが進んだ到達証拠として記録する。
+この抜粋にはOpenSBIバナー自体はなく、全SBI/RPMI機能やUFS・Linuxの成功とは扱わない。
+次はUARTでscsi scanとscsi infoを一度実行してKSB-063のUFS列挙を確認する。
