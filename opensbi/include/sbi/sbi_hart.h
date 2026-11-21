@@ -150,6 +150,11 @@ struct k3_a1_local_pmp_snapshot {
 };
 int sbi_hart_keystone_a1_read_pmp_snapshot(struct sbi_scratch *scratch,
                          struct k3_a1_local_pmp_snapshot *out);
+/* Verify the canonical domain-derived root layout on this Hart and return
+ * only its readback-proven, firmware-owned locked entry mask.
+ */
+int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
+                                      unsigned short *locked_mask);
 void sbi_hart_keystone_pmp_block_opensbi(void);
 bool sbi_hart_keystone_pmp_opensbi_blocked(void);
 #endif

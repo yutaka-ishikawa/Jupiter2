@@ -1,6 +1,6 @@
 # Jupiter2 RAM起動：RPMI領域とPMP粒度の不一致（KSB-058）
 
-登録日：2026-11-21。状態：KSB-058の粒度拒否は修正後の実機ログで通過を確認。続くPMP容量検査で停止（KSB-059）。U-Boot到達と別Linux DTの整合は未検証。
+登録日：2026-11-21。状態：KSB-058の粒度検査通過後、実機でKSB-059の容量拒否を確認。KSB-059／060／061／062の候補を実装・クロスビルド済み。修正後の実機起動と別Linux DTの整合、Enclaveの同時動作は未検証。
 
 ## 1. 確認できた到達点と停止箇所
 
@@ -284,5 +284,223 @@ keystone/sm/src/pmp.cのk3_pmp_boot_partition_admit()の最低3個という検�
 6. 同値性を説明できた範囲に限って割当を修正し、クロスビルド、可能なら対象条件を再現する実ゲスト、
    最終的には同じ実機RAM起動で確認する。検査を弱めて起動だけ通す変更は行わない。
 
-この更新では容量問題に対するファームウェア変更はまだ行っていない。
+この第7章は初回再試験時点の記録である。その後の容量問題への修正候補は第8章に示す。
 getvarや追加continueで解決する停止ではないため、現在のログを保存し、容量割当の検討へ進む。
+
+
+## 8. KSB-059／060／061／062の修正候補とEnclave数の制約
+
+### 8.1 16個という上限と、実機ログの割当要求
+
+今回の実機は16個のPMP entryを検出した。物理CSRの数はハードウェアで決まり、
+OpenSBIのconfigurationや配列上限を32へ変えても実機のentryは増えない。
+ソフトウェアで変更できるのは、その16個の割当、保護領域の配置・表現、管理方法である。
+QEMUのモデルを改造してentry数を増やすことと、実機の変更は区別する。
+
+容量拒否は書込み前の計画段階なので、次は「書込み済み14個」ではなく割当要求の内訳である。
+
+| 用途 | 対象・性質 | 要求数 |
+| --- | --- | --- |
+| Firmware | 0x100000000からのRXと包含する全体領域。S/U禁止、Lなし | 2 |
+| ESOS／RT24 | RCPU0 runtimeの2分割、RCPU1 runtime、RCPU用DTB。M/S/Uを禁止するL付き保護 | 4 |
+| RPMI | 0xcac90000のdoorbellページ、0x100800000の共有メモリー | 2 |
+| 割込み | 0xf1800000のAPLIC、0xf1000000のM-mode IMSIC | 2 |
+| UART | 0xd4017000のページ。S/UにもR/Wを許可 | 1 |
+| K3レジスター保存領域 | 0xd4282000のページ | 1 |
+| 追加MMIO | 0xf1810000–0xf181ffff。今回の登録用途は継続確認中 | 1 |
+| fallback | 全アドレスのS/U R/W/X許可。最終entry | 1 |
+| 合計 | | 14 |
+
+OpenSBIコード自身の保護だけで14個を使うわけではない。販売元のESOS、通信、割込み等も含む。
+用途未確定のMMIOを、未使用と推測して削除しない。
+
+### 8.2 Firmware用PMPを共有できる条件
+
+domainのRX／RWメタデータはそのまま残し、実ハードウェアのPMPへの割当だけを共有する。
+次の全条件を満たす場合に限る。
+
+- RXと包含領域がdomain配列で隣接し、同じscratch->fw_startから始まる。
+- RX flagsはM-readable＋M-executableのみ、包含領域はM-readable＋M-writableのみ。
+  MMIO、S/U許可、ENF_PERMISSIONSを含まない。
+- RXの長さはscratch->fw_rw_offsetと一致し、包含領域はscratch->fw_size全体を含む。
+- RXより包含領域のorderが大きく、表現不能や不正なorderは共有前にも拒否する。
+- activeなSmepmp policyはない。MML／MMWP／RLBが有効なら拒否する。
+
+legacy PMPでは両者のS/U権限はともにR/W/Xなし、Lもなしである。
+小さいRXをハードウェアへ別途置かなくても、次に隣接する包含entryが同じS/U禁止を適用する。
+間に他entryがあるケースは対象外なので、別の高優先ルールを露出させない。
+外側の範囲も、他のroot entryの順序も変えない。
+
+この説明はlegacy PMPのS/U保護と、ロックされていない信頼済みM-modeという契約についてである。
+M-modeの内部アクセスが旧RX境界をまたぐ場合の部分一致faultまで同一とは主張しない。
+PMPによるM-modeのRX／RW分離強制が必要な構成は対象外であり、Smepmp用の合成もしない。
+
+### 8.3 同じ配置を計画・書込み・検証・admissionに使う
+
+opensbi/lib/sbi/sbi_hart.cでdomainからcanonicalな配置を一度構築し、
+その配置をプログラムと全CSR readbackで共有する。保持した全entryに加え、
+空きslotがOFFであること、fallbackの位置・権限・物理アドレス範囲も検査する。
+RXを包含するentry自体の実readbackで、小さいRX範囲を覆うS/U禁止も検証する。
+
+後段のadmissionでも同じdomain由来の配置を再構築して全CSRを照合する。
+その結果から得られた正規のroot-owned lock maskだけを、専用のpreflight経路へ渡す。
+既存の汎用k3_a1_preflight_local()はLを許可しないままである。
+未知のL、free slotのL、fallbackのL、不一致、3個未満の空きは引き続き拒否する。
+SM自身の最低3個という契約は変更していない。
+
+今回のdomain構成から期待される割当は次のとおり。これは修正後の実測値ではない。
+
+| 用途 | PMP index | mask |
+| --- | --- | --- |
+| OpenSBIの通常保護 | 0–11 | 0x0fff |
+| Keystone用の空き | 12–14 | 0x7000 |
+| fallback（OpenSBI所有） | 15 | 0x8000 |
+| OpenSBI所有の合計 | 0–11と15 | 0x8fff |
+
+root domain情報は14領域のまま、実PMPは13個となる。4個のRCPU保護のLも維持する。
+
+### 8.4 3個は固定上限ではなく最小条件。Enclaveの能力は別途数える
+
+UTMはUntrusted Memory、Linux側とEnclaveが引数・結果・ocall等を受け渡す非信頼の共有領域。
+EPMはEnclave Private Memory、Enclaveのコードや秘密データを置く保護領域である。
+EnclaveはUTMの内容を検証して使い、EPMの秘密をそのままUTMへ出さない。
+
+
+今回の実装は「Keystoneを3個に制限」しない。OpenSBIが使わない残りをすべてKeystoneへ渡す。
+ただし今回の実機構成では整理後に3個しか残らないため、次の制約がある。
+
+K3版ではSM本体がOpenSBI image内にあり、その保護はOpenSBIが担当する。
+修正前のKeystone側ではOS-wide regionとUTMが末尾slotを切替利用していた。
+しかしK3の後段root fallbackの下では、その共有はOS-wide denyを失わせる（KSB-062）。
+今回の候補ではOS-wide regionを末尾の1個、UTMをそれより前の独立したentryへ分ける。
+従って残り3個で収まるのは、OS用1＋NAPOT UTM用1＋NAPOT EPM用1という最小予算である。
+先に共有を前提に示した「動的領域に二つ」「2 Enclave分」という計算は、安全なK3構成の能力としては撤回する。
+
+| 単一Enclaveの構成 | OS切替用 | UTM（NAPOTの例） | EPM | backing | 合計 |
+| --- | --- | --- | --- | --- | --- |
+| NAPOT EPM、backingなし | 1 | 1 | 1 | 0 | 3 |
+| TOR EPM、backingなし | 1 | 1 | 2 | 0 | 4。3個では不足 |
+| NAPOT EPM＋NAPOT backing | 1 | 1 | 1 | 1 | 4。3個では不足 |
+| TOR EPM＋NAPOT backing | 1 | 1 | 2 | 1 | 5。3個では不足 |
+| TOR EPM＋TOR backing | 1 | 1 | 2 | 2 | 6。3個では不足 |
+
+NAPOTは2のべき乗サイズとそのサイズでの整列が必要で、TORは一般の非ゼロbase領域で2個必要。
+UTMもTORならその分さらに1個必要になる。
+複数Enclaveは各EnclaveのEPM／UTM等の予約が必要なので、3個で2 Enclaveは収まらない。
+この予算は動作保証ではなく、実際の起動・アプリ・SMP等の条件も別に満たす必要がある。
+SMP／HSM／IPI同期、Enclave切替、アプリの他の条件は別途検証する。
+
+現在のallocatorはEnclaveを保持している間、EPM等のslotも予約する。
+停止中だから自動的にslotが他Enclaveへ解放される設計ではない。
+複数Enclave・multimemの目標能力がこの予算を超える場合は、追加の安全な整理、
+領域配置、または割当方式の設計変更が必要である。最低数の検査を外すだけでは能力は増えない。
+
+### 8.5 共有slotの解放処理（KSB-061）とOS／UTMの分離（KSB-062）
+
+上記の資源計算を確認中に、UTM等の一つのregionを解放すると、同じ末尾slotを使う
+OS-wide region等が残っていてもreg_bitmapから予約が消える問題を確認した。
+このままではCREATE／DESTROY反復後のANY割当がOS用slotを再利用し得る。
+解放の参照確認は、一般の共有regionの予約を維持するため修正する。
+K3については次のKSB-062対応でOSとUTMのslot自体を分離する。
+
+解放時には同じpmp_lockを保持して残存regionを調べ、slotを参照するregionが
+なくなった場合だけ予約bitを落とすよう修正する。TORの二つのslotについても同様に扱う。
+この解放処理の修正自体はCSRを書き換えず、既存の所有mask・entry数も増減しない。
+
+KSB-062では、context_switch_to_enclave()がOS-wide denyを設定した後、同じslotへUTM許可を書くと、
+その後ろのOpenSBI fallbackが通常OSメモリーまで許可してしまう。
+K3のCREATEではUTMをPMP_PRI_ANYで独立に予約し、OS-wide denyを保持したままUTMを許可する。
+通常OSメモリーはOS-wide denyに一致し、後段fallbackへ抜けない。
+独立したUTM entryを確保できない場合は、既存の失敗経路でEPM等を解放してCREATEを拒否する。
+非K3の従来のfallbackを持たない構成のUTM割当方針は変更しない。
+rootが明示的に許可するMMIOの扱いは別の既存方針であり、今回のOSメモリーfallback問題と区別する。
+
+### 8.6 検証範囲と次の実機試験
+
+SMの実ソース一式を再コンパイルし、SMあり・なしのOpenSBIをクロスリンクして確認する。
+ここでは対応する実QEMU実行環境・kernel/rootfsがなく、integrationは未実行である。
+模擬SBI／PMP／CSR試験は追加しない。ビルド成功を実機PMP成功と扱わない。
+
+実機RAM起動では次のような診断を確認する。
+
+```text
+[K3-PMP] share firmware deny base=0x100000000 order=18 via order=20
+[K3-PMP] verified shared firmware deny slot=7 base=0x100000000
+K3 PMP: OpenSBI entries=12 fallback=15 Keystone free=3 mask=0x7000
+[K3-PMP] root-config PASS hart=0 root=13 Keystone-free=3
+```
+
+後段でも同じ配置のreadbackを行うため、共有診断等が複数回出る場合がある。
+実際のU-Bootバナー／UARTプロンプトへ進むことを確認してから、別Linux DTとの整合確認へ進む。
+第6.2節のmailbox0〜3のM-mode所有条件は今回の修正でも変わらない。
+
+Enclave試験はU-Boot到達後の別段階であり、少なくとも以下を実ゲスト／実機で確認する。
+
+- 必要数と形状に応じたCREATE／RUN／STOP／RESUME／DESTROY。
+- entry数を使い切ったCREATEの安全な失敗とrollback。
+- 必要なentryを用意した構成で二つのNAPOT Enclaveを保持し、一方をDESTROYして再CREATEする場合の予約保持。
+- 残り3個では2 EnclaveのCREATEが安全に失敗すること。ホスト復帰後の予約が破損しないこと。
+- EnclaveからEPM／UTM／許可した領域の外の通常OSメモリーへアクセスし、拒否されること。
+- TORとbackingを含む構成の不足判定。無理に許可せず、3個で不可能な構成を区別する。
+- 複数Hartでの同期と切替、他Enclaveの保護、既存root-owned entryとLの不変性。
+
+これらの実行結果はまだない。3個で一般的なKeystone機能や複数Enclaveが動くとは記載しない。
+
+### 8.7 開発PCでの再生成と転送
+
+依存とoriginal内の販売元ファイルは既存手順どおり用意する。
+開発PCで最新ソースを取得し、publicリポジトリのルートから実行する。
+
+```bash
+set -euo pipefail
+mkdir -p work/jupiter2-pmp-capacity-retest
+KEYSTONE_SM_TRACE=0 make opensbi JOBS=4 \
+  2>&1 | tee work/jupiter2-pmp-capacity-retest/build.log
+
+python3 scripts/build-jupiter2-ram-boot-image.py \
+  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
+  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
+  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
+  --configuration conf_11 \
+  --esos-configuration conf_dual \
+  --board k3-pico-itx \
+  --variant keystone \
+  --opensbi-reserve-bytes 0x00100000 \
+  --max-download-bytes 0x20000000 \
+  --output work/jupiter2-ram-boot/keystone-pmp-capacity-retest
+```
+
+1 MiBは既存の候補値を使用する例で、再ビルドの領域と配置を確認する。転送上限512 MiBは実測値。
+出力先が既存なら別名を指定する。NOR更新は行わず、UARTログを保存してFDLへ入り、PCで実行する。
+
+```bash
+sudo fastboot devices
+sudo fastboot stage work/jupiter2-ram-boot/keystone-pmp-capacity-retest/images/FSBL.bin
+sudo fastboot continue
+```
+
+DDR初期化とUSB再認識を確認してから、統合FITを転送する。
+
+```bash
+sudo fastboot -s HW4MPK3321280144 stage \
+  work/jupiter2-ram-boot/keystone-pmp-capacity-retest/images/ram-boot-keystone.itb
+sudo fastboot -s HW4MPK3321280144 continue
+```
+
+UARTでPMP診断と次段への進行を確認する。U-Bootがfastbootへ入った場合だけ、
+PCのgetvar versionへの応答を確認し、追加continueでUARTプロンプトへ進む。
+PMP途中の拒否なら追加continueでは解決しない。最初の試験はU-Boot到達までとする。
+
+### 8.8 今回のビルド記録（2026-11-21）
+
+SMの30 translation unitsを実クロスコンパイルし、OpenSBIとリンクした。
+RISC-V ELF、SMシンボル、enclave mtvecの4-byte整列を確認した。
+SMなしのk3_defconfigもクロスリンク成功。実機のPMP／OS保護／複数Enclaveの試験は未実行。
+
+| 構成 | BINサイズ | BIN SHA-256 |
+| --- | --- | --- |
+| K3 Keystone audit（SMあり・multimemコードを含む） | 270248 bytes | 2ae3fa9c2fc4c28446955f864ea4b76c4980e70cb005c8a15ac82504127436ed |
+| k3_defconfig（SMなし） | 269600 bytes | 941f32c66ebf89e2fb6a3934ebee8633735a0155022ce960d12eb61c76bd3093 |
+
+ビルドでmultimemコードを含めたことは、実機のPMP予算でmultimemを使用できるという意味ではない。

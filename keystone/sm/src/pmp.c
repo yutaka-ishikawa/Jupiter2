@@ -687,32 +687,54 @@ static int napot_region_init(uintptr_t start, uint64_t size, enum pmp_priority p
   return SBI_ERR_SM_PMP_SUCCESS;
 }
 
+/* Requires pmp_lock. BOTTOM regions intentionally share one register;
+ * freeing one descriptor must not release the OS/other UTM reservation.
+ */
+static bool pmp_register_has_region(pmpreg_id reg_idx)
+{
+    region_id i;
+    pmpreg_id other;
+
+    for (i = 0; i < PMP_MAX_N_REGION; i++) {
+	if (!is_pmp_region_valid(i)) {
+	    continue;
+	}
+	other = region_register_idx(i);
+	if (other == reg_idx ||
+	    (region_needs_two_entries(i) && other - 1 == reg_idx)) {
+	    return true;
+	}
+    }
+    return false;
+}
+
 int pmp_region_free_atomic(int region_idx)
 {
-  /* Releasing the last Enclave region does NOT prove the PMP is INACTIVE.
-   * Only a separately verified complete protection teardown may do so. */
-  if (k3_keystone_pmp_assert_active())
-    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "HSM Start in progress");
+    pmpreg_id reg_idx;
+    bool two_entries;
 
-  spin_lock(&pmp_lock);
+    /* Region teardown alone does not prove global PMP inactivity. */
+    if (k3_keystone_pmp_assert_active()) {
+	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "HSM Start in progress");
+    }
+    spin_lock(&pmp_lock);
+    if (!is_pmp_region_valid(region_idx)) {
+	spin_unlock(&pmp_lock);
+	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index");
+    }
 
-  if(!is_pmp_region_valid(region_idx))
-  {
+    reg_idx = region_register_idx(region_idx);
+    two_entries = region_needs_two_entries(region_idx);
+    UNSET_BIT(region_def_bitmap, region_idx);
+    if (!pmp_register_has_region(reg_idx)) {
+	UNSET_BIT(reg_bitmap, reg_idx);
+    }
+    if (two_entries && !pmp_register_has_region(reg_idx - 1)) {
+	UNSET_BIT(reg_bitmap, reg_idx - 1);
+    }
+    region_clear_all(region_idx);
     spin_unlock(&pmp_lock);
-    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index");
-  }
-
-  pmpreg_id reg_idx = region_register_idx(region_idx);
-  UNSET_BIT(region_def_bitmap, region_idx);
-  UNSET_BIT(reg_bitmap, reg_idx);
-  if(region_needs_two_entries(region_idx))
-    UNSET_BIT(reg_bitmap, reg_idx - 1);
-
-  region_clear_all(region_idx);
-
-  spin_unlock(&pmp_lock);
-
-  return SBI_ERR_SM_PMP_SUCCESS;
+    return SBI_ERR_SM_PMP_SUCCESS;
 }
 
 int pmp_region_init(uintptr_t start, uint64_t size, enum pmp_priority priority, int* rid, int allow_overlap)

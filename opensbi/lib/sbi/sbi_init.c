@@ -80,6 +80,7 @@ static void k3_keystone_a1_post_pmp_before_smode(struct sbi_scratch *scratch,
 	{
 		struct k3_a1_csr_measured measured = {0};
 		struct k3_a1_local_candidate candidate = {0};
+		unsigned short verified_root_locks = 0;
 		unsigned int i;
 		measured.count = snapshot.pmp_count;
 		measured.granularity = snapshot.pmp_log2gran;
@@ -91,7 +92,19 @@ static void k3_keystone_a1_post_pmp_before_smode(struct sbi_scratch *scratch,
 			measured.entry[i].addr = snapshot.entry[i].addr;
 			measured.entry[i].log2len = snapshot.entry[i].log2len;
 		}
-		rc = k3_a1_preflight_local(&measured, &candidate);
+		/* Authorize no lock merely because it appeared in the snapshot.
+		 * First revalidate every actual CSR against the domain-derived
+		 * canonical root mapping, fallback and unused Keystone slots.
+		 */
+		rc = sbi_hart_keystone_a1_verify_root_pmp(scratch,
+						     &verified_root_locks);
+		if (rc) {
+			sbi_printf("K3 A1-E: root PMP readback failed on Hart %u: %d\n",
+				   hartid, rc);
+			sbi_hart_hang();
+		}
+		rc = k3_a1_preflight_local_with_root_locks(&measured, &candidate,
+							 verified_root_locks);
 		if (rc) {
 			sbi_printf("K3 A1-E: local PMP shape rejected on Hart %u: %d\n",
 			           hartid, rc);

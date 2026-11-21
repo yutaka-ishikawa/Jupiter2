@@ -83,10 +83,10 @@
 | KSB-056 | PMU FW counter探索失敗時の配列index | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-057 | RAM FIT作成が共通ESOS構成・LZOを扱えない | 本リポジトリの実機導入ツール | 修正済・ホスト検査のみ |
 | KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 粒度検査通過を実機確認・後続KSB-059で停止 |
-| KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | 要対応・実機再現 |
-| KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | ソース確認・未修正 |
-| KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | ソース確認・未修正 |
-| KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | ソース確認・未修正 |
+| KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | 修正候補・クロスリンク済・実機再試験待ち |
+| KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | 修正候補・クロスリンク済・実機未検証 |
+| KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | 修正候補・SMコンパイル済・実機未検証 |
+| KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -881,8 +881,10 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   OpenSBI側のslot計画とSM側のadmissionはいずれも最低3個を要求し、次段へ進めない。
 - 分類・由来：K3実機のdomain構成と現行16-PMP割当契約の不整合・移植制約。
   拒否自体は設計どおりであり、上流Keystoneの欠陥やPMP検出不良と断定しない。
-- 状態：未修正。domainの保護を維持したハードウェア上の冗長entry整理等を検討する。
-  最低数の一方だけを変更する、必要領域を削除する、L付き保護を外す方法は採らない。
+- 修正候補：同じfw_startから始まる隣接したRXと包含RW領域に限り、flags・実行時サイズ・
+  legacy policyを確認し、同じS/U禁止を一つのハードウェアentryで表す。domain記録は残す。
+  canonical配置を計画・書込み・全CSR readback・admissionで共有し、最低3個は維持する。
+  今回はOpenSBI用13個、Keystone用3個の予算。一般的なEnclave機能や同時実行数の保証ではない。
 - 検証限界：今回の実機ログではslot計画の拒否まで。PMP書込み・readback、U-Boot、
   Linux、Enclaveの成功は未確認。詳細：[PMP実機再試験結果](jupiter2-pmp-granularity-issue.md#7-修正後の実機結果粒度を通過しpmp容量で停止ksb-059)。
 
@@ -900,7 +902,9 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
 - 方針：Lを消さず、汎用preflightの既定の拒否も維持する。実rootの全entry・fallback・
   未使用slotをreadbackで照合して得た正規ロックmaskだけを、K3起動経路で明示的に認める。
   不明なL、free slotやfallbackのL、不一致は引き続き拒否する。
-- 状態：未修正。実機での当該gate通過は未検証。
+- 修正候補：domain由来の全entry・fallback・free slotを実CSRで再検証して得たlock maskのみ、
+  専用preflight経路へ渡す。既定preflightはLを許可しないまま。未知のlock・不一致は拒否。
+  実機での当該gate通過は未検証。
 
 
 ### KSB-061: 共有bottom PMP slotの解放が残るOS／UTM予約を失う
@@ -912,7 +916,9 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
 - 影響：UTMのDESTROY等の後もOS-wide regionが残るのに、ANY割当がそのslotを空きと判断する。
   少数slotでCREATE／DESTROYを繰り返す経路や複数Enclaveの資源管理に影響し得る。
 - 由来：本リポジトリで取り込んだPMP allocatorの参照管理の不足。上流最新版との一致は未確認。
-- 状態：ソースで確認、実機での当該破綻は未再現。解放時に残存regionのslot参照を確認する修正を進める。
+- 修正候補：pmp_lock下で、解放するregionの定義を外した後に残存regionを走査し、
+  同じslot（TORの下端slotも含む）への参照がなくなった場合だけ予約bitを消す。
+  実機での当該破綻と修正後のCREATE／DESTROY反復は未再現・未検証。
 
 
 ### KSB-062: K3でOS-wide denyとUTMのslot共用が後段fallbackと両立しない
@@ -928,4 +934,11 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   必要数がない場合はCREATEを拒否する。root fallbackの所有を奪ったり、最低数を下げたりしない。
 - 資源計算：K3ではOS用1＋UTM用1＋EPM用1以上が必要。残り3個ならNAPOT EPM一つの最小構成で、
   TOR EPM、backing、複数Enclaveにはさらにentryが必要。先の共有前提の上限計算は訂正する。
-- 状態：未修正。実機の保護・複数Hart・Enclave実行は未検証。
+- 修正候補：K3に限りUTMをPMP_PRI_ANYへ変更し、OS-wide denyとは別の前段slotを予約する。
+  entry不足は既存のCREATE rollbackへ戻す。non-K3のUTM方針とroot-owned fallbackは変更しない。
+  実機のOSメモリー保護・複数Hart・Enclave実行は未検証。
+
+KSB-059〜062の今回の候補実装は本更新と同じ変更系列。SM 30単位の実クロスコンパイルと
+SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機試験は未実施で、
+ビルド成功を保護成功と扱わない。詳細：[資源計算と候補実装](jupiter2-pmp-granularity-issue.md#8-ksb-059060061062の修正候補とenclave数の制約)。
+

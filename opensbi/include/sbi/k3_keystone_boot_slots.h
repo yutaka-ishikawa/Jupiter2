@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
-/* Jupiter2 QEMU-only deterministic 16-PMP boot slot layout.
- * Every root-domain entry (denies and grants) precedes Keystone free slots;
+/* K3 deterministic 16-PMP boot slot layout.
+ * Every effective root mapping (denies and grants) precedes Keystone slots;
+ * the caller preserves domain metadata and proves any shared hardware entry;
  * the root-domain universal S/U allow is always index 15.
  * This is a slot plan, not a substitute for hardware CSR readback.
  */

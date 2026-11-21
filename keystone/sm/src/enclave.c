@@ -423,6 +423,11 @@ create_enclave_internal(unsigned long *eidptr,
     int memid;
     int pmp_rc;
     struct runtime_params_t params;
+#ifdef KEYSTONE_K3_PMP_N_REG
+    const enum pmp_priority utm_priority = PMP_PRI_ANY;
+#else
+    const enum pmp_priority utm_priority = PMP_PRI_BOTTOM;
+#endif
 
     /* No mutation or EID allocation is permitted before protection and RoT
      * have been established. This is required for K3 QEMU stage 20. */
@@ -477,8 +482,12 @@ create_enclave_internal(unsigned long *eidptr,
 	goto free_backing_region;
     }
 
-    // create PMP region for shared memory
-    if (pmp_region_init_atomic(utbase, utsize, PMP_PRI_BOTTOM, &shared_region,
+    /* K3 retains an OpenSBI-owned all-range allow after the OS-wide deny.
+     * UTM must have its own earlier entry; reusing the OS deny slot would
+     * expose ordinary host memory through that later root fallback.
+     * Failure to allocate a separate entry must fail CREATE, not weaken it.
+     */
+    if (pmp_region_init_atomic(utbase, utsize, utm_priority, &shared_region,
 			       0)) {
 	goto free_region;
     }

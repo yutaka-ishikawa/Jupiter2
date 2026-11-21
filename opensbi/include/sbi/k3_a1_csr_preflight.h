@@ -40,90 +40,130 @@ struct k3_a1_local_candidate {
  * image. No caller may treat PF_OK as permission to transfer ownership.
  * If anything is ambiguous, reject and preserve the existing build gate.
  */
-static inline int k3_a1_preflight_local(
- const struct k3_a1_csr_measured *m, struct k3_a1_local_candidate *out)
+/* verified_root_locks is valid only after a full domain-derived CSR
+ * readback on this Hart. A caller-supplied mask alone is not evidence.
+ * The default wrapper below authorizes no locks at all.
+ */
+static inline int k3_a1_preflight_local_with_root_locks(
+    const struct k3_a1_csr_measured *m, struct k3_a1_local_candidate *out,
+    uint16_t verified_root_locks)
 {
- unsigned int i, old=K3_A1_CSR_MAX, fallback;
- uint16_t fw=0, free_mask=0;
- if (!m || !out || m->count < 5 || m->count > K3_A1_CSR_MAX ||
-     m->granularity > 64 ||
-     m->pmp_addrbits == 0 || m->pmp_addrbits > 62)
-  return K3_A1_PF_BAD_INPUT;
+    unsigned int i, old = K3_A1_CSR_MAX, fallback;
+    uint16_t fw = 0, free_mask = 0, actual_locks = 0;
+
+    if (!m || !out || m->count < 5 || m->count > K3_A1_CSR_MAX ||
+	m->granularity > 64 || m->pmp_addrbits == 0 || m->pmp_addrbits > 62) {
+	return K3_A1_PF_BAD_INPUT;
+    }
 #ifdef K3_QEMU_PMP16
- /* Emulator contract: all 16 harts expose exactly 16 PMP entries.
-  * This is deliberately not the physical K3 A100 PMP count. */
- if (m->count != 16U) return K3_A1_PF_BAD_INPUT;
+    if (m->count != 16U) {
+	return K3_A1_PF_BAD_INPUT;
+    }
 #endif
- /* Check *active* mode bits. Having the Smepmp extension is not denial. */
- if (m->mseccfg_valid && (m->mseccfg & K3_A1_CSR_MSECCFG_POLICY))
-  return K3_A1_PF_ACTIVE_SMEPMP;
- for (i=0;i<m->count;i++) {
-  const struct k3_a1_csr_measured_entry *e=&m->entry[i];
-  unsigned int mode=(unsigned int)e->prot & K3_A1_CSR_A;
-  if (e->prot & ~(uint64_t)0xffU) return K3_A1_PF_BAD_INPUT;
-  if (mode!=0 && mode!=0x08U && mode!=0x10U && mode!=0x18U)
-   return K3_A1_PF_BAD_INPUT;
-  /* pmp_get() can decode a full-coverage NAPOT as order 57
-   * on a machine with 54 implemented PMPADDR bits. Comparing against
-   * RV64 XLEN (64) incorrectly rejects this valid fallback.
-   */
-  if (mode==K3_A1_CSR_NAPOT && e->addr==0 &&
-      e->log2len >= m->pmp_addrbits + 2U &&
-      ((unsigned int)e->prot & K3_A1_CSR_RWX)==K3_A1_CSR_RWX) {
-   if (old!=K3_A1_CSR_MAX) return K3_A1_PF_AMBIGUOUS;
-   if (e->prot & K3_A1_CSR_LOCK) return K3_A1_PF_LOCKED;
-   old=i;
-  }
- }
- if (old==K3_A1_CSR_MAX) return K3_A1_PF_NO_GLOBAL_ALLOW;
- /* A1-E root-domain layout: all OpenSBI PMP entries (grants or denies),
-  * then untouched Keystone slots, with all-range fallback last. */
- if (old == m->count - 1U) {
-  unsigned int seen_free = 0;
-  for (i=0; i<old; i++) {
-   const struct k3_a1_csr_measured_entry *e=&m->entry[i];
-   if (e->prot & K3_A1_CSR_LOCK) return K3_A1_PF_LOCKED;
-   if (e->prot & K3_A1_CSR_A) {
-    if (seen_free)
-     return K3_A1_PF_SHADOWED;
-    fw |= (uint16_t)(1U << i);
-   } else {
-    seen_free = 1;
-    free_mask |= (uint16_t)(1U << i);
-   }
-  }
-  if (!fw || __builtin_popcount((unsigned int)free_mask)<3)
-   return K3_A1_PF_NO_SLOTS;
-  out->old_allow = old;
-  out->fallback = old;
-  out->firmware_entries = fw;
-  out->free_keystone_entries = free_mask;
-  return K3_A1_PF_OK;
- }
- /* Denies must take priority over the old broad allow, and all active
-  * entries after it would be unknown aliases for the Keystone PMP plan. */
- for (i=0;i<old;i++) {
-  const struct k3_a1_csr_measured_entry *e=&m->entry[i];
-  if (!((unsigned int)e->prot & K3_A1_CSR_A) ||
-      (e->prot & K3_A1_CSR_RWX)) return K3_A1_PF_SHADOWED;
-  fw |= (uint16_t)(1U<<i);
- }
- if (!fw) return K3_A1_PF_SHADOWED;
- for (i=old+1;i<m->count;i++) {
-  const struct k3_a1_csr_measured_entry *e=&m->entry[i];
-  if ((e->prot & K3_A1_CSR_A) || (e->prot & K3_A1_CSR_LOCK))
-   return K3_A1_PF_NO_SLOTS;
-  free_mask |= (uint16_t)(1U<<i);
- }
- fallback=m->count-1;
- /* Need a fallback after all Keystone deny slots and at least two
-  * independent slots for SM + dynamic Enclave denial. */
- if (fallback <= old+2 || __builtin_popcount((unsigned int)free_mask)<3)
-  return K3_A1_PF_NO_SLOTS;
- out->old_allow=old;
- out->fallback=fallback;
- out->firmware_entries=fw;
- out->free_keystone_entries=free_mask;
- return K3_A1_PF_OK;
+    if (m->mseccfg_valid && (m->mseccfg & K3_A1_CSR_MSECCFG_POLICY)) {
+	return K3_A1_PF_ACTIVE_SMEPMP;
+    }
+    for (i = 0; i < m->count; i++) {
+	const struct k3_a1_csr_measured_entry *e = &m->entry[i];
+	unsigned int mode = (unsigned int)e->prot & K3_A1_CSR_A;
+
+	if (e->prot & ~(uint64_t)0xffU) {
+	    return K3_A1_PF_BAD_INPUT;
+	}
+	if (mode != 0 && mode != 0x08U && mode != 0x10U && mode != 0x18U) {
+	    return K3_A1_PF_BAD_INPUT;
+	}
+	if (e->prot & K3_A1_CSR_LOCK) {
+	    if (!mode) {
+		return K3_A1_PF_LOCKED;
+	    }
+	    actual_locks |= (uint16_t)(1U << i);
+	}
+	/* Accept full physical PMP coverage, not only RV64 order 64. */
+	if (mode == K3_A1_CSR_NAPOT && e->addr == 0 &&
+	    e->log2len >= m->pmp_addrbits + 2U &&
+	    ((unsigned int)e->prot & K3_A1_CSR_RWX) == K3_A1_CSR_RWX) {
+	    if (old != K3_A1_CSR_MAX) {
+		return K3_A1_PF_AMBIGUOUS;
+	    }
+	    if (e->prot & K3_A1_CSR_LOCK) {
+		return K3_A1_PF_LOCKED;
+	    }
+	    old = i;
+	}
+    }
+    if (actual_locks != verified_root_locks) {
+	return K3_A1_PF_LOCKED;
+    }
+    if (old == K3_A1_CSR_MAX) {
+	return K3_A1_PF_NO_GLOBAL_ALLOW;
+    }
+    if (old == m->count - 1U) {
+	unsigned int seen_free = 0;
+
+	for (i = 0; i < old; i++) {
+	    const struct k3_a1_csr_measured_entry *e = &m->entry[i];
+
+	    if (e->prot & K3_A1_CSR_A) {
+		if (seen_free) {
+		    return K3_A1_PF_SHADOWED;
+		}
+		fw |= (uint16_t)(1U << i);
+	    } else {
+		seen_free = 1;
+		free_mask |= (uint16_t)(1U << i);
+	    }
+	}
+	if (!fw || __builtin_popcount((unsigned int)free_mask) < 3) {
+	    return K3_A1_PF_NO_SLOTS;
+	}
+	out->old_allow = old;
+	out->fallback = old;
+	out->firmware_entries = fw;
+	out->free_keystone_entries = free_mask;
+	return K3_A1_PF_OK;
+    }
+    /* Root locks are authorized only in the canonical last-fallback
+     * layout. Retain the stricter legacy alternative for other callers.
+     */
+    if (verified_root_locks) {
+	return K3_A1_PF_LOCKED;
+    }
+    for (i = 0; i < old; i++) {
+	const struct k3_a1_csr_measured_entry *e = &m->entry[i];
+
+	if (!((unsigned int)e->prot & K3_A1_CSR_A) ||
+	    (e->prot & K3_A1_CSR_RWX)) {
+	    return K3_A1_PF_SHADOWED;
+	}
+	fw |= (uint16_t)(1U << i);
+    }
+    if (!fw) {
+	return K3_A1_PF_SHADOWED;
+    }
+    for (i = old + 1; i < m->count; i++) {
+	const struct k3_a1_csr_measured_entry *e = &m->entry[i];
+
+	if ((e->prot & K3_A1_CSR_A) || (e->prot & K3_A1_CSR_LOCK)) {
+	    return K3_A1_PF_NO_SLOTS;
+	}
+	free_mask |= (uint16_t)(1U << i);
+    }
+    fallback = m->count - 1;
+    if (fallback <= old + 2 ||
+	__builtin_popcount((unsigned int)free_mask) < 3) {
+	return K3_A1_PF_NO_SLOTS;
+    }
+    out->old_allow = old;
+    out->fallback = fallback;
+    out->firmware_entries = fw;
+    out->free_keystone_entries = free_mask;
+    return K3_A1_PF_OK;
+}
+
+static inline int k3_a1_preflight_local(
+    const struct k3_a1_csr_measured *m, struct k3_a1_local_candidate *out)
+{
+    return k3_a1_preflight_local_with_root_locks(m, out, 0);
 }
 #endif
