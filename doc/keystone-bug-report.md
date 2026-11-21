@@ -938,7 +938,7 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   entry不足は既存のCREATE rollbackへ戻す。non-K3のUTM方針とroot-owned fallbackは変更しない。
   実機のOSメモリー保護・複数Hart・Enclave実行は未検証。
 
-KSB-059〜062の今回の候補実装は本更新と同じ変更系列。SM 30単位の実クロスコンパイルと
+KSB-059〜062の候補実装：[4f976074681bd1377de9af961ea0ab70a3670984](https://github.com/yutaka-ishikawa/public/commit/4f976074681bd1377de9af961ea0ab70a3670984)。SM 30単位の実クロスコンパイルと
 SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機試験は未実施で、
 ビルド成功を保護成功と扱わない。詳細：[資源計算と候補実装](jupiter2-pmp-granularity-issue.md#8-ksb-059060061062の修正候補とenclave数の制約)。
 
