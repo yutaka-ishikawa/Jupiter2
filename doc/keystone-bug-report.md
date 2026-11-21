@@ -85,6 +85,7 @@
 | KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 粒度検査通過を実機確認・後続KSB-059で停止 |
 | KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | 要対応・実機再現 |
 | KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | ソース確認・未修正 |
+| KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | ソース確認・未修正 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -899,3 +900,15 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   未使用slotをreadbackで照合して得た正規ロックmaskだけを、K3起動経路で明示的に認める。
   不明なL、free slotやfallbackのL、不一致は引き続き拒否する。
 - 状態：未修正。実機での当該gate通過は未検証。
+
+
+### KSB-061: 共有bottom PMP slotの解放が残るOS／UTM予約を失う
+
+- 登録日：2026-11-21。対象：keystone/sm/src/pmp.cのpmp_region_free_atomic()。
+- 証拠：NAPOTのPMP_PRI_BOTTOMはslotを複数regionで共有でき、K3のOS-wide regionと
+  各EnclaveのUTMは同じ末尾slotを使う。一方freeは一つのregionを解放するときに、
+  同じslotを参照する他のregionを確認せずreg_bitmapを消す。
+- 影響：UTMのDESTROY等の後もOS-wide regionが残るのに、ANY割当がそのslotを空きと判断する。
+  少数slotでCREATE／DESTROYを繰り返す経路や複数Enclaveの資源管理に影響し得る。
+- 由来：本リポジトリで取り込んだPMP allocatorの参照管理の不足。上流最新版との一致は未確認。
+- 状態：ソースで確認、実機での当該破綻は未再現。解放時に残存regionのslot参照を確認する修正を進める。
