@@ -86,6 +86,7 @@
 | KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | 要対応・実機再現 |
 | KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | ソース確認・未修正 |
 | KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | ソース確認・未修正 |
+| KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | ソース確認・未修正 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -912,3 +913,19 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   少数slotでCREATE／DESTROYを繰り返す経路や複数Enclaveの資源管理に影響し得る。
 - 由来：本リポジトリで取り込んだPMP allocatorの参照管理の不足。上流最新版との一致は未確認。
 - 状態：ソースで確認、実機での当該破綻は未再現。解放時に残存regionのslot参照を確認する修正を進める。
+
+
+### KSB-062: K3でOS-wide denyとUTMのslot共用が後段fallbackと両立しない
+
+- 登録日：2026-11-21。対象：keystone/sm/src/enclave.cのCREATEとswitch_to_enclave()、
+  sm.cのosm_init()、K3 root fallbackの配置。
+- 証拠：OS-wide regionとUTMはPMP_PRI_BOTTOMで同一のKeystone末尾slotへ割当てる。
+  切替ではosm_pmp_set(PMP_NO_PERM)の後にUTMを許可するため、同slotの全域denyがUTM窓へ置換される。
+  K3にはその後ろにroot-owned全域S/U allow（index15）が残り、UTM外の通常OSメモリーも許可され得る。
+- 分類・影響：本リポジトリのK3統合の保護契約不整合。実機で攻撃を実行した証拠はなく、
+  ソース上のslot aliasとfirst-match規則から確認した。既存rootの明示的MMIO grantとは別の問題。
+- 方針：K3のUTMはOS-wide denyより前の独立したKeystone-owned slotへ割当てる。
+  必要数がない場合はCREATEを拒否する。root fallbackの所有を奪ったり、最低数を下げたりしない。
+- 資源計算：K3ではOS用1＋UTM用1＋EPM用1以上が必要。残り3個ならNAPOT EPM一つの最小構成で、
+  TOR EPM、backing、複数Enclaveにはさらにentryが必要。先の共有前提の上限計算は訂正する。
+- 状態：未修正。実機の保護・複数Hart・Enclave実行は未検証。
