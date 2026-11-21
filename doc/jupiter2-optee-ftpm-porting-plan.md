@@ -26,7 +26,9 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
 ## 第1・第2段階の進捗
 
 - OpenSBIのMPXY共有メモリーサイズ修正（KSB-045、`d32afa86c`）を取り込み、
-  K3 Keystone構成の `fw_dynamic.bin` をビルドした。
+  K3 Keystone構成の `fw_dynamic.bin` をビルドした。K3 QEMUで16 hartの
+  ファームウェア起動を試し、OpenSBI v1.6のバナーとSMタイマー初期化ログを確認した。
+  この試行にはLinuxとOP-TEE payloadを含めていない。
 - K3用OP-TEE本体を `2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59` からRV64向けに
   ビルドした。[同居検証プログラムと検証用TA](../verifications/optee-coexistence/README.md)
   を追加し、RV64向けのホスト実行ファイルと署名済みTAを生成した。
@@ -59,7 +61,7 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
 - `verifications/` にLinux側テストプログラムと検証用TAを追加する。
   同じプロセスでTAセッションとKeystone Enclaveを開き、TAへの入力と応答を照合し、
   Enclave呼出しと交互に反復する。必要なRPC・OCALL後の復帰も確認する。
-- 1 hartの逐次試験から複数hartの並行試験へ進む。共有領域の正常アクセス、
+- 現行K3 QEMUは16 hart構成を要求する。まず単一hartに試験プロセスを固定して逐次試験を行い、複数hartの並行試験へ進む。共有領域の正常アクセス、
   保護領域の隔離、通信・遷移の失敗時の復帰、既存Keystoneの回帰を確認する。
   試験は実K3 QEMUゲスト、Linuxドライバー、OpenSBI/SM、EnclaveとTAを通して実行する。
 - **成果物・完了条件**。テストソース、ビルド・ゲスト内実行手順、期待値、
