@@ -859,7 +859,7 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
 - 検証：SMありのK3 audit構成とSMなしk3_defconfigの実クロスリンク成功、
   RISC-V ELF・SMシンボル・mtvec整列を確認。模擬PMPテストは追加していない。
   実機でのPMP成功、U-Boot／Linux／Enclave到達、実QEMU integration PASSは未検証。
-- 修正履歴：本項の候補実装を含むコミットで登録元を変更。初回の実機失敗記録と
+- 修正履歴：候補実装は[995c9c1ad9b765ed9a66c1186f96023f1a3779ad](https://github.com/yutaka-ishikawa/public/commit/995c9c1ad9b765ed9a66c1186f96023f1a3779ad)。初回の実機失敗記録と
   調査計画のコミットは384e4b1e2cc6f14de313f6138617417a47b1c7b4。
 - 詳細・検証計画：[Jupiter2 PMP粒度問題](jupiter2-pmp-granularity-issue.md)。
 
