@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -29,6 +30,72 @@ SETTINGS = {
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def elf_load_map(data):
+    """Inspect the actual RISC-V executable consumed by the remoteproc loader."""
+    if len(data) < 64 or data[:7] != b'\x7fELF\x02\x01\x01':
+        raise ValueError('RCPU firmware must be little-endian ELF64')
+    header = struct.unpack_from('<HHIQQQIHHHHHH', data, 16)
+    kind, machine, version, entry, phoff = header[:5]
+    ehsize, phsize, count = header[7:10]
+    if (kind != 2 or machine != 243 or version != 1 or ehsize != 64
+            or phsize != 56 or not 0 < count <= 1024
+            or phoff < 64 or phoff + phsize * count > len(data)):
+        raise ValueError('invalid/unsupported RISC-V ELF executable headers')
+    segments = []
+    for index in range(count):
+        values = struct.unpack_from('<IIQQQQQQ', data, phoff + phsize * index)
+        kind, flags, offset, virtual, physical, filesz, memsz, align = values
+        if kind != 1:
+            continue
+        if (filesz > memsz or offset + filesz > len(data)
+                or physical + memsz > 1 << 64 or virtual + memsz > 1 << 64):
+            raise ValueError('invalid RCPU ELF LOAD extent')
+        segments.append({'virtual': virtual, 'physical': physical,
+                         'file_bytes': filesz, 'memory_bytes': memsz,
+                         'flags': flags, 'alignment': align})
+    # K3 remoteproc loads p_paddr, but starts the literal DT fw_boot_entry.
+    # Do not silently treat a translated virtual entry as a physical address.
+    if entry % 2 or not any(s['flags'] & 1 and s['virtual'] == s['physical']
+                           and s['physical'] <= entry < s['physical'] + s['file_bytes']
+                           for s in segments):
+        raise ValueError('RCPU ELF entry is not in an identity-mapped executable LOAD')
+    return {'entry': entry, 'entry_hex': hex(entry), 'segments': segments,
+            'elf_bytes': len(data), 'elf_sha256': hashlib.sha256(data).hexdigest()}
+
+
+def set_rcpu_entries(dts, firmwares):
+    for core, info in enumerate(firmwares):
+        pattern = (r'(\brcpu@' + str(core) + r'\s*\{[^{}]*?'
+                   r'\bfw_boot_entry\s*=\s*)<([^>]+)>')
+        match = re.search(pattern, dts)
+        if not match or len(re.findall(pattern, dts)) != 1:
+            raise ValueError(f'expected one fixed-source rcpu@{core}/fw_boot_entry')
+        old = re.findall(r'0x[0-9a-fA-F]+|\d+', match[2])
+        if len(old) != 2:
+            raise ValueError('expected two-cell RCPU boot entry')
+        info['source_dt_entry'] = (int(old[0], 0) << 32) | int(old[1], 0)
+        info['source_dt_entry_hex'] = hex(info['source_dt_entry'])
+        entry = info['entry']
+        dts = re.sub(pattern, lambda m: m[1] + f'<0x{entry >> 32:x} 0x{entry & 0xffffffff:x}>',
+                     dts, count=1)
+    return dts
+
+
+def verify_rcpu_dtb(fit, path, firmwares):
+    root, _ = fit.parse_fdt(path.read_bytes())
+
+    def find(node, name):
+        result = [node] if node.name == name else []
+        for child in node.children.values():
+            result.extend(find(child, name))
+        return result
+
+    for core, info in enumerate(firmwares):
+        nodes = find(root, f'rcpu@{core}')
+        if len(nodes) != 1 or fit.number(nodes[0].props['fw_boot_entry']) != info['entry']:
+            raise ValueError(f'compiled SPL DT boot entry differs from rcpu{core} ELF')
 
 
 def configure(text):
@@ -94,13 +161,29 @@ def build(args):
     spec = importlib.util.spec_from_file_location('jupiter2_fit', packager)
     fit = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fit)
-    root, _, _ = fit.read_fit(args.esos_itb)
+    root, esos_blob, esos_total = fit.read_fit(args.esos_itb)
     configs = root.children['configurations'].children
     if args.esos_configuration not in configs:
         raise ValueError('selected ESOS configuration is missing')
     names = fit.strings(configs[args.esos_configuration].props['loadables'])
     if not {'rcpu0-fw', 'rcpu1-fw', 'rcpu-data-null'}.issubset(names):
         raise ValueError('reference workflow requires both RCPU firmware images and rcpu-data-null')
+    firmwares = []
+    for core in range(2):
+        name = f'rcpu{core}-fw'
+        node = root.children['images'].children[name]
+        payload = fit.image_data(node, esos_blob, esos_total)
+        compression = fit.string(node, 'compression')
+        if compression == 'lzo':
+            if not shutil.which('lzop'):
+                raise ValueError('RCPU ELF inspection requires lzop on PATH')
+            payload = subprocess.run(['lzop', '-d', '-c'], input=payload,
+                                     capture_output=True, check=True).stdout
+        elif compression != 'none':
+            raise ValueError('unsupported RCPU firmware compression')
+        info = elf_load_map(payload)
+        info['name'] = name
+        firmwares.append(info)
     args.output.mkdir(parents=True)
     source, records = args.output / 'source', args.output / 'records'
     records.mkdir()
@@ -121,6 +204,9 @@ def build(args):
     diagnostic_patch = Path(__file__).resolve().parents[1] / 'patches/jupiter2-reference-ram-boot-diagnostics.patch'
     run(['git', 'apply', '--check', diagnostic_patch], cwd=source)
     run(['git', 'apply', diagnostic_patch], cwd=source)
+    spl_dts = source / 'arch/riscv/dts/k3_spl.dts'
+    spl_dts.write_text(set_rcpu_entries(spl_dts.read_text(), firmwares))
+    (records / 'rcpu-elf.json').write_text(json.dumps(firmwares, indent=2) + '\n')
     # Vendor config.mk writes to srctree, so each run uses its own checkout.
     shutil.copyfile(args.opensbi_bin, source / 'board/spacemit/k3/fw_dynamic.bin')
     defconfig = source / 'configs/k3_defconfig'
@@ -141,6 +227,7 @@ def build(args):
                 'esos_configuration': args.esos_configuration,
                 'inputs': {str(p): sha(p) for p in (args.opensbi_bin, args.esos_itb)},
                 'settings': SETTINGS, 'diagnostic_patch_sha256': sha(diagnostic_patch),
+                'rcpu_firmwares': firmwares,
                 'hardware_verified': False, 'status': 'prepared'}
     (records / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     if args.prepare_only:
@@ -160,6 +247,12 @@ def build(args):
     run(make + [f'-j{args.jobs}', 'all'], cwd=source)
     verify_config(source / '.config')
     verify_fsbl(source / 'FSBL.bin')
+    compiled_dtb = source / 'spl/u-boot-spl.dtb'
+    verify_rcpu_dtb(fit, compiled_dtb, firmwares)
+    if compiled_dtb.read_bytes() not in (source / 'FSBL.bin').read_bytes():
+        raise ValueError('verified SPL DTB not found in wrapped FSBL')
+    shutil.copyfile(compiled_dtb, records / 'spl.dtb')
+    manifest['spl_dtb_sha256'] = sha(compiled_dtb)
     run([sys.executable, packager, '--fsbl', source / 'FSBL.bin',
          '--uboot-itb', source / 'u-boot.itb', '--uboot-layout', 'reference',
          '--esos-itb', args.esos_itb, '--esos-configuration', args.esos_configuration,

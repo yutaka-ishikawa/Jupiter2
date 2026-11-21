@@ -229,3 +229,62 @@ ELF entryが0x100804000なら、固定SPL DTの0x100800000と不一致である�
 その場合はPT_LOADの実配置と起動条件を照合してから、DTの修正候補を作る。
 一致している場合は、ESOS版との起動・共有メモリーの契約や可視性など別の原因を調べる。
 いずれもtimeoutを無視してOpenSBIへ進めない。
+
+## 10. 実ELFで確定した起動先不一致と修正後の試験（KSB-067）
+
+ユーザー提供rcpu1-fw.elf（284080 bytes）をreadelfとビルダーで検査した。
+SHA-256はedbd613a0008a97ac94f589afd7d60c770dd809ae2e4260c54fe247fa42ab4ca。
+
+| 項目 | 確認値 |
+| --- | --- |
+| ELF形式 | ELF64 little-endian RISC-V EXEC |
+| ELF entry | 0x100804000 |
+| 実行可能LOAD | PhysAddr=VirtAddr=0x100804000、FileSiz=MemSiz=0x44000、RWE |
+| resource_tableのLOAD | PhysAddr=VirtAddr=0x100e00000、FileSiz=MemSiz=0x100、RW |
+| 参照SPL DTのcore 1起動先 | 0x100800000（コードの16 KiB手前） |
+
+0x100800000から0x100803fffをロードするセグメントはこのELFにない。
+ドライバーはELFをp_paddrへロードするが、開始アドレスはSPL DTから取得するため、
+今回の組合せで起動先が一致していなかった。修正後のcore 1応答成功やUFS起動はまだ未確認。
+
+ビルダーは選択したESOS FITのrcpu0-fw/rcpu1-fwを展開し、RISC-V ELF64のentryが
+ファイル内の実行可能PT_LOADに含まれ、仮想・物理アドレスが同一であることを検査する。
+そのentryをそれぞれのSPL DTへ反映し、ビルド後のSPL DTBにも同値があることと、
+そのDTBがFSBLに含まれることを確認する。値を固定の0x100804000へ一律置換しない。
+ESOS本体の変更、RCPU応答待ちの省略、NOR書込みは行わない。
+
+開発PCで更新を取得し、第8節のビルドコマンドを新しいoutputで実行する。
+例えばOUTを次のようにして、同じ引数でビルドする。
+
+```bash
+git pull --ff-only
+OUT="$PWD/work/jupiter2-ram-boot/reference-vendor-entry-$(date +%Y%m%d-%H%M%S)"
+```
+
+ビルド成功後は次を確認する。
+
+```bash
+cat "$OUT/records/rcpu-elf.json"
+fdtget -t x "$OUT/records/spl.dtb" /soc/rcpu@1 fw_boot_entry
+```
+
+今回のcore 1のentry_hexが0x100804000、元のsource_dt_entry_hexが0x100800000、
+ELFハッシュが上記と一致し、fdtgetは`1 804000`と表示することを確認する。
+core 0は実際の同梱ELFのentryを使用する。
+完全電源断・FDLから、新しく作ったFSBLと統合FITの対を第8節の順序で転送する。
+
+UARTではcore 1のentry=0x100804000とhandshake acknowledgedを確認する。
+両core成功後、OpenSBIの起動表示とU-Bootプロンプトが出てからUFS試験へ進む。
+同じentryでもtimeoutする場合は、全ログを保存して停止し、他の初期化条件を調べる。
+
+ホスト検証：ユーザー実ELFの解析、実際の固定DTSの変更、実dtcによるDT照合と不一致拒否を確認。
+追加の3件はLLVMでRISC-V ELFを生成してからELF→DTBを検査する。実機実行やCPU模擬はしない。
+既存FITテスト23件と分けて実行する。
+
+```bash
+# 追加試験にはRISC-V対応clang/ld.lldとdtcが必要。
+python3 scripts/tests/test_jupiter2_reference_elf.py
+python3 scripts/tests/test_jupiter2_ram_boot_image.py
+```
+
+この修正候補のK3 GCC完全ビルド・実機再試験・QEMU guest統合は未実施。

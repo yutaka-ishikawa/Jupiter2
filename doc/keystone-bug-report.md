@@ -91,6 +91,7 @@
 | KSB-064 | 参照ESOS結合スクリプトのdescription一致とconf_dualが不一致 | 第三者K3手順を今回の入力へ適用する場合 | 統合上の制約・明示構成による回避実装、ホスト検査済 |
 | KSB-065 | 参照FSBLがESOS開始失敗を成功として扱いRAM追加FITも誤判定 | 参照U-Bootと販売元ESOSの統合 | core 1応答待ち失敗を実機観測・診断修正候補 |
 | KSB-066 | 診断版のRCPU entryがSPLで0xxと表示される | 本リポジトリの診断パッチとtiny printf | %lxとulongへ修正・実機表示の再確認待ち |
+| KSB-067 | 参照SPL DTのcore 1起動先が販売元ESOS ELF entryと不一致 | 固定参照FSBLと今回の販売元ESOSの統合 | 実ELFで不一致確認・ELFからDTへ反映する修正候補 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1023,3 +1024,28 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
 - 検証：固定ソースの書式処理と設定を確認。git apply --checkで適用確認する。
   修正後の実機表示・完全ビルドは未確認。表示確認だけのために再起動を要求せず、
   先にホストでESOS ELFを調べる。
+
+### KSB-067: 参照SPL DTと販売元RCPU core 1のELF entry不一致
+
+- 登録日：2026-11-21。ユーザー提供rcpu1-fw.elf（284080 bytes）をreadelfで検査。
+  SHA-256: edbd613a0008a97ac94f589afd7d60c770dd809ae2e4260c54fe247fa42ab4ca。
+  ELF64 little-endian RISC-V EXEC、entry=0x100804000。
+  実行可能LOADは物理・仮想とも0x100804000、file/mem size=0x44000。
+  別のRW LOADは0x100e00000、size=0x100（resource_table）。
+- 不一致：参照コミット4c294a06のarch/riscv/dts/k3_spl.dtsは
+  rcpu@1/fw_boot_entry=<0x1 0x800000>、つまり0x100800000。
+  k3-rproc.cはDT値を起動レジスターへ書く。ELFロード関数はPT_LOADのp_paddrへ配置する。
+  このELFには0x100800000から0x100803fffをロードするセグメントがなく、
+  設定された起動先が実行可能コードより16 KiB手前である。
+- 帰属：固定参照ソースと今回の販売元ESOSの組合せの互換性不良。
+  ESOS core 1応答失敗の原因となる具体的な設定不一致は確定したが、
+  修正後の起動成功、唯一の原因であること、以前のUFS障害との因果は未確認。
+- 修正候補：ESOS FITの選択済みrcpu0-fw/rcpu1-fwを展開し、実ELFのentry/LOADを検査する。
+  両coreのSPL DT起動先をそれぞれの実ELF entryから設定し、差分とELFハッシュ・配置を記録する。
+  コンパイル後のSPL DTBにも同値があることと、そのDTBがFSBL内にあることを必須検査する。
+  FIT entryからの推測や、timeoutの無視で回避しない。
+- 検証：ユーザー実ELFとreadelfの一致、固定ソースDTSの変更、dtcによるDT照合を確認。
+  実LZO FITからのprepare-only CLIでcore 1のユーザー実ELFを展開・反映・ハッシュ記録。
+  core 0はこのホスト試験に限りLLVM生成の形式試験用ELFを使用した。
+  新しいELF/DTホスト試験3件、既存FITホスト試験23件が合格。
+  K3 GCC完全ビルド・修正後の実機・QEMU統合は未検証。
