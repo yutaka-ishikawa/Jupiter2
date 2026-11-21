@@ -1,8 +1,7 @@
 # Milk-V Jupiter2へのOP-TEE・fTPM TA移植計画
 
 対象はSpacemiT K3（RV64）搭載のMilk-V Jupiter2 SBC。調査基準はJupiter2の
-`main`（`cf42df851`）。本書は実装・試験の計画であり、ビルド、QEMU起動、
-実機動作の結果は未取得。
+`main`（`cf42df851`）。実装・試験の計画と進捗を記載する。
 
 ## 目標と進め方
 
@@ -23,6 +22,18 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
 | OpenSBI | [改造OpenSBIのK3 Keystone構成](../opensbi/platform/generic/configs/k3_keystone_audit_defconfig)と[既存MPXY dispatcher](../opensbi/lib/utils/mpxy/fdt_mpxy_opteed.c)を使う。`CONFIG_K3_KEYSTONE_SM` で[無効化されているドメイン切替](../opensbi/lib/sbi/sbi_domain_context.c)は、SMと共通の隔離・遷移設計を実装してから有効にする。 |
 | Linux | `linux-k3/` と現行K3/Bianbu defconfigを起点に[MPXY経路](../linux-k3/drivers/tee/optee/mpxy_sbi.c)と[fTPMドライバー](../linux-k3/drivers/char/tpm/tpm_ftpm_tee.c)を使う。同じImageでKeystone driverとTEE・TPMを利用する。 |
 | OP-TEE・TA | SpacemiTの `k3-br-v1.0.y` を、現行MPXY ABIに合うOP-TEE本体とブート・DT差分の参照元とする。`optee_ftpm` とMicrosoft TPM 2.0参照実装を固定し、K3のTA ABIでビルドする。 |
+
+## 第1・第2段階の進捗
+
+- OpenSBIのMPXY共有メモリーサイズ修正（KSB-045、`d32afa86c`）を取り込み、
+  K3 Keystone構成の `fw_dynamic.bin` をビルドした。
+- K3用OP-TEE本体を `2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59` からRV64向けに
+  ビルドした。[同居検証プログラムと検証用TA](../verifications/optee-coexistence/README.md)
+  を追加し、RV64向けのホスト実行ファイルと署名済みTAを生成した。
+  ホストのリンクにはoptee_client `9f4414f62dfc5692fd39f760515ce2d344d07b6d` を使用。
+- 残作業は、共通PMPポリシー、hart間同期とドメイン切替、OP-TEEのQEMUロード・DT引継ぎ、
+  ゲストでの通信と逐次・並行試験。現行のK3 Keystone構成ではドメイン切替を抑止している。
+  OP-TEE同居、保護領域の隔離、ゲスト内でのテストプログラム実行は未確認。
 
 ## 実装順序と完了条件
 

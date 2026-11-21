@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+#ifndef JUPITER2_OPTEE_COEXISTENCE_PROTOCOL_H
+#define JUPITER2_OPTEE_COEXISTENCE_PROTOCOL_H
+
+#define COEXISTENCE_TA_UUID \
+    { 0xc25c295d, 0x8af1, 0x44f7, \
+      { 0x9f, 0x0e, 0x65, 0x7c, 0x39, 0xbc, 0x22, 0xad } }
+#define COEXISTENCE_CMD_INCREMENT 0
+#define COEXISTENCE_TA_MARKER 0x4a325441U
+
+#endif

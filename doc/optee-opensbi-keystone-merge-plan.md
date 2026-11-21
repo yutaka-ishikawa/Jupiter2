@@ -13,7 +13,7 @@ Keystoneへは機能単位のバックポートと接続変更が可能だが、
 
 - SpacemiT K3 SDKのMPXY OP-TEE dispatcher、domainごとのMPXY状態、domain切替APIは既に取り込み済み。
   dispatcherをもう一度追加する必要はない。
-- 優先候補は、既存MPXYのサイズ丸め修正、次にOpenSBI上流のFP/Vector状態保存・復元部品。
+- MPXYのサイズ丸め修正は `d32afa86c` で取り込み済み（実ゲスト未検証）。次の候補はOpenSBI上流のFP/Vector状態保存・復元部品。
   FP/VectorはKeystone独自のcontext切替へ接続し直す必要がある。
 - RISEのVIRQ/SYSTEM_IRQ/Yield、HWISO/WorldGuard、OP-TEE用RPMI TEE/REQFWDは
   別の目的を持つ。Keystoneの通常enclave実行の必須条件ではなく、必要性と依存を分けて判断する。
@@ -122,7 +122,7 @@ OP-TEE本体・DT・ビルド構成との組合せであり、Keystoneの動的E
 | 対象 | 判定 | 理由・保持する契約 |
 | --- | --- | --- |
 | 既存K3 OPTEED | 再取り込み不要 | dispatcher本体はSDKと一致。Keystone profileでの利用はdomain制限に従う。 |
-| MPXYサイズ丸め修正 | 優先バックポート候補 | 現在のコードに同じ誤計算を確認。KSB-045を参照。 |
+| MPXYサイズ丸め修正 | バックポート済み | `d32afa86c`。実ゲスト検証はKSB-045とT-MPXYを参照。 |
 | FP/Vector低層helper | 条件付き採用 | ISA/toolchain依存と後続修正を揃え、SM独自switchへ接続する。 |
 | OpenSBI domain FP/Vector接続 | そのまま採用しない | KeystoneのRUN/RESUME/STOP/EXITはdomain switchを通らない。 |
 | VIRQ/SYSTEM_IRQ/Yield | 将来の別工程 | 外部IRQをenclave/別domainへ配送する要件がある場合に実施。現行timerの代替にはしない。 |

@@ -69,7 +69,7 @@
 | KSB-042 | EXIT後のRESUMEが再進入を許す | SM状態遷移・由来未確定 | 実QEMUで再現・未修正 |
 | KSB-043 | 並行PMP更新の一時競合でDESTROYが回収不能になる | K3移植のHSM/PMP admission | 実QEMUで再現・未修正 |
 | KSB-044 | CREATE失敗時のPMP rollback結果を検査しない | SM CREATE cleanup・由来未確定 | ソース確認・障害注入による実証前 |
-| KSB-045 | MPXY共有メモリーの丸め値がbytesではなくpage数になる | OpenSBI取込コード・上流修正照合済み | 未修正・PAGE_SIZE超channelで発火、実ゲスト未検証 |
+| KSB-045 | MPXY共有メモリーの丸め値がbytesではなくpage数になる | OpenSBI取込コード・上流修正照合済み | 修正済み（`d32afa86c`）・実ゲスト未検証 |
 | KSB-046 | MPXY属性範囲のu32加算overflow | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-047 | PMU counter indexの加算overflow | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-048 | PMU event infoのサイズ乗算overflow | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
@@ -722,10 +722,10 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   は同じ箇所をbyte単位のROUNDUPへ修正する。Keystone固有の新規バグとは分類しない。
 - **影響**：大きなchannel登録時に共有領域サイズの通知・転送境界の契約が崩れる。
   実際のサービス障害・メモリー破壊・漏出は今回再現しておらず、断定しない。
-- **状態・方針**：未修正。今回の依頼では調査と文書を追加した。
-  [取り込み計画P1/T-MPXY](optee-opensbi-keystone-merge-plan.md)で既存のmapping変更を保持して
-  上流修正をバックポートし、実firmwareの検証channelと実guest ECALLで確認する。
-- **検証範囲**：ソースと上流修正の照合のみ。ビルド、実QEMU、実機は未実施。
+- **状態・方針**：`d32afa86c` で上流修正をバックポートした。既存のmapping変更を維持した。
+  [取り込み計画P1/T-MPXY](optee-opensbi-keystone-merge-plan.md)に実ゲストでの確認条件を記載。
+- **検証範囲**：K3 Keystone構成でOpenSBI＋SMをビルド・リンクした。
+  PAGE_SIZE超channelの実ゲストECALLと実機検証は未実施。
 
 ## KSB-046〜056: OpenSBI上流差分調査で確認した修正対象
 
