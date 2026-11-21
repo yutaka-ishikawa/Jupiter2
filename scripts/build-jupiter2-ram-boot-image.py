@@ -233,6 +233,19 @@ def build(args):
     if config.children or 'firmware' in config.props or 'kernel' in config.props:
         fail('expected a plain vendor U-Boot configuration without firmware/kernel/signatures')
     loads = strings(config.props['loadables'])
+    if args.uboot_layout == 'reference':
+        if loads != ['opensbi', 'uboot']:
+            fail('reference layout requires loadables = opensbi, uboot')
+        embedded = uroot.children['images'].children['opensbi']
+        if (string(embedded, 'os') != 'opensbi'
+                or string(embedded, 'type') != 'firmware'
+                or string(embedded, 'compression') != 'none'
+                or string(embedded, 'arch') != 'riscv'
+                or number(embedded.props['load']) != args.opensbi_load
+                or number(embedded.props['entry']) != args.opensbi_load
+                or image_data(embedded, ub, utotal) != inputs['opensbi_bin']):
+            fail('reference FIT embedded OpenSBI differs from --opensbi-bin or load/entry')
+        loads = ['uboot']
     if len(loads) != 1:
         fail('expected exactly one U-Boot loadable in input configuration')
     fdtname = string(config, 'fdt')
@@ -320,6 +333,9 @@ def build(args):
     selected = Node(args.configuration)
     selected.props = {'description': text(args.board), 'firmware': text('opensbi'), 'fdt': text('fdt'),
                       'loadables': text('uboot') + b''.join(text(name) for name in enames)}
+    if args.uboot_layout == 'reference':
+        del selected.props['firmware']
+        selected.props['loadables'] = text('opensbi') + selected.props['loadables']
     configs.children[selected.name] = selected
     root.children[configs.name] = configs
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -347,6 +363,7 @@ def build(args):
         (records / 'fit-list.txt').write_text(listing.stdout)
         (outimages / 'FSBL.bin').write_bytes(inputs['fsbl'])
         manifest = {'format': 1, 'variant': args.variant, 'board': args.board,
+                    'uboot_layout': args.uboot_layout,
                     'configuration': args.configuration, 'hardware_verified': False,
                     'esos_configuration': ec.name,
                     'esos_description': string(ec, 'description'),
@@ -390,6 +407,8 @@ def main():
     parser.add_argument('--esos-configuration',
                         help='explicit ESOS config, e.g. conf_dual; retains ALL its loadables')
     parser.add_argument('--board', default='k3-pico-itx')
+    parser.add_argument('--uboot-layout', choices=('vendor', 'reference'), default='vendor',
+                        help='reference: verify embedded OpenSBI and retain loadables-first SPL layout')
     parser.add_argument('--variant', choices=('vendor', 'keystone'), required=True)
     parser.add_argument('--opensbi-load', type=positive, default=0x100000000)
     parser.add_argument('--opensbi-reserve-bytes', type=positive, required=True,

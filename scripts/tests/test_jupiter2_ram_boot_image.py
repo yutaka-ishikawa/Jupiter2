@@ -260,6 +260,53 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(manifest['esos_configuration'], 'board')
         self.assertEqual(manifest['esos_selection'], 'explicit')
 
+    def reference_fit(self, external=False):
+        image = '''opensbi { data = /incbin/("opensbi.bin");
+          type = "firmware"; os = "opensbi"; arch = "riscv";
+          compression = "none"; load = <1 0>; entry = <1 0>;
+          hash-1 { algo = "sha256"; }; };'''
+        dts = self.uboot_dts.replace('images {', 'images {' + image, 1)
+        dts = dts.replace('loadables = "uboot";', 'loadables = "opensbi", "uboot";')
+        self.make_fit('uboot', dts, external=external)
+
+    def test_reference_layout_roundtrip(self):
+        self.reference_fit()
+        result = self.build(uboot_layout='reference')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        root, _, _ = builder.read_fit(self.base / 'release/images/ram-boot-vendor.itb')
+        config = root.children['configurations'].children['conf_11']
+        self.assertNotIn('firmware', config.props)
+        self.assertEqual(builder.strings(config.props['loadables']), ['opensbi', 'uboot', 'rt'])
+
+    @unittest.skipUnless(shutil.which('lzop'), 'requires real lzop')
+    def test_reference_external_fit_and_full_dual_esos(self):
+        self.reference_fit(external=True)
+        self.dual_fit()
+        result = self.build(uboot_layout='reference', esos_configuration='conf_dual')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.base / 'release/records/manifest.json').read_text())
+        self.assertEqual(len(manifest['esos_loadables']), 27)
+        self.assertEqual(manifest['uboot_layout'], 'reference')
+
+    def test_reference_embedded_opensbi_mismatch(self):
+        self.reference_fit()
+        (self.base / 'opensbi.bin').write_bytes(b'OTHER SBI')
+        result = self.build(uboot_layout='reference')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('embedded OpenSBI differs', result.stderr)
+        self.assertFalse((self.base / 'release').exists())
+
+    def test_reference_requires_reference_input(self):
+        result = self.build(uboot_layout='reference')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('requires loadables', result.stderr)
+
+    def test_reference_input_not_silently_accepted_as_vendor(self):
+        self.reference_fit()
+        result = self.build()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('exactly one U-Boot loadable', result.stderr)
+
     def test_truncated_input_rejected(self):
         (self.base / 'uboot.itb').write_bytes(b'\xd0\x0d\xfe\xed')
         result = self.build()

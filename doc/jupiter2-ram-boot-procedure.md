@@ -659,6 +659,8 @@ UARTが応答しない場合は、ログを保存し、電源を切る。FDLを�
 | C：販売元版RAM起動 | PCログ、全UARTログ、Linux状態、通常起動との差分 | 新OpenSBIへ差し替える前にRAM起動経路が動作 |
 | D：OpenSBI＋SM | 同じ記録とSM初期化・hello等の実行結果 | 実機の基本機能と必要なEnclave動作を確認 |
 
-次に行う作業は段階Aのソース比較である。その結果を基に、実際に使うFSBLと各ファームウェアのビルド条件を確定し、第7章のスクリプトへ渡す入力を用意する。現時点で実機試験は未実施で、RAMブートの成功やNORへの無書込みを検証済みとはしていない。
-
-
+販売元版・開発版のRAM起動でUFS通信失敗が報告されている。次は修正版FSBLとU-Bootを対で作る
+[参照実装の解析・開発手順](jupiter2-reference-ram-boot-development.md)と
+[実機テスト手順](jupiter2-reference-ram-boot-tests.md)に従う。
+既存の販売元FSBLを使う本書のpackagerと、新しい対をビルドする参照ビルダーの出力を混ぜない。
+UFS列挙の成功やNORへの無書込みは未検証である。

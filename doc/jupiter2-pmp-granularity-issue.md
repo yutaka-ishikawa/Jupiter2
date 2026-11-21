@@ -543,4 +543,8 @@ UFS上のファイルが必要な場合は、使用中のRAM起動chainを次の
 販売元U-Boot単体をM-modeで起動した試験と、OpenSBI経由の試験は、実行モードやESOS起動等が異なる。
 純正U-Boot単体の成功だけで開発版OpenSBIが原因と断定しない。
 PMP保護を解除する、NORを書き換える、UFSをeraseする方法はこの切り分けでは行わない。
-現在は比較結果未取得で、UFSからのLinux読み出しは未確認である。
+その後、ユーザーから販売元OpenSBI入り統合FIT、および元の販売元FSBL＋u-boot.itbでも
+同様のdescriptor失敗が報告された。各試行の入力SHAと全起動ログは引き続き確認が必要だが、
+現在の証拠からKeystone固有の原因と扱わない。UFSからのLinux読み出しは未確認である。
+次は[修正版FSBLとESOSを含む参照実装の開発手順](jupiter2-reference-ram-boot-development.md)と
+[実機テスト手順](jupiter2-reference-ram-boot-tests.md)で、販売元OpenSBIを使うRAM起動を先に確立する。

@@ -88,6 +88,7 @@
 | KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 原因未確定・ユーザー実機観測 |
+| KSB-064 | 参照ESOS結合スクリプトのdescription一致とconf_dualが不一致 | 第三者K3手順を今回の入力へ適用する場合 | 統合上の制約・明示構成による回避実装、ホスト検査済 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -954,8 +955,26 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
 - 解釈：公開販売元U-Bootのdrivers/ufs/ufs.hでUIC_ERROR=0x4。
   リンク／通信エラーが観測され、UFSからbootファイルを読む段階に進めていない。
 - 分類：実機の統合障害として記録するが、媒体故障、PMP起因、OpenSBI／SMの欠陥とは断定しない。
-  使用候補の完全な起動ログ・入力SHAと、販売元OpenSBIを使った同条件比較は未取得。
+  その後、ユーザーから販売元OpenSBI入り統合FITと、元の販売元FSBL＋u-boot.itbでも
+  同様のdescriptor失敗が報告された。Keystone固有とする根拠はない。
+  各試行の完全な起動ログ・入力SHA、通常起動での比較結果は引き続き必要。
 - 方針：scsi scanの反復やflashで修復しようとせず、他媒体の列挙と、完全電源断からのA/B比較を行う。
   FSBL／U-Boot／DTB／ESOSは同じ入力を使い、OpenSBIだけを販売元版へ差し替える。
   両者で失敗ならRAM起動経路やUFS初期化条件、販売元版だけ成功なら開発版との差分へ絞る。
 - 状態：未修正・原因調査中。詳細：[UFS起動媒体の確認](jupiter2-pmp-granularity-issue.md#9-ram起動後のufs通信失敗ksb-063)。
+  次の比較候補は[参照FSBL/ESOSの開発手順](jupiter2-reference-ram-boot-development.md)。
+
+### KSB-064: 参照ESOS結合とconf_dualのdescription不一致
+
+- 登録日：2026-11-21。対象はganboing/u-boot-k3の固定コミット
+  4c294a06c14e46e9c9cc934373c3e63919703017、scripts/combine-esos.shを今回のESOSへ適用する場合。
+- 出典・証拠：参照ソースはdescriptionをキーとして構成を結合する。
+  ユーザー提供dumpimage一覧はconf_dual、description=ESOS Dual Core Configuration。
+  conf_11のdescription=k3-pico-itxと一致しない。
+- 影響：imagesのコピーだけが行われ、対象構成のloadablesにESOSが追加されない可能性がある。
+  これは入力組合せから確認した統合上の制約であり、参照記事の使用ESOSでも起きると主張しない。
+  また現在の実機UFS障害の原因だとは断定しない。既存packagerは既にconf_dualを明示選択できる。
+- 回避：新しい参照ビルダーも既存packagerの明示選択を使用し、元の名前・全loadables・順序を維持する。
+  参照側combine-esos.shは呼び出さない。組込みOpenSBIのバイト一致も検査する。
+- 検証：実dtc/mkimage/dumpimage/lzopを使う参照FIT＋27 loadablesのホスト回帰試験を追加。
+  実ESOSのバイナリー検証、ESOS開始とUFS列挙の実機確認は未実施。
