@@ -84,6 +84,7 @@
 | KSB-057 | RAM FIT作成が共通ESOS構成・LZOを扱えない | 本リポジトリの実機導入ツール | 修正済・ホスト検査のみ |
 | KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 粒度検査通過を実機確認・後続KSB-059で停止 |
 | KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | 要対応・実機再現 |
+| KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | ソース確認・未修正 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -882,3 +883,19 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   最低数の一方だけを変更する、必要領域を削除する、L付き保護を外す方法は採らない。
 - 検証限界：今回の実機ログではslot計画の拒否まで。PMP書込み・readback、U-Boot、
   Linux、Enclaveの成功は未確認。詳細：[PMP実機再試験結果](jupiter2-pmp-granularity-issue.md#7-修正後の実機結果粒度を通過しpmp容量で停止ksb-059)。
+
+
+### KSB-060: 正規rootのロック付き保護とboot preflightが不整合
+
+- 登録日：2026-11-21。対象：opensbi/include/sbi/k3_a1_csr_preflight.h、
+  opensbi/lib/sbi/sbi_init.cのpost-PMP gate、K3 root PMP設定。
+- 証拠：KSB-059の実機domainにはENF_PERMISSIONS付きのRCPU予約領域が4個あり、
+  PMPへはL付きdenyとして登録する。一方k3_a1_preflight_localはfallback前のLを一律拒否する。
+- 影響：容量問題を解消してPMP設定・readbackを通過しても、その次のadmissionで拒否される条件がある。
+  この停止位置はまだ実機で観測しておらず、ソース上の契約不整合として登録する。
+- 由来：本リポジトリのK3用root配置と、QEMU中心の厳格なpreflightの組合せ。
+  上流Keystone自体の不具合とは断定しない。
+- 方針：Lを消さず、汎用preflightの既定の拒否も維持する。実rootの全entry・fallback・
+  未使用slotをreadbackで照合して得た正規ロックmaskだけを、K3起動経路で明示的に認める。
+  不明なL、free slotやfallbackのL、不一致は引き続き拒否する。
+- 状態：未修正。実機での当該gate通過は未検証。
