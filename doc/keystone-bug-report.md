@@ -94,6 +94,7 @@
 | KSB-067 | 参照SPL DTのcore 1起動先が販売元ESOS ELF entryと不一致 | 固定参照FSBLと今回の販売元ESOSの統合 | 修正後の両core応答を実機確認・後段KSB-068で停止 |
 | KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | KSB-069修正後にU-Boot到達を実機確認 |
 | KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 整合修正後のU-Boot・UFS・Linux起動を実機確認 |
+| KSB-070 | Linux用DTがSMのM-only mailboxページ内の直接controllerを有効化 | Bianbu Linux DTとK3 SMの所有契約 | 提供DTBで不整合確認・別名DTBで限定修正候補 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1116,3 +1117,28 @@ KSB-063/065/067/068/069の到達結果追記（2026-11-21）：ユーザーか�
 各修正単独の効果を分離した検証ではない。unameの実出力、開発版SM/Enclave動作、
 QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイド](jupiter2-ram-boot-guide.md)へ集約。
 新操作スクリプト自身のUSB実行は実機未確認で、ホストのdry-run等の検査と区別する。
+
+### KSB-070: Linux用DTの直接mailbox controllerとSMのM-onlyページが不整合
+
+- 登録日：2026-11-21。ユーザー提供k3-pico-itx.dtbは148441 bytes、
+  SHA-256 de39ef1acaf7fc13b365a55b1c007f8888c36a06b9840598762ce03a9aa5f129。
+- 証拠：/soc/mailbox0@cac90000からmailbox3@cac90c00までの4 controllerがokay。
+  SMのKSB-058対応は0xcac90000–0xcac90fffをM-mode専用にする。
+  対象4 controllerを指す有効なmboxes利用者はなく、mailbox 3の参照者rcpu_rproc0はdisabled。
+  mailbox 4を使うrcpu_rproc1と、SBI MPXYを使うRPMIクライアントは有効で、変更対象にしない。
+- ソース確認：linux-k3/drivers/mailbox/spacemit/k3-mailbox.cのprobeはIRQを登録し、
+  IRQハンドラーはreadl/writelでcontrollerへ直接アクセスする。
+  有効remoteproc利用者がいないだけでは、LinuxがM-onlyページへアクセスしない保証にはならない。
+- 帰属：今回のBianbu Linux DTとK3 SMのページ所有契約の互換性不良。
+  提供DTBで不整合は確認したが、このDTBとSM版Linuxの実機trapを既に観測したとは主張しない。
+- 修正候補：元DTBを残し、対象4 controllerのstatusだけをdisabledにした別名DTBを生成。
+  scripts/prepare-jupiter2-keystone-linux-dtb.pyは有効利用者がいれば拒否し、
+  他ノード・未知のプロパティを保持していることを検査する。
+  有効なremoteproc 1やmailbox 4以降、SBI MPXY、reserved-memoryを自動停止・変更しない。
+- 実入力の候補：148457 bytes、SHA-256
+  54a6e7855c04dc17c67d13526a6e917f5f971a95d7b1d82894509d6aada4db5d。
+  入出力DTB全体は公開せず、変更対象・hash・利用者の状態だけを記録する。
+- 検証範囲：実DTBを実fdtputで変更して全ノード・プロパティを照合。
+  新しいDTホスト試験6件で有効利用者の拒否、元ファイル保持、他ノード保持、再実行を確認。
+  新DTBによる販売元/SM版Linuxの実機起動、hello二種、QEMU guest統合は未検証。
+  [SM起動からアプリ試験までの手順](jupiter2-keystone-app-test.md)に段階と判定を記載。

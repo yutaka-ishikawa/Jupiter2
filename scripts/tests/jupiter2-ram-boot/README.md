@@ -8,6 +8,7 @@
 | test_fit_packaging.py | FIT生成、ハッシュ、全ESOS loadables、LZO展開後の配置、不正入力の拒否 | dtc/mkimage/dumpimage/lzop |
 | test_elf_rpmi_contract.py | ELF entryからDTへの反映、有効RPMIサーバーの選択とAP側DTの整合 | RISC-V対応clang/ld.lld、dtc |
 | test_host_operations.py | 操作ツールのchecksum/dry-run、UART起動コマンドの生成・構文、同梱配置 | 実FITツール、bash -n、sha256sum |
+| test_linux_dtb_preparation.py | Linux DTBのmailbox0..3のみ変更、元DTBと他ノードの保持、有効利用者がいる場合の拒否 | dtc/fdtput |
 | run-host-tests.sh | 上記を必要ツール確認後にまとめて実行 | 上記すべて |
 
 ```bash

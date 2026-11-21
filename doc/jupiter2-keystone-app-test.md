@@ -1,0 +1,198 @@
+# Jupiter2実機でKeystoneアプリを試験する
+
+更新日：2026-11-21。
+
+現在確認できているのは、販売元OpenSBIを使ったRAM起動とLinux起動である。
+KeystoneアプリにはSM入りOpenSBIが必要。同じkernel/initrdと整合するLinux DTBを使い、
+SM起動→Linux起動→driver→hello二種の順で確認する。NOR更新はこの試験に含めない。
+
+## 1. 提供Linux DTBの確認結果
+
+ユーザー提供k3-pico-itx.dtbは148441 bytes。
+SHA-256: de39ef1acaf7fc13b365a55b1c007f8888c36a06b9840598762ce03a9aa5f129。
+
+| Linux DTノード | 状態 | SMとの関係 |
+| --- | --- | --- |
+| /soc/mailbox0@cac90000 | okay | M-onlyページ内 |
+| /soc/mailbox1@cac90400 | okay | M-onlyページ内 |
+| /soc/mailbox2@cac90800 | okay | M-onlyページ内 |
+| /soc/mailbox3@cac90c00 | okay | M-onlyページ内 |
+| /soc/rcpu_rproc0@0 | disabled | mailbox 3の参照者だが無効 |
+| /soc/mailbox4@cac91000 | okay | 対象ページ外、変更しない |
+| /soc/rcpu_rproc1@1 | okay | mailbox 4を使用、変更しない |
+| /soc/mpxy_mbox@0 | okay | SBI経由のRPMI、変更しない |
+
+SMのKSB-058対応は0xcac90000–0xcac90fffをM-mode専用にする。
+元DTBではLinuxの直接mailbox driverがこのページを使える設定のため、そのままSM版へ流用しない。
+DT上では対象4 controllerに有効なmboxes利用者がいない。mailbox driverはprobeでIRQを登録し、
+IRQ処理でMMIOを読むので、remoteproc 0がdisabledであるだけではcontrollerの所有が整合しない。
+詳細はKSB-070に記録した。
+
+## 2. 別名の試験用Linux DTBを作る（開発PC）
+
+publicリポジトリのルートで実行する。TARGETは今回の実機名の例で、名前解決できない場合は
+実際のIPアドレスへ変更する。既にPCへ取り出した同じDTBがあればscpの代わりにそのファイルを使う。
+
+```bash
+git pull --ff-only
+PUBLIC_ROOT="$PWD"
+WORK="$PWD/work/jupiter2-keystone-app-test"
+TARGET=ishikawa@cradsec-jupitor2
+mkdir -p "$WORK/original" "$WORK/linux"
+
+scp "$TARGET:/boot/spacemit/6.18.3-generic/k3-pico-itx.dtb" \
+  "$WORK/original/k3-pico-itx.dtb"
+
+python3 scripts/prepare-jupiter2-keystone-linux-dtb.py \
+  --input "$WORK/original/k3-pico-itx.dtb" \
+  --output "$WORK/linux/k3-pico-itx-keystone.dtb"
+cat "$WORK/linux/k3-pico-itx-keystone.dtb.json"
+```
+
+必要なPCツールはPython 3とdevice-tree-compilerのfdtput。
+スクリプトは対象4 controllerを確認し、有効なmboxes利用者がいれば拒否する。
+変更は4ノードのstatus=disabledだけで、元DTBを上書きせず、他のノード・プロパティの保持を検査する。
+同じ結果の出力が既にある場合は再利用し、異なる内容なら上書きを拒否する。
+reportに入力・出力hashと変更対象を保存する。DTB全体や起動時の乱数情報はreportへ出力しない。
+
+今回の実入力から得た限定修正候補は148457 bytes、SHA-256:
+54a6e7855c04dc17c67d13526a6e917f5f971a95d7b1d82894509d6aada4db5d。
+これはmailboxページの所有を整合させる候補で、全PMP領域・Linux・Enclaveの実機合格ではない。
+有効なremoteproc 1、mailbox 4以降、SBI MPXY、reserved-memoryは保持している。
+DTBバイナリー全体は公開リポジトリへ追加せず、各自の作業ディレクトリで管理する。
+
+## 3. 新しい名前で実機へ配置し、販売元構成で先に確認する
+
+開発PCから新ファイルを転送する。
+
+```bash
+scp "$WORK/linux/k3-pico-itx-keystone.dtb" "$TARGET:/tmp/k3-pico-itx-keystone.dtb"
+ssh -t "$TARGET" 'sudo install -m 0644 /tmp/k3-pico-itx-keystone.dtb /boot/spacemit/6.18.3-generic/k3-pico-itx-keystone.dtb'
+```
+
+元のk3-pico-itx.dtbとenv_k3.txtは変更しない。
+まず成功済みの販売元OpenSBIのRAM起動経路で、新DTBだけを選んでLinuxが起動するか確認する。
+DT変更の影響とSM変更の影響を分けるためである。
+起動方法は[RAM起動ガイド](jupiter2-ram-boot-guide.md)に従う。
+今回の実機用のUARTテキストは次で作れる。
+
+```bash
+python3 scripts/run-jupiter2-ram-boot.py --phase linux \
+  --kernel /Image-6.18.3-keystone \
+  --initrd /initrd.img-6.18.3 \
+  --dtb /spacemit/6.18.3-generic/k3-pico-itx-keystone.dtb \
+  --root-partuuid 73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 \
+  --output "$WORK/boot-linux-keystone-dtb.cmd"
+cat "$WORK/boot-linux-keystone-dtb.cmd"
+```
+
+生成した全文をUARTのU-Bootへ貼り付ける。PCのBashで実行しない。
+PARTUUIDとファイル名は今回の実機用で、他の実機では実測値へ合わせる。
+
+## 4. SM入りOpenSBIと統合FITを作る（開発PC）
+
+前段が成功したら、同じpublicルートで実行する。CROSS_COMPILEは使用中のK3ツールチェーンに合わせる。
+
+```bash
+export CROSS_COMPILE=riscv64-unknown-linux-gnu-
+make firmware
+
+SM_BIN="$PUBLIC_ROOT/.build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin"
+SM_OUT="$WORK/ram-boot-sm-$(date +%Y%m%d-%H%M%S)"
+
+python3 scripts/build-jupiter2-reference-ram-boot.py \
+  --opensbi-bin "$SM_BIN" \
+  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --esos-configuration conf_dual \
+  --variant keystone \
+  --opensbi-reserve-bytes 0x00100000 \
+  --max-download-bytes 0x20000000 \
+  --cross-compile "$CROSS_COMPILE" \
+  --output "$SM_OUT"
+REL="$SM_OUT/release"
+```
+
+.build-k3は標準ビルド先。makeでK3_BUILD_DIRを変えた場合はSM_BINも対応する実ファイルへ変更する。
+1 MiBは以前の実機SMログのFirmware Size 662 KBを収める試験用予約値。
+別ビルドではBINだけでなくBSS/heap/stack等を含む実行時サイズを確認する。
+512 MiBは今回のSPLの転送上限で、操作ツールも実機から再取得する。
+Makefileの通常のSM buildはcrypto provider=unavailableであり、今回の基本hello試験を
+attestationや製品用の鍵・署名の検証として扱わない。
+
+## 5. SM版をRAM起動し、先にLinuxの起動を確認する
+
+完全電源断・FDLから、今作った対を転送する。
+
+```bash
+python3 scripts/run-jupiter2-ram-boot.py --release "$REL" --phase fsbl --sudo
+```
+
+UARTでDDR完了とSPLのUSB再認識を確認してから：
+
+```bash
+python3 scripts/run-jupiter2-ram-boot.py --release "$REL" \
+  --phase fit --serial HW4MPK3321280144 --sudo
+```
+
+variant=keystoneではimages/ram-boot-keystone.itbを選ぶ。
+UARTでSM/PMP初期化、OpenSBIからU-Bootへの移行が成功したことを確認する。
+PMP設定・readback・SM初期化のエラーがあればLinuxへ進まない。
+UFSを確認し、第3節と同じ新DTBのUARTテキストでLinuxを起動する。
+Linux起動後もまだhelloは実行せず、unameとdriverの対応を確認する。
+
+## 6. ドライバーとhello二種を試験する（実機Linux）
+
+次は実機のLinux端末で実行する。
+
+```bash
+uname -r
+ls -l /lib/modules/$(uname -r)/extra/keystone-driver.ko
+ls -l /opt/keystone/$(uname -r)/hello*.ke
+```
+
+今回の導入例のkernel releaseは6.18.3。Imageのファイル名末尾-keystoneをreleaseへ付けない。
+起動したSMのsource/build記録と、使用するdriver/SDK/appsが対応していることも確認する。
+単にrelease名が同じだけで異なるビルドが同一だとは扱わない。
+
+Linux/modules/apps配布用bundleを展開したディレクトリへ移動する。
+このbundleは、RAM用release（images/FSBL.bin等が入るもの）とは別。
+
+```bash
+# 実機上の、apps/ modules/ kernelrelease.txt tools/run-hello.shがあるbundle内
+bash tools/verify.sh
+cat kernelrelease.txt
+set -o pipefail
+sudo bash tools/run-hello.sh 2>&1 | tee keystone-hello.log
+rc=${PIPESTATUS[0]}
+echo "run-hello.sh exit=$rc"
+sudo dmesg | tail -n 100
+```
+
+run-hello.shはbundle全体のhash、kernel release、配置済みdriverと同梱driverのバイト一致を確認する。
+modprobe keystone_driver、/dev/keystone_enclaveの確認後、hello.keとhello-native.keを順番に実行する。
+途中で失敗すれば後続へ進まない。test用のmock driverやSBI代替は使わない。
+
+終了コード0、両アプリの正常終了、SM側CREATE/RUN/DESTROYとLinux側にエラーがないことを
+基本試験の合格条件とする。隔離違反・複数同時実行・署名/attestationの合格とは分ける。
+現行のPMP予算はOS用1＋NAPOT UTM用1＋NAPOT EPM用1という最小構成で、
+TORやbacking、二つ同時保持は追加entryを要する。まず二種を一つずつ実行し、
+容量不足をPMP保護解除や割当失敗の無視で回避しない。
+
+## 7. 失敗時の記録・戻し方
+
+SM/PMP停止は全UARTログ、Linuxのtrap/panicは最初のエラーを含む全ログを保存する。
+driver/CREATE/RUN失敗はkeystone-hello.log、dmesg、uname -r、bundle/source記録を保存する。
+このDT修正はmailboxページだけの限定検査である。他のPMP領域・remoteproc/IRQ使用で
+問題が出た場合は、その原因を調べる。有効なサービスを無断停止して合格扱いにしない。
+
+RAM試験を破棄するには電源断し、FDLを押さず通常起動するか、保存した販売元releaseをRAM起動する。
+元DTBとenv_k3.txtは保持しているため、別名DTBの試験設定を保存しなければ通常起動の選択は変わらない。
+OSがrootfsへ書いた内容や既に行った永続更新の復元とは区別する。
+
+## 8. 検証範囲
+
+提供実DTBで4 controller有効・有効利用者なしを確認し、実fdtputで別名候補を生成した。
+意味上の変更が4つのstatusだけで、他ノード・プロパティが保持されることを検査した。
+ホスト回帰はscripts/tests/jupiter2-ram-boot/test_linux_dtb_preparation.pyで実dtc/fdtputを使う。
+CPU/SBI/PMPは模擬せず、USBや実機を操作しない。
+この候補による販売元/SM版Linux起動とhello実行は未検証で、上記の実機試験で確認する。

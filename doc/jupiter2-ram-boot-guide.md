@@ -253,3 +253,13 @@ USB操作やCPU/SBI/PMPの模擬はしない。新しい操作補助ツールに
 詳しい調査履歴は[開発・解析文書](jupiter2-reference-ram-boot-development.md)、
 [段階別の実機記録とテスト手順](jupiter2-reference-ram-boot-tests.md)、
 [障害台帳](keystone-bug-report.md)を参照する。
+
+## 11. 次にKeystoneアプリを試験する
+
+販売元OpenSBIでLinuxが起動したことと、SM/Enclaveが動くことは別の段階。
+提供Linux用DTBには、SMのM-only mailboxページ内の直接controllerが有効な不整合があった。
+[Keystone実機アプリ試験手順](jupiter2-keystone-app-test.md)で別名DTBを準備し、
+販売元版でDT変更を確認してから、SM入りOpenSBIへ差し替えて同じLinuxを起動する。
+その後にdriver、hello.ke、hello-native.keを順番に検証する。
+元DTBやenv_k3.txtを置換せず、PMP保護を緩和して進めない。
+
