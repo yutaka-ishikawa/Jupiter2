@@ -78,5 +78,60 @@ class ElfEntryTests(unittest.TestCase):
             reference.verify_rcpu_dtb(fit, output, infos)
 
 
+@unittest.skipUnless(shutil.which('dtc'), 'requires real dtc')
+class RpmiContractTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+
+    def compile(self, text, name):
+        source = self.base / (name + '.dts')
+        output = self.base / (name + '.dtb')
+        source.write_text(text)
+        subprocess.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', output, source],
+                       check=True, capture_output=True)
+        return output.read_bytes()
+
+    def server(self, status, base, name):
+        data = self.compile('''/dts-v1/; / {
+ mailbox { compatible = "spacemit,k3-mailbox3"; phandle = <1>;
+  reg = <0xcac90c00 0x400>; #mbox-cells = <1>; };
+ rpmi { compatible = "spacemit,k3-os0-rpmi"; status = "%s";
+  shmem-base = <1 0x%x>; shmem-size = <0x4000>; slot-size = <256>;
+  a2p-queue-size = <0x1000>; p2a-queue-size = <0x1000>; mboxes = <1 0>;
+ }; };''' % (status, base), name)
+        return fit.parse_fdt(data)[0]
+
+    def test_disabled_server_is_not_selected(self):
+        trees = [self.server('okay', 0x800000, 'core0'),
+                 self.server('disabled', 0xe00000, 'core1')]
+        contract = reference.rpmi_contract(fit, trees)
+        self.assertEqual(contract['active_core'], 0)
+        self.assertEqual(contract['shmem-base'], 0x100800000)
+
+    def test_two_enabled_servers_are_rejected(self):
+        trees = [self.server('okay', 0x800000, 'core0'),
+                 self.server('okay', 0xe00000, 'core1')]
+        with self.assertRaisesRegex(ValueError, 'exactly one enabled'):
+            reference.rpmi_contract(fit, trees)
+
+    def test_board_override_fixes_actual_mismatch_pattern(self):
+        contract = reference.rpmi_contract(fit, [self.server('okay', 0x800000, 'core0')])
+        source = '''/dts-v1/; / {
+ rpmi_shmem_mbox: mailbox {
+  compatible = "riscv,rpmi-shmem-mbox";
+  reg = <1 0xe00000 0 0x1000>, <1 0xe01000 0 0x1000>,
+        <1 0xe02000 0 0x1000>, <1 0xe03000 0 0x1000>, <0 0xcac90c00 0 0x100>;
+  reg-names = "a2p-req", "p2a-ack", "p2a-req", "a2p-ack", "db-reg";
+  riscv,slot-size = <256>;
+ }; };'''
+        before = self.compile(source, 'before')
+        with self.assertRaisesRegex(ValueError, 'RPMI transport differs'):
+            reference.verify_rpmi_dtb(fit, before, contract)
+        after = self.compile(source + reference.rpmi_board_override(contract), 'after')
+        reference.verify_rpmi_dtb(fit, after, contract)
+
+
 if __name__ == '__main__':
     unittest.main()

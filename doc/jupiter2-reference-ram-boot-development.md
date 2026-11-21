@@ -31,9 +31,9 @@
 
 1. 固定コミットを新規作業ディレクトリへ取得する。既存のoriginal/とreleaseは変更しない。
 2. 販売元OpenSBI BINを固定ソースのITSが参照する場所へコピーする。まず販売元版で検証する。
-3. ESOSの両coreの実ELFを展開・検査し、ELF entryをSPL DTの各fw_boot_entryへ反映する。k3_defconfigへ試験用設定（bootcmd空、bootdelay=-1、DDR情報保存とFSBL更新の無効化、永続envの読込み停止）を適用する。ボード側のUSB起動分岐もbootcmd/bootdelayを上書きするため、同じ停止設定へ変更する。ソース差分と入力ハッシュを保存する。
+3. ESOSの両coreの実ELFを展開・検査し、ELF entryをSPL DTの各fw_boot_entryへ反映する。Pico用ESOS DTのうち有効なRPMIサーバーを一つ選び、共有queueとslot、doorbellの契約をPico用OpenSBI/U-Boot DTへ反映する。k3_defconfigへ試験用設定（bootcmd空、bootdelay=-1、DDR情報保存とFSBL更新の無効化、永続envの読込み停止）を適用する。ボード側のUSB起動分岐もbootcmd/bootdelayを上書きするため、同じ停止設定へ変更する。ソース差分と入力ハッシュを保存する。
 4. 同一作業ツリー内でFSBLとU-Bootをビルドする。ベンダーconfig.mkがsrctreeを直接参照するため、この処理でO=による分離ビルドを使わない。
-5. 最終.config、FSBLサイズとAIHDヘッダー、conf_11、組込みOpenSBIの内容を検査する。コンパイル済みSPL DTの両entryとELFが一致し、そのDTBがFSBLに含まれることも検査する。ESOSを明示構成で追加してFITを生成する。
+5. 最終.config、FSBLサイズとAIHDヘッダー、conf_11、組込みOpenSBIの内容を検査する。コンパイル済みSPL DTの両entryとELFが一致し、そのDTBがFSBLに含まれることも検査する。最終U-Boot FITの選択DTのRPMI transportがESOS側と一致することを検査し、ESOSを明示構成で追加してFITを生成する。
 6. ホスト検査合格後、[実機テスト手順](jupiter2-reference-ram-boot-tests.md)でUFS列挙を確認する。成功前にLinux起動やKeystoneへ進まない。
 7. 販売元版が成功したら同じソース・ESOS・設定でOpenSBIだけをKeystone版に変えて再ビルドし、入力manifestを比較する。
 
@@ -91,5 +91,11 @@ Keystone版は`--variant keystone`、対応する`fw_dynamic.bin`、確認済み
 不一致であることを確認した（KSB-067）。ビルダーは実ELFから起動先を反映するよう変更した。
 ELFハッシュ・LOAD配置・元のDT値をrecords/rcpu-elf.jsonへ、検査済みSPL DTBをrecords/spl.dtbへ保存する。
 修正候補のホスト検証と実機再試験は[第10節](jupiter2-reference-ram-boot-tests.md#10-実elfで確定した起動先不一致と修正後の試験ksb-067)を参照する。
+
+実機では両coreの起動応答まで通過した。その後のOpenSBI無出力を調べた実FITで、
+AP側DTのRPMI queue=0x100e00000と、有効なESOS core 0のqueue=0x100800000が不一致だった（KSB-069）。
+参照ソースと販売元ESOSの版・構成を揃えるため、後者を実入力から読み取ってPico用DTへ反映する。
+共有queueの契約・ESOS DTハッシュをrecords/rpmi-contract.json、検査済みAP DTをrecords/opensbi-uboot.dtbへ保存する。
+修正後のOpenSBI起動は実機再試験で確認する。解析と確認コマンドは[第12節](jupiter2-reference-ram-boot-tests.md#12-実fitで確認したrpmi共有領域の不一致ksb-069)を参照する。
 
 ホストでの生成・ハッシュ照合はFSBLのDDR初期化、ESOS実行、RPMIのABI、UFS通信の成功を保証しない。実機の判定・ログ採取と失敗時の復帰は別紙に記載する。NOR書込みがないことも、DDR保存設定を無効化しただけでは保証せず、実機ログで確認する。

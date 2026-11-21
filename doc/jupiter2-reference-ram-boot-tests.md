@@ -309,3 +309,71 @@ consoleだけ無出力かはこのログだけでは分からない。
 OpenSBIの起動コードとリンク先、DTのconsole/RPMI/CPU設定、引渡しABIとの整合性を調べる。
 SPLによるfixup後の実行時DTと一致するとは扱わず、必要なら追加の採取を行う。
 現段階では原因を推測してPMPを解除したり、cache設定を変更して再試験を反復したりしない。
+
+## 12. 実FITで確認したRPMI共有領域の不一致（KSB-069）
+
+ユーザー提供ram-boot-vendor.itbは2191805 bytes。
+SHA-256: cf820239195bc9f3dc825b7247e891ae0b59663c5d45e644bea294f999e58d95。
+同梱OpenSBIは270552 bytes、SHA-256:
+33072ac8216a74981ed36785a7d515f3c3cadcab3cef8d775972c28e2b9e6a9c。
+FITハッシュを検査して展開し、RISC-Vの起動命令とDTBを確認した。
+
+| 対象 | RPMI status | 共有領域 |
+| --- | --- | --- |
+| OpenSBI/U-Boot用DT | okay | 0x100e00000から4 queue |
+| ESOS core 0のPico用DT | okay | 0x100800000、全体0x4000 |
+| ESOS core 1のPico用DT | disabled | 0x100e00000、全体0x4000 |
+
+有効なサーバーはcore 0であり、AP側がそのサーバーとは異なる領域を参照していた。
+0x100e00000はcore 1のresource_table LOADとも重なる。
+各queueは0x1000、slotは0x100、core 0のmailbox3は0xcac90c00、channel 0である。
+doorbellのbaseはAP側と一致している。
+この組合せの設定不良は確認済みだが、OpenSBI無出力の唯一の原因、修正後の起動成功とはまだ扱わない。
+OpenSBIへ渡る実行時DTにはSPLのfixupがある点も区別する。
+
+修正ビルダーは選択済みESOSのrcpu0-dtb-pico-itxとrcpu1-dtb-pico-itxを展開し、
+親ノードも含めて有効なRPMIサーバーを探す。一つに決まらない場合は停止する。
+共有領域、queue/slotサイズ、mailbox phandle/provider/channelを検査し、
+k3-pico-itx.dtsへrpmi_shmem_mboxのボード別overrideを追加する。
+共通k3.dtsiや他ボードの設定、ESOSのstatusやバイナリー自体は変更しない。
+最終U-Boot FITのconf_11が選択するDTBを抽出して同じqueue/slot/doorbellを検査する。
+
+ホストでは、受け取った実DTの不一致を検出し、有効サーバーの選択と、
+実際の固定Pico DTSにoverrideを追加したcpp/dtc生成物の一致を確認した。
+DTのプリプロセスは固定ソースの.configから定義を生成したホスト検査であり、
+K3 GCCの完全ビルドではない。追加したRPMIの3件を含め、ELF/DTホスト試験6件とFIT試験23件を実行する。
+
+```bash
+python3 scripts/tests/test_jupiter2_reference_elf.py
+python3 scripts/tests/test_jupiter2_ram_boot_image.py
+```
+
+開発PCのpublicルートで更新し、第8節の同じビルドコマンドを新しいoutputで実行する。
+この修正でも引数の追加は不要。例えばOUTを次にする。
+
+```bash
+git pull --ff-only
+OUT="$PWD/work/jupiter2-ram-boot/reference-vendor-rpmi-$(date +%Y%m%d-%H%M%S)"
+```
+
+成功後は次を確認する。
+
+```bash
+cat "$OUT/records/rpmi-contract.json"
+fdtget -t x "$OUT/records/opensbi-uboot.dtb" \
+  /soc/rpmi-shmem-mbox@cac90c00 reg
+```
+
+今回の入力ではactive_core=0、shmem_base_hex=0x100800000。
+regは次の20 cellsに対応する。
+
+```text
+1 800000 0 1000   1 801000 0 1000
+1 802000 0 1000   1 803000 0 1000
+0 cac90c00 0 100
+```
+
+第8節と同じ完全電源断・FDL手順で、今回作ったFSBLと統合FITを対で転送する。
+両coreのhandshake acknowledgedの後、OpenSBIバナーとU-Bootプロンプトを確認する。
+両方が出てからUFS列挙へ進む。無出力なら全UARTログと今回のmanifestを保存して停止する。
+修正候補の実機成功・QEMU guest統合は未検証である。

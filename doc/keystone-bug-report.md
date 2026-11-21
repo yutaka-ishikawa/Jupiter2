@@ -93,6 +93,7 @@
 | KSB-066 | 診断版のRCPU entryがSPLで0xxと表示される | 本リポジトリの診断パッチとtiny printf | 表示修正を実機確認 |
 | KSB-067 | 参照SPL DTのcore 1起動先が販売元ESOS ELF entryと不一致 | 固定参照FSBLと今回の販売元ESOSの統合 | 修正後の両core応答を実機確認・後段KSB-068で停止 |
 | KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | 実機観測・原因未確定 |
+| KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 実FIT内の両DTで不一致確認・整合修正候補 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1067,3 +1068,29 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
   同梱OpenSBI/DTB/ESOSのハッシュと配置、OpenSBI初期命令とヘッダー、console/RPMI設定を確認する。
   FIT内のDTはSPLによる実行時fixup前であり、必要なら次に実行時FDT/引渡し情報を採取する。
 - 状態：未修正・調査中。UFS試験へは進まない。詳細は参照RAM起動テスト手順の第11節。
+  提供FITの解析でKSB-069の具体的なqueue設定不一致を確認し、次の修正候補とした。
+
+### KSB-069: OpenSBI用DTと有効なESOS RPMIサーバーの共有領域不一致
+
+- 登録日：2026-11-21。ユーザー提供ram-boot-vendor.itbは2191805 bytes、
+  SHA-256 cf820239195bc9f3dc825b7247e891ae0b59663c5d45e644bea294f999e58d95。
+  OpenSBIは270552 bytes、SHA-256 33072ac8216a74981ed36785a7d515f3c3cadcab3cef8d775972c28e2b9e6a9c。
+- 証拠：FITのOpenSBI/U-Boot用DTはRPMI queueを0x100e00000から4本指定する。
+  同じFITのrcpu0-dtb-pico-itxはrpmi@2がokay、shmem-base=0x100800000。
+  rcpu1-dtb-pico-itxの0x100e00000側rpmi@2はdisabled。
+  有効サーバーはcore 0、共有領域0x4000、各queue 0x1000、slot 0x100。
+  mailbox3のbase=0xcac90c00、channel=0でAP側doorbell baseとは一致する。
+- 影響：OpenSBIと有効ESOSサーバーが異なるqueue領域を参照する。
+  0x100e00000はcore 1 ELFのresource_table LOADとも重なる。
+  具体的な設定不一致は確定。OpenSBI無出力の唯一の原因と断定せず、実行時fixupも照合対象。
+- 帰属：固定参照ソースと今回の販売元ESOSの組合せの互換性不良。
+  参照k3.dtsiは0x100e00000で、今回のESOSと版・構成が揃っていなかった。
+- 修正候補：選択済みPico用ESOS DTを展開して、有効なRPMIサーバーが一つであることを確認する。
+  queue/slotサイズとmailbox provider/channelを検査し、その契約をPico用U-Boot DTへ反映する。
+  共通k3.dtsiや他ボードは変更しない。最終U-Boot FITの選択DTも同じ契約であることを必須検査する。
+  ESOS/DTハッシュと契約をrecords/rpmi-contract.jsonへ記録する。
+- 検証：実入力の不一致拒否、固定ソースのPico DTSのcpp/dtc生成後の一致を確認。
+  実FITから同梱OpenSBIと全27 ESOS payloadを取り出した入力でprepare-only CLIが通り、
+  両entryと有効サーバーの契約・ハッシュ・ソース差分を記録した。
+  ELF/RPMI DTホスト試験6件、FITホスト試験23件が合格。修正後のK3 GCC完全ビルド、
+  OpenSBI/RPMI/UFSの実機成功、QEMU guest統合は未確認。

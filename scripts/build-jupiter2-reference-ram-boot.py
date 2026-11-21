@@ -98,6 +98,93 @@ def verify_rcpu_dtb(fit, path, firmwares):
             raise ValueError(f'compiled SPL DT boot entry differs from rcpu{core} ELF')
 
 
+def fit_payload(fit, node, blob, total):
+    payload = fit.image_data(node, blob, total)
+    compression = fit.string(node, 'compression')
+    if compression == 'none':
+        return payload
+    if compression != 'lzo' or not shutil.which('lzop'):
+        raise ValueError('ESOS inspection requires none/LZO compression and lzop for LZO')
+    return subprocess.run(['lzop', '-d', '-c'], input=payload,
+                          capture_output=True, check=True).stdout
+
+
+def enabled_nodes(fit, node):
+    if 'status' in node.props and fit.string(node, 'status') not in ('okay', 'ok'):
+        return
+    yield node
+    for child in node.children.values():
+        yield from enabled_nodes(fit, child)
+
+
+def rpmi_contract(fit, trees):
+    candidates = []
+    for core, tree in enumerate(trees):
+        nodes = list(enabled_nodes(fit, tree))
+        for node in nodes:
+            if ('compatible' not in node.props or 'spacemit,k3-os0-rpmi'
+                    not in fit.strings(node.props['compatible'])):
+                continue
+            values = {k: fit.number(node.props[k]) for k in
+                      ('shmem-base', 'shmem-size', 'slot-size',
+                       'a2p-queue-size', 'p2a-queue-size')}
+            queue = values['a2p-queue-size']
+            slot = values['slot-size']
+            if (not queue or queue != values['p2a-queue-size'] or not slot
+                    or queue % slot or values['shmem-size'] < queue * 4):
+                raise ValueError('unsupported ESOS RPMI four-queue layout')
+            cells = node.props['mboxes']
+            if len(cells) != 8 or int.from_bytes(cells[4:], 'big') != 0:
+                raise ValueError('expected ESOS RPMI mailbox channel zero')
+            phandle = int.from_bytes(cells[:4], 'big')
+            providers = [n for n in nodes if 'phandle' in n.props
+                         and fit.number(n.props['phandle']) == phandle]
+            if (len(providers) != 1 or len(providers[0].props['reg']) != 8
+                    or fit.number(providers[0].props['#mbox-cells']) != 1):
+                raise ValueError('unsupported ESOS RPMI mailbox provider')
+            doorbell = int.from_bytes(providers[0].props['reg'][:4], 'big')
+            if (doorbell != 0xcac90c00 or 'compatible' not in providers[0].props
+                    or 'spacemit,k3-mailbox3' not in fit.strings(providers[0].props['compatible'])):
+                raise ValueError('unsupported Pico RPMI doorbell provider')
+            if values['shmem-base'] + queue * 4 > 1 << 64:
+                raise ValueError('RPMI shared-memory range overflow')
+            candidates.append({**values, 'active_core': core, 'doorbell_base': doorbell,
+                               'shmem_base_hex': hex(values['shmem-base'])})
+    if len(candidates) != 1:
+        raise ValueError('expected exactly one enabled RPMI server in selected ESOS board DTs')
+    return candidates[0]
+
+
+def rpmi_reg_cells(contract):
+    result = []
+    for index in range(4):
+        address = contract['shmem-base'] + index * contract['a2p-queue-size']
+        result += [address >> 32, address & 0xffffffff, 0, contract['a2p-queue-size']]
+    # Preserve the existing AP doorbell register extent, not the ESOS controller extent.
+    return result + [0, contract['doorbell_base'], 0, 0x100]
+
+
+def rpmi_board_override(contract):
+    cells = rpmi_reg_cells(contract)
+    rows = ['<' + ' '.join(f'0x{v:x}' for v in cells[i:i + 4]) + '>'
+            for i in range(0, len(cells), 4)]
+    return ('\n/* Match the enabled server in the selected ESOS board DT. */\n'
+            '&rpmi_shmem_mbox {\n\treg = ' + ',\n\t      '.join(rows) + ';\n'
+            f'\triscv,slot-size = <0x{contract["slot-size"]:x}>;\n}};\n')
+
+
+def verify_rpmi_dtb(fit, data, contract):
+    root, _ = fit.parse_fdt(data)
+    nodes = [n for n in enabled_nodes(fit, root) if 'compatible' in n.props
+             and 'riscv,rpmi-shmem-mbox' in fit.strings(n.props['compatible'])]
+    expected = b''.join(v.to_bytes(4, 'big') for v in rpmi_reg_cells(contract))
+    names = ['a2p-req', 'p2a-ack', 'p2a-req', 'a2p-ack', 'db-reg']
+    if (len(nodes) != 1 or nodes[0].props['reg'] != expected
+            or fit.strings(nodes[0].props['reg-names']) != names
+            or fit.number(nodes[0].props['riscv,slot-size']) != contract['slot-size']):
+        raise ValueError('U-Boot/OpenSBI DT RPMI transport differs from enabled ESOS server')
+
+
 def configure(text):
     # Remove active settings and both standard and vendor-style commented forms.
     lines = [line for line in text.splitlines()
@@ -172,18 +259,21 @@ def build(args):
     for core in range(2):
         name = f'rcpu{core}-fw'
         node = root.children['images'].children[name]
-        payload = fit.image_data(node, esos_blob, esos_total)
-        compression = fit.string(node, 'compression')
-        if compression == 'lzo':
-            if not shutil.which('lzop'):
-                raise ValueError('RCPU ELF inspection requires lzop on PATH')
-            payload = subprocess.run(['lzop', '-d', '-c'], input=payload,
-                                     capture_output=True, check=True).stdout
-        elif compression != 'none':
-            raise ValueError('unsupported RCPU firmware compression')
+        payload = fit_payload(fit, node, esos_blob, esos_total)
         info = elf_load_map(payload)
         info['name'] = name
         firmwares.append(info)
+    board_trees = []
+    board_hashes = {}
+    for core in range(2):
+        name = f'rcpu{core}-dtb-pico-itx'
+        if name not in names:
+            raise ValueError('selected ESOS configuration lacks ' + name)
+        payload = fit_payload(fit, root.children['images'].children[name], esos_blob, esos_total)
+        board_trees.append(fit.parse_fdt(payload)[0])
+        board_hashes[name] = hashlib.sha256(payload).hexdigest()
+    contract = rpmi_contract(fit, board_trees)
+    contract['board_dtb_sha256'] = board_hashes
     args.output.mkdir(parents=True)
     source, records = args.output / 'source', args.output / 'records'
     records.mkdir()
@@ -207,6 +297,9 @@ def build(args):
     spl_dts = source / 'arch/riscv/dts/k3_spl.dts'
     spl_dts.write_text(set_rcpu_entries(spl_dts.read_text(), firmwares))
     (records / 'rcpu-elf.json').write_text(json.dumps(firmwares, indent=2) + '\n')
+    board_dts = source / 'arch/riscv/dts/k3-pico-itx.dts'
+    board_dts.write_text(board_dts.read_text() + rpmi_board_override(contract))
+    (records / 'rpmi-contract.json').write_text(json.dumps(contract, indent=2) + '\n')
     # Vendor config.mk writes to srctree, so each run uses its own checkout.
     shutil.copyfile(args.opensbi_bin, source / 'board/spacemit/k3/fw_dynamic.bin')
     defconfig = source / 'configs/k3_defconfig'
@@ -228,6 +321,7 @@ def build(args):
                 'inputs': {str(p): sha(p) for p in (args.opensbi_bin, args.esos_itb)},
                 'settings': SETTINGS, 'diagnostic_patch_sha256': sha(diagnostic_patch),
                 'rcpu_firmwares': firmwares,
+                'rpmi_contract': contract,
                 'hardware_verified': False, 'status': 'prepared'}
     (records / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     if args.prepare_only:
@@ -253,6 +347,12 @@ def build(args):
         raise ValueError('verified SPL DTB not found in wrapped FSBL')
     shutil.copyfile(compiled_dtb, records / 'spl.dtb')
     manifest['spl_dtb_sha256'] = sha(compiled_dtb)
+    uroot, ublob, utotal = fit.read_fit(source / 'u-boot.itb')
+    selected = uroot.children['configurations'].children['conf_11']
+    dtname = fit.string(selected, 'fdt')
+    dtdata = fit.image_data(uroot.children['images'].children[dtname], ublob, utotal)
+    verify_rpmi_dtb(fit, dtdata, contract)
+    (records / 'opensbi-uboot.dtb').write_bytes(dtdata)
     run([sys.executable, packager, '--fsbl', source / 'FSBL.bin',
          '--uboot-itb', source / 'u-boot.itb', '--uboot-layout', 'reference',
          '--esos-itb', args.esos_itb, '--esos-configuration', args.esos_configuration,
