@@ -82,6 +82,7 @@
 | KSB-055 | RPMI CPPC要求のfield順序が上流修正前 | OpenSBI wire ABI／server互換性制約 | 修正候補・K3 server照合待ち |
 | KSB-056 | PMU FW counter探索失敗時の配列index | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-057 | RAM FIT作成が共通ESOS構成・LZOを扱えない | 本リポジトリの実機導入ツール | 修正済・ホスト検査のみ |
+| KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 実機再現・調査中 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -837,3 +838,17 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   FIT生成、格納データ一致、構成指定、展開後の重複拒否を含むホスト試験を実施。
   入力は再現用fixtureで、ユーザー実ESOSバイナリー自体は未入手。
   Jupiter2実機起動・ESOS初期化・QEMU integration PASSは未確認。
+
+
+### KSB-058: Jupiter2の小領域が実機PMP粒度で表現できず起動停止
+
+- 登録日：2026-11-21。対象：K3のdomain登録とopensbi/lib/sbi/sbi_hart.cのKeystone用PMP設定。
+- 条件・証拠：ユーザーのJupiter2実機UARTでOpenSBI v1.6、SM/TIMER初期化後、
+  base=0xcac90c00、order=8、flags=0x80000003の領域をgran=12で表現できず、
+  init_coldboot: PMP configure failed (error -2)で停止した。
+- 影響：OpenSBI＋SMへ到達するが、U-Boot・Linuxへ移行できない。
+- 由来：販売元domainの小領域登録と、本リポジトリのK3 Keystoneの厳密な表現可能性検査の
+  組合せによる移植・統合問題。上流Keystone本体の欠陥とは扱わない。
+- 状態：登録元と同一4 KiBページの権限を調査中。検査無効化、domain entry削除、
+  汎用的な無条件の範囲拡大は行わない。修正後の実機検証は未実施。
+- 詳細・検証計画：[Jupiter2 PMP粒度問題](jupiter2-pmp-granularity-issue.md)。
