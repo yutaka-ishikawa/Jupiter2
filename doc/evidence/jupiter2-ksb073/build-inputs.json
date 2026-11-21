@@ -1,0 +1,63 @@
+{
+  "source_base": "79129697eda0c3315273409973d339abae47575b",
+  "source_status": "KSB-073 fix in worktree; fix commit recorded in bug register after commit creation",
+  "sample_packages": {
+    "hello.ke": {
+      "bytes": 503855,
+      "sha256": "bfb080bbcb7494fffe58af8ae3f5d8671075fb4c3592d186aab02641f5cd752f"
+    },
+    "hello-native.ke": {
+      "bytes": 212331,
+      "sha256": "4f63436b50febe468f10f0f789d81f53612c0e8c9dc3b9b6b46cf548f7628879"
+    }
+  },
+  "kernel_release": "6.18.3-ksb073-qemu",
+  "kernel_source": "linux-k3 from this repository; dedicated minimal QEMU configuration",
+  "kernel_config_sha256": "e87f597252eb4f8688d58d0a72fa15b34d0390add15aa538d55eca7f4a84724a",
+  "driver_sha256": "4ba66eb1c05c44ef1a1066b901b95edac047aa3dcaac68681b2c8d417a66c91c",
+  "driver_source_sha256": {
+    "keystone/linux-keystone-driver/keystone-enclave.c": "431e9f094f3bcaf9d328e2d471bd5877451c2347ed81b26847ced23fd10ee8bf",
+    "keystone/linux-keystone-driver/keystone-ioctl.c": "0abd49447d2844b9165d2677908aa734dac0a35693709a93c47880bc83ad5149",
+    "keystone/linux-keystone-driver/keystone-page.c": "e2070305ed57371a34f0f030c6f0266d0be151c8b0b7310d2e98055df28b5c2a",
+    "keystone/linux-keystone-driver/keystone-sbi.c": "59b161e0c3d8ba90ae6108d740b3a00c58420bc0036f924e758ec7ad8e03bbd2",
+    "keystone/linux-keystone-driver/keystone-sbi.h": "38a74d1ff7c7835ec74ffc148900386d3f08ef8cd1d45e6488f59ee05e066c0c",
+    "keystone/linux-keystone-driver/keystone.c": "8a1beda508ef81c9dddb7ae7f5ffd4cbe6296c271ee573dce9af46657393817a",
+    "keystone/linux-keystone-driver/keystone.h": "488f920255a96584ad687b37ffcbe7159903bbc30cc31b0c87548608490b3bb1",
+    "keystone/linux-keystone-driver/riscv64.h": "63651f7ae111ca51640c864428a9bd154ffcbe92e6c416cb7f7459f4c59ac6cd"
+  },
+  "sample_runner_sha256": {
+    "hello": "9a5b566a219cde8654990a3dbb72626b66e39af4594a69369b014df8ae21f8cd",
+    "hello-native": "715cb1b1a3ed143d0e55b641b9e3e7185214d83ceee8a1a5be70f45e62233210"
+  },
+  "test_source_sha256": {
+    "keystone/sm/src/enclave.c": "061c2aa8f6af004b619dc71b57a2d2d211bddec57149b79fd2429d1ee38a9042",
+    "scripts/tests/jupiter2-ram-boot/linux-sample-init.sh": "93cf1cfbaea00bcec1902f04da04a63a46320b0e322392ab729706e63b01ffb0",
+    "scripts/tests/jupiter2-ram-boot/run_linux_sample_regression.py": "a047d875d9af805a0bd7e045c0f0330a8d16134990d7eb14a719e3ac32e63129"
+  },
+  "guest_runtime_packages": {
+    "busybox-static": "1:1.37.0-6+b9",
+    "libc6": "2.41-12+deb13u4",
+    "libgcc-s1": "14.2.0-19",
+    "libstdc++6": "14.2.0-19"
+  },
+  "firmware_provider": "unavailable (basic samples; not an attestation test)",
+  "compiler": "LLVM/Clang 19.1.7; host GCC 14.2.0 for kernel build utilities",
+  "scope": "real QEMU + real Linux + real driver + provided SDK/Eyrie/sample binaries; no SBI/PMP/CSR mocks",
+  "reference_expected_result": "hello pinned to Linux CPU3 stops at runner+0x529c, load access fault cause=5, exit=139; subsequent apps skipped",
+  "fixed_expected_result": "hello and hello-native on Linux CPU3 and CPU8 all exit=0 with PASS SAMPLE and DESTROY, in both PMP profiles",
+  "not_covered": [
+    "all 12 samples suite",
+    "full verifications/run-all.sh",
+    "host EPM access-denial negative test",
+    "real-board retest of fixed firmware",
+    "actual K3 ESOS/RPMI/UFS integration",
+    "real-board root PMP budget/locks and 38-bit PMPADDR model"
+  ],
+  "published_uart_format": "All UART text retained; CRLF normalized to LF",
+  "published_log_sha256": {
+    "fixed-mixed.log": "bc7c69647801e4a52b4bdb2415cb926ab84b1de2381e3adf9271274b3a231827",
+    "fixed-uniform16.log": "26e143dc65401d6407ca8bad55b1937a8aae7395926c8fa22092fb0ef462ffdf",
+    "reference-mixed.log": "2af1c54da60ca3b5345a0cb09a1fa433de75115bb383cb44101129da35b7a5c7",
+    "reference-uniform16.log": "727334a789943f95038ceb40a5ddaf93c5bd5d9ad0c035eed8dd9a97c4ac3392"
+  }
+}

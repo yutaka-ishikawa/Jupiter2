@@ -29,7 +29,7 @@ QEMUのPASSは、その入力構成に対する結果であり、実機構成へ
 | P0 | X100=16、A100=32 PMP（KSB-071） | Hart別のPMP数を再現し、混在したまま全Hart起動・Enclave同期を実行 | `mixed-pmp` オプションを追加 |
 | P0 | PMP粒度4 KiB。256バイトのRPMI doorbell領域が表現できない（KSB-058） | 混在プロファイルを4096バイト粒度にし、小領域の拒否・ページ単位の保護を検証 | 混在プロファイルの粒度を修正。実機domain fixtureは未実装 |
 | P0 | rootが13エントリー、Keystone空き3個。RCPU保護にLビットあり（KSB-059/060） | 実機相当のdomain規則・順序・ロックを入力する試験を追加 | 現行QEMUのdomainを実機同等にはしていない。未実装 |
-| P0 | OS/UTMのslot共用では実機fallbackと競合（KSB-061/062） | 少数slot、広域fallback、共有regionの解放・再割当てを本物のSMで回帰試験 | コード修正済みの項目だが、今回の混在構成でのguest再試験は未実施 |
+| P0 | OS/UTMのslot共用では実機fallbackと競合（KSB-061/062） | 少数slot、広域fallback、共有regionの解放・再割当てを本物のSMで回帰試験 | KSB-073でUTM復帰も修正し、混在Linux guestでhello二種成功。slot不足・共有解放・実機予約条件の負の試験は未実施 |
 | P1 | 実機のPMPADDR実装幅38ビット | WARL上位ビットと範囲境界の実測に合わせたCSRモデル・試験を追加 | 今回の混在実測は54ビット。実機の38ビットへ変更していない |
 | P1 | PMP16〜31の初期状態が未採取 | 追加範囲のOFF/ロック/有効規則、特にPMP16のTORロックによるPMPADDR15への影響を検証 | SM/OpenSBIに全数検査を実装。負の条件を作るQEMU診断機構は未実装 |
 | P1 | Linux直接mailboxとM-onlyページの所有権競合（KSB-070） | M-onlyページを含む実機相当DT入力、直接アクセスの拒否、SBI経由利用を検証 | 別名Linux DTBの生成・検査を実装済み。QEMUに同じmailbox機器モデルはない |
@@ -110,3 +110,12 @@ QEMU本体のビルドと両プロファイルのQMP設定検査に成功した�
 一方、今回のQEMUのroot使用数は7個、空き9個、PMPADDR幅54ビットだった。
 実機のroot13個・空き3個・38ビットを再現する試験は追加が必要である。
 専用S-mode guestの成功をLinux/SDKのrun-allやEnclave隔離のPASSとはしない。
+
+
+## 7. 実Linux/SDK/Eyrie/sampleまでの回帰試験を追加
+
+KSB-073では実機と同じ提供sampleを実Linux guestで実行した。
+修正前はQEMUでもrunner+0x529cのload access fault・終了139を再現できた。
+修正後は両PMP構成×Linux CPU3/8×hello/nativeの計8回すべて正常終了した。
+[入力hash・修正箇所・UARTと比較結果](jupiter2-utm-host-access-issue.md#6-実qemuでのsample回帰試験結果)を参照する。
+これは全sample suiteや実機domain fixture等の未実装項目が解消したことを意味しない。

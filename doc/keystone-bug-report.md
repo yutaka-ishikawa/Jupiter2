@@ -95,9 +95,9 @@
 | KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | KSB-069修正後にU-Boot到達を実機確認 |
 | KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 整合修正後のU-Boot・UFS・Linux起動を実機確認 |
 | KSB-070 | Linux用DTがSMのM-only mailboxページ内の直接controllerを有効化 | Bianbu Linux DTとK3 SMの所有契約 | 提供DTBで不整合確認・別名DTBで限定修正候補 |
-| KSB-071 | X100/A100のPMP数混在を16個固定の移植処理が拒否 | K3 Keystone移植のroot配置・PMP証拠管理 | 混在対応候補実装・SM/OpenSBIクロスリンク済み、実機未検証 |
+| KSB-071 | X100/A100のPMP数混在を16個固定の移植処理が拒否 | K3 Keystone移植のroot配置・PMP証拠管理 | 混在対応候補・QEMU実Linuxで二種成功、実機helloはKSB-073で停止 |
 | KSB-072 | QEMU回帰試験が実機の混在PMP・粒度・domain条件を含まない | Jupiter2部分モデルと試験範囲の制約 | 混在PMP/4 KiBオプション実装、実機相当domain等は未実装 |
-| KSB-073 | 全16 CPU起動後、hello二種のhost runnerがload access faultで停止 | 実機Linux・SDK/driver/SM統合、原因未確定 | 実機dmesgで両runnerのSIGSEGV確認・一致するELFで解析が必要 |
+| KSB-073 | 全16 CPU起動後、hello二種のhost runnerがload access faultで停止 | K3の独立UTM割当てとホストPMP復帰の不整合 | SM修正・実QEMUで旧版の障害再現、修正版hello二種8回PASS、実機再試験待ち |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1153,6 +1153,7 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 影響：A100がLinuxへ到達せず、sm_is_ready()の全16 Hart STARTED条件を満たせない。CPU3へのtasksetでもhello CREATEが100100で拒否される。SM not initializedという共通診断は実際の拒否条件を区別できない。
 - 方針：[混在PMP対応計画](jupiter2-heterogeneous-pmp-plan.md)。共通16個の配置を維持し、32個側の追加範囲は全数検証して無効状態を要求する。追加範囲の実態を未確認のまま無視・解除しない。
 - 状態：共通16個と実装16/32個の分離、全追加範囲の検査、32個snapshot/証拠管理、SM拒否理由の診断を実装。SMのmixed/qemu16各30単位コンパイルとmixedのOpenSBIリンクを確認。QEMU専用S-mode guestで一律16個と16/32混在の全16 Hart readback・HSM到達を確認。Linux/SDKのguest統合、修正版実機起動、hello成功は未検証。提供ログには複数回の過去試行が含まれ、末尾側の起動を根拠としている。修正commit：[9bfb8bf74f62](https://github.com/yutaka-ishikawa/public/commit/9bfb8bf74f62f1c253be9fd11f6bc36a03b02105)。
+- 後続確認：実機の新dmesgでは全16 CPU起動を確認（firmware hashは未照合）。KSB-073修正後の実QEMU/Linuxでは、混在構成を含むhello二種8回が正常終了。全run-allや修正版実機helloの結果とは区別する。
 
 ### KSB-072: QEMU試験条件と実機のPMP・起動契約が不一致
 
@@ -1165,9 +1166,11 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 
 ### KSB-073: 全16 CPU起動後、hello二種のhost runnerがload access faultで停止
 
-- 入力：2026年11月21日提供のdmesg.txtと、hello-native.keの終了コード139。Linux 6.18.3、最新ログではBrought up 1 node, 16 CPUsを確認。起動firmwareのhashは未照合であり、全CPU起動をEnclave成功とは扱わない。
-- 観測：hello-runnerはCPU2でepc=0x2aaefb129c、ELF内相対位置0x529c、badaddr=0x3fa252a000。hello-native-runnerはCPU1でepc=0x2ae5c49244、相対位置0x5244、badaddr=0x3fb2373000。両方ともcause=5（load access fault）、SIGSEGV code=2。直前にEPM 4 MiBを物理0x11c000000へ割り当てた記録がある。
-- 切り分け：ホスト側runnerのロード例外であり、TA/Enclave内コードの例外と断定しない。以前の100100による受付拒否とは異なる症状。dmesgだけではSM CREATE/RUNの到達位置やPMP・PMA・PTEのどれが原因かを確定できない。
-- 関連経路：SDK PhysicalEnclaveMemory::writeMem/allocMem、KeystoneDevice::map、およびdriver keystone_mmap_locked。これらは調査対象であって、現段階で原因箇所を確定したものではない。
-- 次の確認：実機に配置したhello.keとhello-native.keから同一のrunner ELFを取得し、0x529c/0x5244の命令・関数を特定。必要に応じてmmap/ioctlの順序、障害VAのmapping、実PMP/PMA/PTE属性、UART上のSM診断を照合する。
-- 帰属・状態：実機統合の障害として登録。SDK/driverの上流不具合とはまだ帰属しない。PMP検査を解除する修正は行わず、原因判明前のコード変更・修正成功は主張しない。
+- 入力：2026年11月21日提供のdmesg.txtと実機配置済みhello.ke/hello-native.ke。Linux 6.18.3で全16 CPU起動を確認。旧firmwareのhashは未照合。hello-nativeの終了コード139。
+- 観測：hello-runnerはCPU2でepc=0x2aaefb129c、ELF内位置0x529c、badaddr=0x3fa252a000。hello-native-runnerはCPU1でepc=0x2ae5c49244、位置0x5244、badaddr=0x3fb2373000。両方cause=5（load access fault）、SIGSEGV code=2。直前にEPM 4 MiBを物理0x11c000000へ割り当てている。
+- 同一ELFによる特定：両方のEPCはdispatch(void*)+8のld a4,0(a0)、RAはEnclave::run内のOCALL callback呼出し直後（0x6092/0x603c）に一致。UTM上edge_call headerの最初の読取りで停止している。CREATE/RUNを経たOCALL復帰後であり、初期ELFロード中の失敗とは区別する。
+- ソース上の原因：KSB-062でK3のUTMを独立slot化したが、revoke_region()がREGION_UTMにもNO_PERMを残す。後段のOS許可より優先され、ホストの共有bufferアクセスを遮る。上流一般ではなくK3移植の組合せの不備。実機CSR/PTEのdumpは未採取で、修正版による実機確認を要する。
+- 修正候補：K3のUTMだけをホスト復帰・失敗rollback時にk3_pmp_apply_verifiedでUNSETしCSR readbackを行う。EPMのNO_PERMは維持する。汎用UTMとBACKINGは変更しない。対象：keystone/sm/src/enclave.c。
+- 検証：SM全30単位クロスコンパイル、OpenSBIリンクとmtvec整列に成功。実QEMU＋Linux 6.18.3＋実driver＋提供SDK/Eyrie/sampleで比較し、修正前は一律/混在の両構成でhelloのrunner+0x529c、cause=5、終了139を再現。修正後は両構成×CPU3/8×hello/nativeの計8回が正常出力・終了0・DESTROY。全12 sample、run-all全体、EPM拒否の負の試験、修正版の実機試験は未実施。
+- 過去のPASSとの関係：保存済みsample成功記録は11月9日。UTM独立slot化は11月21日で、その後の同一成果物のsample回帰確認が不足していた。今回QEMUでも障害を再現し、修正前後の比較を記録した。
+- 詳細・package/runner hash・再試験手順：[UTMホスト復帰の解析](jupiter2-utm-host-access-issue.md)。修正commitは本更新を含むcommit。

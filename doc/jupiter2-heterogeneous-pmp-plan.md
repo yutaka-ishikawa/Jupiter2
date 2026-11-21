@@ -251,3 +251,14 @@ SM/OpenSBIの試験用raw bin：SHA-256
 同じソースでもビルド条件やツールが違えばhashは変わるため、利用者の成果物も別途記録する。
 既存の実ツールを使うホスト梱包試験43件も成功。
 EnclaveのCREATE/RUN、IPI同期更新、Linux idle/hotplug、追加範囲を不正状態にする負の試験は未実施。
+
+
+## 8. その後の実Linux guestでのsample確認（KSB-073）
+
+起動確認だけでは検出できなかったUTMホスト復帰の不備を修正し、実QEMU＋実Linux＋実driverで、
+利用者提供のhello/hello-nativeを実行した。一律16個と16/32混在の両構成、Linux CPU3/8固定の計8回で
+正常出力・終了0・DESTROYを確認した。修正前の終了139も両構成で再現した。
+本書のそれ以前の「Linux/SDK実行未実施」は当初の検証時点の記録であり、
+現在の二種の試験結果は[KSB-073の比較試験と証跡](jupiter2-utm-host-access-issue.md#6-実qemuでのsample回帰試験結果)を参照する。
+全verification suite、実機相当root配置のfixture、EPMアクセス拒否・hotplug等の負の試験、
+修正版の実機hello二種の確認は引き続き未実施。

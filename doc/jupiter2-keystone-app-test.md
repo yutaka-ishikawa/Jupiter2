@@ -270,3 +270,14 @@ CPU8〜15が起動せずhello CREATEが100100になる場合は
 今回の修正はSM/OpenSBIのみを更新したRAM起動で試せる。Linuxのonlineが0-15であることを確認してからhelloへ進む。
 `admission denied:` や `extra rejected` が出た場合はそのUARTログを保存し、検査を無効化して続行しない。
 QEMU試験の範囲は[実機との差分](jupiter2-qemu-hardware-test-gaps.md)を参照。
+
+
+## helloがOCALL復帰後にSegmentation faultになる場合
+
+全16 CPU起動後にrunnerが共有bufferを読めずcause=5で停止する症状は
+[KSB-073のUTM復帰問題](jupiter2-utm-host-access-issue.md)を参照する。
+修正はSM側で行う。修正版firmwareをRAM起動した後、同じdriver/appsで第6章を再試験する。
+
+KSB-073の修正版は、実QEMUの一律/混在PMP構成でhelloとhello-nativeをCPU3/8に固定し、計8回の正常終了・DESTROYを確認した。
+修正前はQEMUでも同じ位置の終了139を再現した。UARTログと入力hashは上記解析文書に保存している。
+この結果は修正版の実機確認を置き換えない。

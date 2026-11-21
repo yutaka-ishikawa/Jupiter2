@@ -1,0 +1,699 @@
+
+OpenSBI v1.6
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+[SM/TIMER] host=sstc enclave=mtimer slice-us=10000
+Platform Name               : riscv-virtio,qemu
+Platform Features           : medeleg
+Platform HART Count         : 16
+Platform IPI Device         : aia-imsic
+Platform Timer Device       : aclint-mtimer @ 24000000Hz
+Platform Console Device     : uart8250
+Platform HSM Device         : ---
+Platform PMU Device         : ---
+Platform Reboot Device      : syscon-reboot
+Platform Shutdown Device    : syscon-poweroff
+Platform Suspend Device     : ---
+Platform CPPC Device        : ---
+Firmware Base               : 0x102000000
+Firmware Size               : 662 KB
+Firmware RW Offset          : 0x40000
+Firmware RW Size            : 406 KB
+Firmware Heap Offset        : 0x8b000
+Firmware Heap Size          : 106 KB (total), 6 KB (reserved), 16 KB (used), 83 KB (free)
+Firmware Scratch Size       : 8192 B (total), 512 B (used), 7680 B (free)
+Runtime SBI Version         : 2.0
+Standard SBI Extensions     : ipi,pmu,srst,hsm,rfnc,time,base,legacy,dbcn
+Experimental SBI Extensions : sse,fwft,dbtr
+
+Domain0 Name                : root
+Domain0 Boot HART           : 0
+Domain0 HARTs               : 0*,1*,2*,3*,4*,5*,6*,7*,8*,9*,10*,11*,12*,13*,14*,15*
+Domain0 Region00            : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region01            : 0x00000000d4017000-0x00000000d4017fff M: (I,R,W) S/U: (R,W)
+Domain0 Region02            : 0x00000000e0800000-0x00000000e0803fff M: (I,R,W) S/U: ()
+Domain0 Region03            : 0x00000000e081c000-0x00000000e081ffff M: (I,R,W) S/U: ()
+Domain0 Region04            : 0x00000000e0000000-0x00000000e000ffff M: (I,R,W) S/U: ()
+Domain0 Region05            : 0x0000000102000000-0x000000010203ffff M: (R,X) S/U: ()
+Domain0 Region06            : 0x0000000102000000-0x00000001020fffff M: (R,W) S/U: ()
+Domain0 Region07            : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address        : 0x0000000102200000
+Domain0 Next Arg1           : 0x0000000121e00000
+Domain0 Next Mode           : S-mode
+Domain0 SysReset            : yes
+Domain0 SysSuspend          : yes
+
+Boot HART ID                : 0
+Boot HART Domain            : root
+Boot HART Priv Version      : v1.12
+Boot HART Base ISA          : rv64imafdcbvh
+Boot HART ISA Extensions    : smaia,smstateen,sscofpmf,sstc,zicntr,zihpm,zicboz,zicbom,svpbmt,sdtrig,svade,smnpm
+Boot HART PMP Count         : 16
+Boot HART PMP Granularity   : 12 bits
+Boot HART PMP Address Bits  : 54
+Boot HART MHPM Info         : 16 (0x0007fff8)
+Boot HART Debug Triggers    : 2 triggers
+Boot HART MIDELEG           : 0x0000000000003666
+Boot HART MEDELEG           : 0x0000000000f4b509
+[K3-PMP] init_coldboot before configure hart=0
+[K3-PMP] configure-start Hart=0 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=0 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=0 rc=0
+[K3-PMP] init_coldboot after configure hart=0 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM] Initializing ... hart [0]
+[SM/RNG] selected=counter quality=development status=0
+[SM/CRYPTO] provider=unavailable attestation=0 sealing=0
+[SM/K3] legacy trusted-key initialization skipped; see SM/CRYPTO
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=1 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=1 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=1 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=2 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=2 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=2 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=3 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=3 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=3 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=4 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=4 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=4 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=5 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=5 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=5 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=6 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=6 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=6 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=7 count=16 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=7 implemented=16 common=16 extra-off=0 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=7 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=8 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=8 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=8 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=9 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=9 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=9 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=10 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=10 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=10 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=11 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=11 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=11 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=12 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=12 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=12 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=13 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=13 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=13 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=14 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=14 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=14 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+[K3-PMP] configure-start Hart=15 count=32 log2gran=12 addrbits=54
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] root plan regular=6 opensbi-mask=0x803f keystone-mask=0x7fc0 free=9
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+K3 PMP: OpenSBI entries=6 fallback=15 Keystone free=9 mask=0x7fc0
+[K3-PMP] root-config PASS hart=15 implemented=32 common=16 extra-off=16 root=7 Keystone-free=9
+[K3-PMP] configure-return Hart=15 rc=0
+[K3-PMP] region base=0x100000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xd4017000 order=12 flags=0x8000001b pmp=0x3
+[K3-PMP] region base=0xe0800000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe081c000 order=14 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0xe0000000 order=16 flags=0x80000003 pmp=0x0
+[K3-PMP] region base=0x102000000 order=18 flags=0x5 pmp=0x0
+[K3-PMP] share firmware deny base=0x102000000 order=18 via order=20
+[K3-PMP] region base=0x102000000 order=20 flags=0x3 pmp=0x0
+[K3-PMP] region base=0x0 order=64 flags=0x38 pmp=0x7
+[K3-PMP] verified shared firmware deny slot=5 base=0x102000000
+[SM/K3] SM initialized (see SM/CRYPTO capabilities; no hardware attestation or DMA proof; see SM/RNG quality)
+Booting Linux on hartid 0
+Linux version 6.18.3-ksb073-qemu (agent@ecd1e4826d2b) (Debian clang version 19.1.7 (22+b1), Debian LLD 19.1.7) #1 SMP Sat Nov 21 17:23:54 JST 2026
+random: crng init done
+Machine model: riscv-virtio,qemu
+SBI specification v2.0 detected
+SBI implementation ID=0x1 Version=0x10006
+SBI TIME extension detected
+SBI IPI extension detected
+SBI RFENCE extension detected
+SBI SRST extension detected
+SBI DBCN extension detected
+efi: UEFI not found.
+OF: reserved mem: 0x0000000102000000..0x00000001020fffff (1024 KiB) nomap non-reusable mmode_resv0@1,2000000
+Zone ranges:
+  DMA32    empty
+  Normal   [mem 0x0000000102000000-0x0000000121ffffff]
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000102000000-0x00000001020fffff]
+  node   0: [mem 0x0000000102100000-0x0000000121ffffff]
+Initmem setup node 0 [mem 0x0000000102000000-0x0000000121ffffff]
+SBI HSM extension detected
+riscv: base ISA extensions acdfhimv
+riscv: ELF capabilities acdfimv
+Ticket spinlock: enabled
+percpu: Embedded 18 pages/cpu s36384 r8192 d29152 u73728
+Kernel command line: console=ttyS0,115200 earlycon=sbi rdinit=/init loglevel=7 panic=-1
+printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+Built 1 zonelists, mobility grouping on.  Total pages: 131072
+mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=16, Nodes=1
+rcu: Hierarchical RCU implementation.
+rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+riscv-intc: 64 local interrupts mapped using AIA
+riscv-imsic: interrupt-controller@e0400000: providing IPIs using interrupt 1
+rcu: srcu_init: Setting srcu_struct sizes based on contention.
+clocksource: riscv_clocksource: mask: 0xffffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+sched_clock: 64 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+riscv-timer: Timer interrupt in S-mode is available via sstc extension
+Console: colour dummy device 80x25
+Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=96000)
+pid_max: default: 32768 minimum: 301
+Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+ASID allocator using 16 bits (65536 entries)
+rcu: Hierarchical SRCU implementation.
+rcu: 	Max phase no-delay instances is 1000.
+EFI services will not be available.
+smp: Bringing up secondary CPUs ...
+smp: Brought up 1 node, 16 CPUs
+Memory: 497976K/524288K available (2012K kernel code, 633K rwdata, 836K rodata, 276K init, 245K bss, 21956K reserved, 0K cma-reserved)
+devtmpfs: initialized
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+posixtimers hash table entries: 8192 (order: 5, 131072 bytes, linear)
+futex hash table entries: 4096 (262144 bytes on 1 NUMA nodes, total 256 KiB, linear).
+cpu11: Ratio of byte access time to unaligned word access is 4.55, unaligned accesses are fast
+cpu1: Ratio of byte access time to unaligned word access is 7.06, unaligned accesses are fast
+cpu15: Ratio of byte access time to unaligned word access is 5.65, unaligned accesses are fast
+cpu8: Ratio of byte access time to unaligned word access is 4.78, unaligned accesses are fast
+cpu10: Ratio of byte access time to unaligned word access is 7.13, unaligned accesses are fast
+cpu3: Ratio of byte access time to unaligned word access is 7.25, unaligned accesses are fast
+cpu2: Ratio of byte access time to unaligned word access is 5.32, unaligned accesses are fast
+cpu12: Ratio of byte access time to unaligned word access is 7.25, unaligned accesses are fast
+cpu9: Ratio of byte access time to unaligned word access is 7.45, unaligned accesses are fast
+cpu4: Ratio of byte access time to unaligned word access is 5.38, unaligned accesses are fast
+cpu5: Ratio of byte access time to unaligned word access is 7.21, unaligned accesses are fast
+cpu13: Ratio of byte access time to unaligned word access is 5.80, unaligned accesses are fast
+cpu14: Ratio of byte access time to unaligned word access is 4.42, unaligned accesses are fast
+cpu6: Ratio of byte access time to unaligned word access is 6.64, unaligned accesses are fast
+cpu7: Ratio of byte access time to unaligned word access is 9.65, unaligned accesses are fast
+cpu0: Ratio of byte access time to unaligned word access is 7.42, unaligned accesses are fast
+cpu0: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu7: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu4: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu1: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu8: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu6: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu3: Ratio of vector byte access time to vector unaligned word access is 3.80, unaligned accesses are fast
+cpu11: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu5: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu15: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu12: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu2: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu14: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu13: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu9: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+cpu10: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+vgaarb: loaded
+clocksource: Switched to clocksource riscv_clocksource
+PCI: CLS 0 bytes, default 64
+workingset: timestamp_bits=62 max_order=17 bucket_order=0
+Unpacking initramfs...
+riscv-imsic: interrupt-controller@e0400000:  hart-index-bits: 4,  guest-index-bits: 6
+riscv-imsic: interrupt-controller@e0400000: group-index-bits: 0, group-index-shift: 24
+riscv-imsic: interrupt-controller@e0400000: per-CPU IDs 511 at base address 0x00000000e0400000
+riscv-imsic: interrupt-controller@e0400000: total 8160 interrupts available
+riscv-aplic e0804000.interrupt-controller: 512 interrupts forwarded to MSI base 0x00000000e0400000
+pci-host-generic 30000000.pci: host bridge /soc/pci@30000000 ranges:
+pci-host-generic 30000000.pci:       IO 0x0003000000..0x000300ffff -> 0x0000000000
+pci-host-generic 30000000.pci:      MEM 0x0040000000..0x007fffffff -> 0x0040000000
+pci-host-generic 30000000.pci:      MEM 0x0400000000..0x07ffffffff -> 0x0400000000
+pci-host-generic 30000000.pci: Memory resource size exceeds max for 32 bits
+pci-host-generic 30000000.pci: ECAM at [mem 0x30000000-0x3fffffff] for [bus 00-ff]
+pci-host-generic 30000000.pci: PCI host bridge to bus 0000:00
+pci_bus 0000:00: root bus resource [bus 00-ff]
+pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+pci_bus 0000:00: root bus resource [mem 0x40000000-0x7fffffff]
+pci_bus 0000:00: root bus resource [mem 0x400000000-0x7ffffffff]
+pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+pci_bus 0000:00: resource 4 [io  0x0000-0xffff]
+pci_bus 0000:00: resource 5 [mem 0x40000000-0x7fffffff]
+pci_bus 0000:00: resource 6 [mem 0x400000000-0x7ffffffff]
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+printk: legacy console [ttyS0] disabled
+d4017000.serial: ttyS0 at MMIO 0xd4017000 (irq = 11, base_baud = 230400) is a 16550A
+printk: legacy console [ttyS0] enabled
+clk: Disabling unused clocks
+Freeing initrd memory: 6684K
+Freeing unused kernel image (initmem) memory: 272K
+Kernel memory protection not selected by kernel config.
+Run /init as init process
+KSB073-SAMPLES: START
+6.18.3-ksb073-qemu
+KSB073-SAMPLES: ONLINE 0-15
+keystone_driver: loading out-of-tree module taints kernel.
+keystone_enclave: keystone enclave v1.0.0
+crw-rw-rw-    1 0        0          10, 257 Jan  1 00:00 /dev/keystone_enclave
+KSB073-SAMPLES: RUN hello cpu=3
+keystone_enclave: EPM allocated: 4194304 bytes at 104000000 (buddy)
+hello-runner[125]: unhandled signal 11 code 0x2 at 0x0000002abb14e29c in hello-runner[529c,2abb149000+29000]
+CPU: 3 UID: 0 PID: 125 Comm: hello-runner Tainted: G           O        6.18.3-ksb073-qemu #1 NONE 
+Tainted: [O]=OOT_MODULE
+Hardware name: riscv-virtio,qemu (DT)
+epc : 0000002abb14e29c ra : 0000002abb14f092 sp : 0000003feabd62f0
+ gp : 0000002abb174800 tp : 0000003fa184e780 t0 : 0000003fa1c62760
+ t1 : 0000003fa1c8bcf0 t2 : 0000000000000006 s0 : 000000000000000f
+ s1 : 0000003feabd6960 a0 : 0000003fa169b000 a1 : 0000003feabd6890
+ a2 : 0000003feabd6850 a3 : 00000000000186ab a4 : 0000003fa169b000
+ a5 : 0000002abb14e294 a6 : 0000000000000000 a7 : 000000000000001d
+ s2 : 0000003feabd6918 s3 : 0000000000000001 s4 : 000000000000000f
+ s5 : 0000003feabd6890 s6 : 0000003feabd69c8 s7 : 0000003fa1c8bcf0
+ s8 : 0000003feabd69a8 s9 : 0000000000000000 s10: ffffffffffffffff
+ s11: 00000000077fa368 t3 : 0000003feabd6820 t4 : 0000003fa184e148
+ t5 : 0000000000000007 t6 : 0000000001f25bc2
+status: 8000000200006020 badaddr: 0000003fa169b000 cause: 0000000000000005
+Code: 95bf 8522 f0ef 905f 4401 bf75 0113 a601 3423 5891 (6118) 6497 
+Segmentation fault
+KSB073-SAMPLES: EXIT hello cpu=3 139
+cpu10: Ratio of vector byte access time to vector unaligned word access is 3.84, unaligned accesses are fast
+vgaarb: loaded
+clocksource: Switched to clocksource riscv_clocksource
+PCI: CLS 0 bytes, default 64
+workingset: timestamp_bits=62 max_order=17 bucket_order=0
+Unpacking initramfs...
+riscv-imsic: interrupt-controller@e0400000:  hart-index-bits: 4,  guest-index-bits: 6
+riscv-imsic: interrupt-controller@e0400000: group-index-bits: 0, group-index-shift: 24
+riscv-imsic: interrupt-controller@e0400000: per-CPU IDs 511 at base address 0x00000000e0400000
+riscv-imsic: interrupt-controller@e0400000: total 8160 interrupts available
+riscv-aplic e0804000.interrupt-controller: 512 interrupts forwarded to MSI base 0x00000000e0400000
+pci-host-generic 30000000.pci: host bridge /soc/pci@30000000 ranges:
+pci-host-generic 30000000.pci:       IO 0x0003000000..0x000300ffff -> 0x0000000000
+pci-host-generic 30000000.pci:      MEM 0x0040000000..0x007fffffff -> 0x0040000000
+pci-host-generic 30000000.pci:      MEM 0x0400000000..0x07ffffffff -> 0x0400000000
+pci-host-generic 30000000.pci: Memory resource size exceeds max for 32 bits
+pci-host-generic 30000000.pci: ECAM at [mem 0x30000000-0x3fffffff] for [bus 00-ff]
+pci-host-generic 30000000.pci: PCI host bridge to bus 0000:00
+pci_bus 0000:00: root bus resource [bus 00-ff]
+pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+pci_bus 0000:00: root bus resource [mem 0x40000000-0x7fffffff]
+pci_bus 0000:00: root bus resource [mem 0x400000000-0x7ffffffff]
+pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+pci_bus 0000:00: resource 4 [io  0x0000-0xffff]
+pci_bus 0000:00: resource 5 [mem 0x40000000-0x7fffffff]
+pci_bus 0000:00: resource 6 [mem 0x400000000-0x7ffffffff]
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+printk: legacy console [ttyS0] disabled
+d4017000.serial: ttyS0 at MMIO 0xd4017000 (irq = 11, base_baud = 230400) is a 16550A
+printk: legacy console [ttyS0] enabled
+clk: Disabling unused clocks
+Freeing initrd memory: 6684K
+Freeing unused kernel image (initmem) memory: 272K
+Kernel memory protection not selected by kernel config.
+Run /init as init process
+  with arguments:
+    /init
+  with environment:
+    HOME=/
+    TERM=linux
+keystone_driver: loading out-of-tree module taints kernel.
+keystone_enclave: keystone enclave v1.0.0
+keystone_enclave: EPM allocated: 4194304 bytes at 104000000 (buddy)
+hello-runner[125]: unhandled signal 11 code 0x2 at 0x0000002abb14e29c in hello-runner[529c,2abb149000+29000]
+CPU: 3 UID: 0 PID: 125 Comm: hello-runner Tainted: G           O        6.18.3-ksb073-qemu #1 NONE 
+Tainted: [O]=OOT_MODULE
+Hardware name: riscv-virtio,qemu (DT)
+epc : 0000002abb14e29c ra : 0000002abb14f092 sp : 0000003feabd62f0
+ gp : 0000002abb174800 tp : 0000003fa184e780 t0 : 0000003fa1c62760
+ t1 : 0000003fa1c8bcf0 t2 : 0000000000000006 s0 : 000000000000000f
+ s1 : 0000003feabd6960 a0 : 0000003fa169b000 a1 : 0000003feabd6890
+ a2 : 0000003feabd6850 a3 : 00000000000186ab a4 : 0000003fa169b000
+ a5 : 0000002abb14e294 a6 : 0000000000000000 a7 : 000000000000001d
+ s2 : 0000003feabd6918 s3 : 0000000000000001 s4 : 000000000000000f
+ s5 : 0000003feabd6890 s6 : 0000003feabd69c8 s7 : 0000003fa1c8bcf0
+ s8 : 0000003feabd69a8 s9 : 0000000000000000 s10: ffffffffffffffff
+ s11: 00000000077fa368 t3 : 0000003feabd6820 t4 : 0000003fa184e148
+ t5 : 0000000000000007 t6 : 0000000001f25bc2
+status: 8000000200006020 badaddr: 0000003fa169b000 cause: 0000000000000005
+Code: 95bf 8522 f0ef 905f 4401 bf75 0113 a601 3423 5891 (6118) 6497 
+KSB073-SAMPLES: FAIL hello
+reboot: Power down

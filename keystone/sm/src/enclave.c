@@ -35,10 +35,23 @@ static spinlock_t encl_lock = SPIN_LOCK_INITIALIZER;
 
 static int revoke_region(struct enclave_region *region)
 {
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (region->type == REGION_UTM) {
+	/* K3 gives UTM a separate slot before the OS catch-all. NO_PERM
+	 * here would shadow the restored OS allow and fault host OCALL
+	 * dispatch. Disable only this local shared-memory rule, with CSR
+	 * readback before host admission; EPM keeps its global deny.
+	 * The same helper covers failed-entry rollback and normal exits.
+	 */
+	return k3_pmp_apply_verified(region->pmp_rid, SBI_PMP_IPI_TYPE_UNSET,
+				     0);
+    }
+#endif
     if (region->type == REGION_BACKING) {
-        /* Host-visible storage must fall through to the OS PMP catch-all.
-         * A matching NO_PERM entry would instead deny subsequent host access. */
-        return pmp_unset(region->pmp_rid);
+	/* Host-visible storage must fall through to the OS PMP catch-all.
+	 * A matching NO_PERM entry would instead deny subsequent host access.
+	 */
+	return pmp_unset(region->pmp_rid);
     }
     return pmp_set_keystone(region->pmp_rid, PMP_NO_PERM);
 }

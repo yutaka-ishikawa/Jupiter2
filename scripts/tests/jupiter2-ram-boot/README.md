@@ -53,3 +53,15 @@ SBI HSMで各secondaryを順番に起動し、全16 HartのreadbackとS-mode到�
 起動Hartは0固定と仮定せず、QEMU/OpenSBIが選んだ起動Hart以外を開始する。
 これはLinux/Enclave試験ではない。LLVM、更新QEMU、boot trace付きSM統合firmwareが必要。
 outputは新しいディレクトリを指定し、失敗ログも保持する。
+
+
+## 実Linuxでのhello二種・OCALL回帰試験
+
+- linux-sample-init.sh：guestの/init。実driverをロードし、提供sampleをLinux CPU3/8に固定して実行する。開発PCの通常shellでは実行しない。
+- run_linux_sample_regression.py：開発PCから実system QEMUを起動し、両PMP構成のUART出力と終了コードを判定する。比較対象の旧firmwareがあれば、旧版の終了139を期待する負の回帰試験も行う。
+- linux-sample-kernel.config：今回実行した最小Linux 6.18.3設定。実機用設定とは別。
+
+実SBI/SM/PMP/driver/SDK/Eyrie/sampleを実行し、モックは使用しない。
+必要なkernel・driver・RISC-V実行ライブラリー・sampleを含むinitramfsを準備してから実行する。
+[実行例、結果、検証範囲と全UART](../../../doc/jupiter2-utm-host-access-issue.md#6-実qemuでのsample回帰試験結果)を参照。
+referenceケースのPASSは期待した旧版の失敗の再現成功であり、sample正常終了ではない。
