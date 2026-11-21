@@ -1173,4 +1173,4 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 修正候補：K3のUTMだけをホスト復帰・失敗rollback時にk3_pmp_apply_verifiedでUNSETしCSR readbackを行う。EPMのNO_PERMは維持する。汎用UTMとBACKINGは変更しない。対象：keystone/sm/src/enclave.c。
 - 検証：SM全30単位クロスコンパイル、OpenSBIリンクとmtvec整列に成功。実QEMU＋Linux 6.18.3＋実driver＋提供SDK/Eyrie/sampleで比較し、修正前は一律/混在の両構成でhelloのrunner+0x529c、cause=5、終了139を再現。修正後は両構成×CPU3/8×hello/nativeの計8回が正常出力・終了0・DESTROY。全12 sample、run-all全体、EPM拒否の負の試験、修正版の実機試験は未実施。
 - 過去のPASSとの関係：保存済みsample成功記録は11月9日。UTM独立slot化は11月21日で、その後の同一成果物のsample回帰確認が不足していた。今回QEMUでも障害を再現し、修正前後の比較を記録した。
-- 詳細・package/runner hash・再試験手順：[UTMホスト復帰の解析](jupiter2-utm-host-access-issue.md)。修正commitは本更新を含むcommit。
+- 詳細・package/runner hash・再試験手順：[UTMホスト復帰の解析](jupiter2-utm-host-access-issue.md)。修正commit：[76fd41362565](https://github.com/yutaka-ishikawa/public/commit/76fd41362565e0f53f7216a42fa95ac41df1271e)。

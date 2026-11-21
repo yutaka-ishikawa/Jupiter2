@@ -1,6 +1,6 @@
 {
   "source_base": "79129697eda0c3315273409973d339abae47575b",
-  "source_status": "KSB-073 fix in worktree; fix commit recorded in bug register after commit creation",
+  "source_status": "KSB-073 fix committed; exact tested source hashes recorded below",
   "sample_packages": {
     "hello.ke": {
       "bytes": 503855,
@@ -59,5 +59,6 @@
     "fixed-uniform16.log": "26e143dc65401d6407ca8bad55b1937a8aae7395926c8fa22092fb0ef462ffdf",
     "reference-mixed.log": "2af1c54da60ca3b5345a0cb09a1fa433de75115bb383cb44101129da35b7a5c7",
     "reference-uniform16.log": "727334a789943f95038ceb40a5ddaf93c5bd5d9ad0c035eed8dd9a97c4ac3392"
-  }
+  },
+  "fix_commit": "76fd41362565e0f53f7216a42fa95ac41df1271e"
 }

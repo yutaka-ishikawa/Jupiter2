@@ -57,6 +57,8 @@ UTMもこの処理を受けるため、ホストへ戻った後もUTMを指す�
 
 ## 4. 修正内容
 
+修正コミット：[76fd41362565](https://github.com/yutaka-ishikawa/public/commit/76fd41362565e0f53f7216a42fa95ac41df1271e)。
+
 K3構成のREGION_UTMに限り、revoke_region()から既存のk3_pmp_apply_verified()を使い、
 ローカルのUTMエントリーをUNSETする。
 これにより実CSRの読み戻しと、実装が32個の場合の追加範囲検査も受ける。
