@@ -32,6 +32,20 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def package_runtime_tools(release):
+    """同じreleaseへPC操作用テキストだけを同梱する。実機操作は行わない。"""
+    scripts = Path(__file__).resolve().parent
+    tools = release / 'tools'
+    tools.mkdir(exist_ok=True)
+    shutil.copyfile(scripts / 'run-jupiter2-ram-boot.py', tools / 'ram-boot.py')
+    shutil.copyfile(scripts / 'jupiter2-ram-boot-tools/README.md', release / 'README-RAM-BOOT.md')
+    paths = [tools / 'ram-boot.py', release / 'README-RAM-BOOT.md']
+    hashes = {p.relative_to(release).as_posix(): sha(p) for p in paths}
+    (release / 'records/host-tools.sha256').write_text(
+        ''.join(f'{digest}  {name}\n' for name, digest in hashes.items()))
+    return hashes
+
+
 def elf_load_map(data):
     """Inspect the actual RISC-V executable consumed by the remoteproc loader."""
     if len(data) < 64 or data[:7] != b'\x7fELF\x02\x01\x01':
@@ -359,6 +373,7 @@ def build(args):
          '--opensbi-bin', args.opensbi_bin, '--configuration', 'conf_11',
          '--variant', args.variant, '--opensbi-reserve-bytes', args.opensbi_reserve_bytes,
          '--max-download-bytes', args.max_download_bytes, '--output', args.output / 'release'])
+    manifest['host_tools'] = package_runtime_tools(args.output / 'release')
     manifest.update(status='packaged',
                     artifacts={p.name: sha(p) for p in (args.output / 'release/images').iterdir()})
     (records / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

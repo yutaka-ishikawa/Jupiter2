@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Host ELF-to-DT checks with actual LLVM and dtc; no firmware execution."""
+"""目的: ESOS ELFの起動先と、有効RPMIサーバーの設定をDTへ正しく反映できるか検査する。
+
+開発PCで実LLVMによりRISC-V ELFを生成し、実dtcでDTBを作って照合する。
+CPU/SBI/PMPの模擬やELFの実行、USB操作は行わない。
+試験用ELFはESOSの代替ではなく、実機へ転送するファームウェアではない。
+"""
 import copy
 import importlib.util
 from pathlib import Path
@@ -9,7 +14,7 @@ import subprocess
 import tempfile
 import unittest
 
-SCRIPTS = Path(__file__).resolve().parents[1]
+SCRIPTS = Path(__file__).resolve().parents[2]
 
 
 def load(name, filename):

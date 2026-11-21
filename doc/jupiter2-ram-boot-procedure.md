@@ -1,6 +1,11 @@
 # Milk-V Jupiter2：OpenSBI＋Keystone SMをRAMブートで確認する手順と実施計画
 
-更新日：2026-11-20。状態：**統合FIT作成スクリプトを実装し、ホスト上で検査済み。販売元バイナリーとの実際の組合せとJupiter2実機での起動は未検証。**
+更新日：2026-11-21。**現在の操作は[実機でLinux起動まで確認したRAM起動ガイド](jupiter2-ram-boot-guide.md)を参照する。**
+
+本書は調査初期の計画と、既存販売元バイナリーを梱包する旧方式の記録を残す。
+現在の成功経路は、固定参照ソースから作るFSBL/U-Bootと、実ELF/RPMIの整合修正を含む。
+販売元OpenSBIでLinux起動成功が報告された。Keystone SM/Enclave実行の確認は別段階である。
+以下の未検証・停止条件等は各調査段階での記録で、最新の操作・到達判定は上記ガイドを優先する。
 
 
 ## 実機で確認されたPMP停止と修正候補
@@ -450,7 +455,7 @@ cat records/fit-list.txt
 ホスト側の検査は次で再実行できる。実際のmkimage、dumpimage、dtcを使用する。これはファイル生成・検査の試験であり、SBIやPMPの動作試験ではない。
 
 ```bash
-python3 scripts/tests/test_jupiter2_ram_boot_image.py
+python3 scripts/tests/jupiter2-ram-boot/test_fit_packaging.py
 ```
 
 

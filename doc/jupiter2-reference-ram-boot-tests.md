@@ -1,5 +1,9 @@
 # Jupiter2参照RAM起動: 検査と実機テスト手順
 
+**最新の操作手順は[RAM起動ガイド](jupiter2-ram-boot-guide.md)に集約した。**
+本書は各調査段階の結果と詳細な確認手順を残す。Linux起動成功後の最終到達点は第16節。
+ホスト試験はscripts/tests/jupiter2-ram-boot/へ移動し、先頭コメントとREADMEに目的を記載した。
+
 ## 1. 試験対象と判定の分離
 
 [解析・ビルド手順](jupiter2-reference-ram-boot-development.md)で作る、新しいFSBLとESOS入り統合FITを対で試験する。今回の目的は販売元OpenSBIによるUFS列挙の確立である。古いvendor-releaseのFSBLと新しい統合FITを混ぜない。ホスト検査合格と実機起動合格は別に記録する。
@@ -13,7 +17,7 @@ publicリポジトリのルートで実行する。
 ```bash
 python3 -m py_compile scripts/build-jupiter2-reference-ram-boot.py \
   scripts/build-jupiter2-ram-boot-image.py
-python3 scripts/tests/test_jupiter2_ram_boot_image.py
+python3 scripts/tests/jupiter2-ram-boot/test_fit_packaging.py
 ```
 
 実際のdtc/mkimage/dumpimage/lzopでFITを作り、外部データ形式、全27 ESOS loadables、LZO展開後の重複、ハッシュ破損、参照レイアウト、組込みOpenSBI不一致を検査する。これはホスト梱包試験であり、CPUやPMPを模擬する試験ではない。
@@ -283,8 +287,8 @@ UARTではcore 1のentry=0x100804000とhandshake acknowledgedを確認する。
 
 ```bash
 # 追加試験にはRISC-V対応clang/ld.lldとdtcが必要。
-python3 scripts/tests/test_jupiter2_reference_elf.py
-python3 scripts/tests/test_jupiter2_ram_boot_image.py
+python3 scripts/tests/jupiter2-ram-boot/test_elf_rpmi_contract.py
+python3 scripts/tests/jupiter2-ram-boot/test_fit_packaging.py
 ```
 
 この修正候補のK3 GCC完全ビルド・実機再試験・QEMU guest統合は未実施。
@@ -344,8 +348,8 @@ DTのプリプロセスは固定ソースの.configから定義を生成した�
 K3 GCCの完全ビルドではない。追加したRPMIの3件を含め、ELF/DTホスト試験6件とFIT試験23件を実行する。
 
 ```bash
-python3 scripts/tests/test_jupiter2_reference_elf.py
-python3 scripts/tests/test_jupiter2_ram_boot_image.py
+python3 scripts/tests/jupiter2-ram-boot/test_elf_rpmi_contract.py
+python3 scripts/tests/jupiter2-ram-boot/test_fit_packaging.py
 ```
 
 開発PCのpublicルートで更新し、第8節の同じビルドコマンドを新しいoutputで実行する。
@@ -477,3 +481,40 @@ arch/riscv/lib/image.cのbooti_setup()はそのbaseにLinux Imageのtext_offset�
 販売元OpenSBIによるLinux起動の確認で、Keystone SM/Enclaveの実行成功とは分ける。
 停止・panic・root mount失敗時は最初のエラーを含むUART全ログを保存する。
 この段階のLinux起動はまだ実機結果待ちである。
+
+## 16. Linux起動成功とスクリプト整理
+
+ユーザーから2026-11-21にLinux起動成功が報告された。今回の手動起動は、
+販売元OpenSBIと整合修正した参照FSBL/U-Boot/ESOSをRAM起動し、
+UFS bootfs上のImage-6.18.3-keystone、initrd.img-6.18.3、
+spacemit/6.18.3-generic/k3-pico-itx.dtbからrootfsを起動したもの。
+uname -rの実出力とKeystone SM/Enclave実行結果はまだ取得していない。
+
+途中のDTB load失敗は、fdtfile未定義のままディレクトリを指定したためだった。
+再現用の運用ツールはfdtfileを明示設定し、initrd_sizeをDTB load前に保存し、
+各load成功時だけbootiへ進むUARTテキストを生成する。
+PC側の転送もFSBL段階とSPL/FIT段階を分け、checksumとSPLの転送上限を確認する。
+これらは操作を行うスクリプトで、ホスト回帰試験とは区別する。
+
+ホスト試験は次へ集約した。
+
+```text
+scripts/tests/jupiter2-ram-boot/
+├── README.md
+├── run-host-tests.sh
+├── test_fit_packaging.py
+├── test_elf_rpmi_contract.py
+└── test_host_operations.py
+```
+
+各先頭コメントに何を検証するか、どこで実行するか、実機を操作しないことを明記した。
+テスト用イメージは実機へ転送しない。新しい操作ツールのUSB実行は実機未確認。
+実機成功はユーザーの手動操作の報告、ホスト回帰の合格は開発環境の実行結果として分ける。
+
+```bash
+bash scripts/tests/jupiter2-ram-boot/run-host-tests.sh
+```
+
+必要ツールを確認してから実FIT試験23件、ELF/RPMI DT試験6件、操作ツールのホスト試験8件を実行する。
+操作ツール試験はUSBに触らないdry-runと、実FITツール・bash -n等を使う。
+CPU/SBI/PMPの模擬やQEMU guest実行は行わない。

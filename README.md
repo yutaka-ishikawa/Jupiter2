@@ -13,6 +13,8 @@ The `main` branch contains `qemu/`, `opensbi/`, `keystone/`, and `linux-k3/`. Or
 PCとの配線とシリアル端末の設定は、[Milk-V Jupiter2 UART接続手順](doc/milkv-jupiter2-uart.md)を参照してください。
 
 実機への段階的な導入は、[Milk-V Jupiter2ソフトウェアスタック導入手順](doc/milkv-jupiter2-stack-install.md)を参照してください。
+
+RAMへ転送してLinuxを起動する操作は、[Jupiter2 RAM起動ガイド](doc/jupiter2-ram-boot-guide.md)を参照してください。販売元OpenSBIでのLinux起動実績、同梱のPC操作ツール、専用のホスト試験ディレクトリをまとめています。
 ビルド・退避・kernel/driver配置・OpenSBI更新・復旧と、書き込み前の停止条件をまとめています。
 実機区画容量の確認は`scripts/check-jupiter2-install-capacity.py`、
 ビルド済み成果物からFIT・転送用アーカイブを作る場合は`scripts/build-jupiter2-install-image.py`を使います。

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Host packaging tests using real dtc/mkimage/dumpimage, not simulated SBI."""
+"""目的: 開発PCでRAM起動FITの生成・ハッシュ・配置の不具合を検出する。
+
+実際のdtc/mkimage/dumpimage/lzopと形式試験用データを使う。
+生成した試験用FSBL/ESOSは実機へ転送しない。USB操作、CPU/SBI/PMPの模擬、
+実機起動は行わず、合格はDDR・ESOS・Linuxの起動成功を意味しない。
+"""
 import importlib.util
 import json
 from pathlib import Path
@@ -9,7 +14,7 @@ import sys
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'build-jupiter2-ram-boot-image.py'
+SCRIPT = Path(__file__).resolve().parents[2] / 'build-jupiter2-ram-boot-image.py'
 spec = importlib.util.spec_from_file_location('ram_builder', SCRIPT)
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)

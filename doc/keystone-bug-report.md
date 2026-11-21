@@ -87,13 +87,13 @@
 | KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | 修正候補・クロスリンク済・実機未検証 |
 | KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | 修正候補・SMコンパイル済・実機未検証 |
-| KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 参照構成とESOS整合修正後のUFS列挙を実機確認 |
+| KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 参照構成とESOS整合修正後のUFS・Linux起動を実機確認 |
 | KSB-064 | 参照ESOS結合スクリプトのdescription一致とconf_dualが不一致 | 第三者K3手順を今回の入力へ適用する場合 | 統合上の制約・明示構成による回避実装、ホスト検査済 |
 | KSB-065 | 参照FSBLがESOS開始失敗を成功として扱いRAM追加FITも誤判定 | 参照U-Bootと販売元ESOSの統合 | core 1応答待ち失敗を実機観測・診断修正候補 |
 | KSB-066 | 診断版のRCPU entryがSPLで0xxと表示される | 本リポジトリの診断パッチとtiny printf | 表示修正を実機確認 |
 | KSB-067 | 参照SPL DTのcore 1起動先が販売元ESOS ELF entryと不一致 | 固定参照FSBLと今回の販売元ESOSの統合 | 修正後の両core応答を実機確認・後段KSB-068で停止 |
 | KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | KSB-069修正後にU-Boot到達を実機確認 |
-| KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 整合修正後のU-Boot到達・UFS列挙を実機確認 |
+| KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 整合修正後のU-Boot・UFS・Linux起動を実機確認 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1109,3 +1109,10 @@ Device 0 (0:0)、Vendor YMTC、Product YMUS8B5TH1A1C1、Rev 0303、
 新しい参照FSBL/U-BootとESOS起動先・RPMI DT整合を含む構成でのUFS列挙合格とする。
 どの変更単独で以前の全試行の障害が解消するかは分離検証していない。
 パーティション・ファイル読出し、Linux起動、開発版OpenSBI/SM、Enclave実行はまだ未確認。
+
+
+KSB-063/065/067/068/069の到達結果追記（2026-11-21）：ユーザーからLinux起動成功の報告を受領。
+販売元OpenSBI、修正した参照FSBL/U-Boot、同梱ESOSをRAM起動し、UFSのkernel/initrd/DTBでLinux起動。
+各修正単独の効果を分離した検証ではない。unameの実出力、開発版SM/Enclave動作、
+QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイド](jupiter2-ram-boot-guide.md)へ集約。
+新操作スクリプト自身のUSB実行は実機未確認で、ホストのdry-run等の検査と区別する。

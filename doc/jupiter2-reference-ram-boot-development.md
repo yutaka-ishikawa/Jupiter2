@@ -4,7 +4,7 @@
 
 販売元OpenSBIでUFSを列挙できるRAM起動を先に確立し、その後OpenSBIだけをKeystone版へ交換する。参照先は[ganboing/K3-Docsのhacking手順](https://github.com/ganboing/K3-Docs/blob/master/hacking/README.md)。これは第三者のK3開発記録であり、Milk-VがJupiter2で保証した手順ではない。
 
-現在、開発版OpenSBI、販売元OpenSBIを使用した統合FIT、および販売元FSBL＋元のu-boot.itbのいずれでもUFS descriptor取得失敗が報告されている。`Error in status:00000004`は参照ドライバーのUIC_ERRORに相当する。続く`err = -110`はタイムアウトである。Keystone固有の障害、PMP設定、UFS媒体故障のどれかに原因を断定できない。通常起動との比較はまだ必要である。追跡は[KSB-063](keystone-bug-report.md#ksb-063-ram起動後のu-bootでufs通信が失敗)で行う。
+調査初期には、開発版OpenSBI、販売元OpenSBIを使用した統合FIT、および販売元FSBL＋元のu-boot.itbでUFS descriptor取得失敗が報告された。`Error in status:00000004`は参照ドライバーのUIC_ERRORに相当する。続く`err = -110`はタイムアウトである。Keystone固有の障害、PMP設定、UFS媒体故障のどれかに原因を断定できない。その後、固定参照FSBL/U-BootにELF起動先とRPMI DTの整合修正を加え、UFS列挙とLinux起動に成功した。操作は[RAM起動ガイド](jupiter2-ram-boot-guide.md)にまとめた。各変更単独の効果は分離検証していない。追跡は[KSB-063](keystone-bug-report.md#ksb-063-ram起動後のu-bootでufs通信が失敗)で行う。
 
 ## 2. 参照ドキュメントの解析
 
@@ -99,3 +99,14 @@ AP側DTのRPMI queue=0x100e00000と、有効なESOS core 0のqueue=0x100800000�
 修正後のOpenSBI起動は実機再試験で確認する。解析と確認コマンドは[第12節](jupiter2-reference-ram-boot-tests.md#12-実fitで確認したrpmi共有領域の不一致ksb-069)を参照する。
 
 ホストでの生成・ハッシュ照合はFSBLのDDR初期化、ESOS実行、RPMIのABI、UFS通信の成功を保証しない。実機の判定・ログ採取と失敗時の復帰は別紙に記載する。NOR書込みがないことも、DDR保存設定を無効化しただけでは保証せず、実機ログで確認する。
+
+## 6. Linux起動成功後の整理
+
+2026-11-21にユーザーからLinux起動成功の報告を受けた。unameの実出力は未収集。
+手順の再現用にscripts/run-jupiter2-ram-boot.pyを追加し、build出力のrelease/tools/へ同梱する。
+fsbl/fitはPCからの実機操作、linuxはUART用コマンド生成であり、検査だけのテストとは分ける。
+新補助スクリプトのUSB実行はまだ実機未確認。従来の手動成功経路と同じstage/continueを使う。
+
+ホスト試験はscripts/tests/jupiter2-ram-boot/へ移し、各ファイル冒頭に目的と対象外を記載した。
+移動後は[試験ディレクトリのREADME](../scripts/tests/jupiter2-ram-boot/README.md)のまとめ実行を使う。
+操作と生成物の構成は[RAM起動ガイド](jupiter2-ram-boot-guide.md)を参照する。
