@@ -1,6 +1,6 @@
 # Jupiter2のX100/A100混在PMP構成への対応計画
 
-本書は実装前の確認用計画である。コード変更、修正版ファームウェアの実機実行はまだ行っていない。
+本書は確認済み計画とその実装状況を記録する。2026年11月21日に修正候補を実装した。修正版ファームウェアの実機実行は未実施。
 関連する問題は[KSB-071](keystone-bug-report.md#ksb-071-x100a100のpmp数混在を16個固定の移植処理が拒否)として管理する。
 
 ## 1. 実機ログで確認できたこと
@@ -182,5 +182,72 @@ tasksetは修正方法ではなく、修正後のCPU種別ごとの試験に使�
 
 本書作成時点では、UART記録とソースの照合により直接の拒否箇所を確認した。
 32個側の追加16エントリーの実際の初期内容は未採取であり、無効であるとはまだ断定しない。
-修正実装、ビルド、QEMU統合、修正後の実機helloはいずれも未実施。
-本書の方針を確認後に実装へ進む。
+修正実装とSM/OpenSBIのクロスビルド・リンクを実施。QEMUの専用S-mode guestでは全16 Hart起動を確認。Linux/SDKの統合試験と修正後の実機helloは未実施。
+追加したQEMU混在プロファイルと残る不足は[QEMUと実機試験の差分](jupiter2-qemu-hardware-test-gaps.md)を参照。
+
+
+## 7. 修正候補の実装結果
+
+- 実装個数16/32と共通割当て数16を分離。未知の個数、追加範囲の有効規則・ロックは拒否する。
+- snapshotは最大32個を保持。証拠のactive/locked集合は32ビット化し、所有マスクは共通16個に限定する。
+- root設定前・設定後、local preflight、SMのPMP初期化・設定・解除の前後、IPI ACK前に追加範囲を検査する。
+- warm start/resumeは既存のroot readbackとadmission経路を通るため、同じ追加範囲検査を受ける。
+  HSM開始の禁止条件や同期異常時の停止は緩めていない。
+- SM受付失敗の理由を個別に表示する。全16 Hart STARTED条件は維持する。
+- SMビルドの既定値からQEMU16専用defineを外し、明示的なqemu16診断ビルドだけで有効にする。
+- QEMUへ任意選択の混在PMPプロファイルを追加。PMP数16/32と粒度4096バイトを再現するが、CPUの全仕様や実機domainを再現したものではない。
+
+実機で期待するUART表示例（数値は現在のroot規則の場合）：
+
+```text
+[K3-PMP] root-config PASS hart=0 implemented=16 common=16 extra-off=0 root=13 Keystone-free=3
+[K3-PMP] root-config PASS hart=8 implemented=32 common=16 extra-off=16 root=13 Keystone-free=3
+```
+
+追加範囲の状態が契約と違えば `extra rejected hart=... index=...` で停止する。
+その場合に個数制限やロック検査を外して続行してはいけない。
+SMがなお拒否する場合は `admission denied:` の具体的な理由を採取する。
+
+### ビルド確認と未実施の試験
+
+- 既定mixedと診断qemu16のSMは、それぞれ全30 translation unitsをRISC-V向けにコンパイル・relocatable link成功。
+- mixedのSMをOpenSBIへリンクし、fw_dynamic.elf/bin生成とEnclave mtvecの4バイト整列検査に成功。
+- `make -C verifications guest` は必要なSDKのlibkeystone-eapp.aがないため停止。
+- `make -C verifications kernel-modules` は対応kernelのModule.symversがないため停止。
+- guest内run-all、修正後の実機16 CPU起動、hello二種、idle/hotplug/負の経路は未検証。
+
+実機では従来と同じ参照RAMブート作成スクリプトへ、今回ビルドしたOpenSBIのraw binを渡す。
+販売元版vendor-releaseと区別した新しい出力ディレクトリを使う。
+[SM起動・アプリ試験](jupiter2-keystone-app-test.md)のビルドとRAM起動手順に従い、
+Linux側のonlineが0-15になってからhelloへ進む。
+
+
+### QEMU追加試験の実測結果
+
+変更したQEMU本体をビルドし、以下の両構成で確認した。
+
+| 試験 | uniform16 | mixed |
+| --- | --- | --- |
+| QMPでrealize後の全16 CPUの個数・粒度を照合 | PASS：全16個、16バイト | PASS：前半16個/後半32個、全4 KiB |
+| 実OpenSBI＋SMのHart別root PMP readback | 16 Hartで成功 | 16 Hartで成功、追加16個OFFを検証 |
+| 実SBI HSMを使ったS-mode到達 | 全16 Hartで成功 | 全16 Hartで成功 |
+
+後者は専用の小さなS-mode guestを実行した起動試験であり、Linux guest内のrun-allではない。
+QEMUではrootが7個、Keystone空き9個、PMPADDR幅54ビットだった。
+実機のroot13個・空き3個・PMPADDR幅38ビットは、この試験だけでは検証していない。
+
+```bash
+# 開発PC、publicルート。新しい出力先を指定する。
+python3 scripts/tests/jupiter2-ram-boot/check_qemu_pmp_profile.py \
+  --qemu install/keystone/bin/qemu-system-riscv64
+python3 scripts/tests/jupiter2-ram-boot/run_pmp_hsm_smoke.py \
+  --qemu install/keystone/bin/qemu-system-riscv64 \
+  --firmware .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
+  --output work/ksb071-pmp-hsm-smoke
+```
+
+SM/OpenSBIの試験用raw bin：SHA-256
+`14d45be6777a63cc650571b3fb7d410c628fde297a28eed35266d6e62e983441`。
+同じソースでもビルド条件やツールが違えばhashは変わるため、利用者の成果物も別途記録する。
+既存の実ツールを使うホスト梱包試験43件も成功。
+EnclaveのCREATE/RUN、IPI同期更新、Linux idle/hotplug、追加範囲を不正状態にする負の試験は未実施。

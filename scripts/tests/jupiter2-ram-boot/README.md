@@ -24,3 +24,32 @@ dtc/u-boot-tools/lzop等の通常依存はRAM起動ガイドを参照する。
 CPU/SBI/PMPを模擬しない。合格は実機・QEMU guest・Linux起動の合格を意味しない。
 実機に転送する運用ツールはscripts/run-jupiter2-ram-boot.pyで、ここには置かない。
 実機で確認する項目と実績はdoc/jupiter2-ram-boot-guide.mdおよび詳細テスト文書に記載する。
+
+
+## 実QEMUのPMP設定確認（任意）
+
+```bash
+python3 scripts/tests/jupiter2-ram-boot/check_qemu_pmp_profile.py \
+  --qemu install/keystone/bin/qemu-system-riscv64
+```
+
+更新したQEMUを実際に起動し、QMPで全CPUの個数・粒度を読み取る。
+一律16個/16バイトと混在16・32個/4 KiBの両方を検査する。
+停止状態のCPU設定確認であり、guestのOpenSBI/SM実行やEnclave隔離のPASSではない。
+依存するQEMUがないホストでも既存の梱包試験を実行できるよう、run-host-tests.shには含めない。
+
+
+## 実OpenSBI/SMとHSMの全Hart起動試験
+
+```bash
+python3 scripts/tests/jupiter2-ram-boot/run_pmp_hsm_smoke.py \
+  --qemu install/keystone/bin/qemu-system-riscv64 \
+  --firmware .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
+  --output work/ksb071-pmp-hsm-smoke
+```
+
+実clang/ld.lldでpmp-hsm-smoke.SをS-mode用ELFへビルドし、実OpenSBI/SMへ渡す。
+SBI HSMで各secondaryを順番に起動し、全16 HartのreadbackとS-mode到達を検査する。
+起動Hartは0固定と仮定せず、QEMU/OpenSBIが選んだ起動Hart以外を開始する。
+これはLinux/Enclave試験ではない。LLVM、更新QEMU、boot trace付きSM統合firmwareが必要。
+outputは新しいディレクトリを指定し、失敗ログも保持する。

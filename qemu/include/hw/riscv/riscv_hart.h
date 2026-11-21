@@ -36,6 +36,8 @@ struct RISCVHartArrayState {
     /*< public >*/
     uint32_t num_harts;
     uint32_t hartid_base;
+    /* Jupiter2 diagnostic profile, selected by its board before realize. */
+    bool k3_mixed_pmp;
     char *cpu_type;
     uint64_t resetvec;
     uint32_t num_rnmi_irqvec;

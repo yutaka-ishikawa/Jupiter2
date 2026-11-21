@@ -12,6 +12,7 @@
 
 typedef struct Jupiter2State {
     RISCVVirtState parent_obj;
+    bool mixed_pmp;
     bool wtm_rng;
     char *wtm_rng_fault;
 } Jupiter2State;

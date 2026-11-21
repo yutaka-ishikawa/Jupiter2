@@ -1380,6 +1380,11 @@ static void virt_machine_init(MachineState *machine)
                                 base_hartid, &error_abort);
         object_property_set_int(OBJECT(&s->soc[i]), "num-harts",
                                 hart_count, &error_abort);
+	if (jupiter2_is_machine(machine)) {
+	    object_property_set_bool(OBJECT(&s->soc[i]), "k3-mixed-pmp",
+				     ((Jupiter2State *)machine)->mixed_pmp,
+				     &error_abort);
+	}
         sysbus_realize(SYS_BUS_DEVICE(&s->soc[i]), &error_fatal);
 
         if (virt_aclint_allowed() && s->have_aclint) {

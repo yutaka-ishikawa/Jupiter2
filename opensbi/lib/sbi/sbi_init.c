@@ -82,6 +82,10 @@ static void k3_keystone_a1_post_pmp_before_smode(struct sbi_scratch *scratch,
 		struct k3_a1_local_candidate candidate = {0};
 		unsigned short verified_root_locks = 0;
 		unsigned int i;
+		if (snapshot.common_count != K3_PMP_COMMON_REGS) {
+			sbi_printf("K3 A1-E: invalid common PMP count on Hart %u\n", hartid);
+			sbi_hart_hang();
+		}
 		measured.count = snapshot.pmp_count;
 		measured.granularity = snapshot.pmp_log2gran;
 		measured.pmp_addrbits = sbi_hart_pmp_addrbits(scratch);

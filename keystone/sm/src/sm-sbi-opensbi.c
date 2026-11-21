@@ -43,8 +43,8 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid,
 
 #ifdef KEYSTONE_K3_PMP_N_REG
     if (!sm_is_ready()) {
-	sbi_printf("[SM/K3] Keystone SBI function %lu unavailable: SM not "
-		   "initialized\n",
+	sbi_printf("[SM/K3] Keystone SBI function %lu unavailable: "
+		   "admission checks failed\n",
 		   funcid);
 	return keystone_ecall_return(regs, out, SBI_ERR_SM_NOT_IMPLEMENTED);
     }

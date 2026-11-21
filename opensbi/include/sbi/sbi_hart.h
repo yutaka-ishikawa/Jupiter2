@@ -135,15 +135,20 @@ unsigned int sbi_hart_mhpm_bits(struct sbi_scratch *scratch);
  * Do not engage until a separately validated all-Hart transfer protocol exists.
  * Not a replacement for per-Hart CSR ownership/readback validation.
  */
+/* Read-only validation of every implemented entry outside the common bank.
+ * Must succeed before local updates and remote ACK; never clears firmware state.
+ */
+int sbi_hart_keystone_verify_extra_pmp(struct sbi_scratch *scratch);
 #ifdef CONFIG_K3_KEYSTONE_SM
 /* Read-only local PMP inventory. Called only from trusted M-mode code.
  * A successful snapshot is local evidence, NOT cross-Hart authorization. */
-#define K3_A1_SNAPSHOT_REGS 16U
+#include <sbi/k3_pmp_contract.h>
+#define K3_A1_SNAPSHOT_REGS K3_PMP_MAX_REGS
 struct k3_a1_pmp_entry_snapshot {
  unsigned long prot, addr, log2len;
 };
 struct k3_a1_local_pmp_snapshot {
- unsigned int pmp_count, pmp_log2gran;
+ unsigned int pmp_count, common_count, pmp_log2gran;
  unsigned long mseccfg;
  unsigned int mseccfg_valid;
  struct k3_a1_pmp_entry_snapshot entry[K3_A1_SNAPSHOT_REGS];

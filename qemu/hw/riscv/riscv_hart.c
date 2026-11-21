@@ -34,6 +34,7 @@ static const Property riscv_harts_props[] = {
     DEFINE_PROP_UINT32("num-harts", RISCVHartArrayState, num_harts, 1),
     DEFINE_PROP_UINT32("hartid-base", RISCVHartArrayState, hartid_base, 0),
     DEFINE_PROP_STRING("cpu-type", RISCVHartArrayState, cpu_type),
+    DEFINE_PROP_BOOL("k3-mixed-pmp", RISCVHartArrayState, k3_mixed_pmp, false),
     DEFINE_PROP_UINT64("resetvec", RISCVHartArrayState, resetvec,
                        DEFAULT_RSTVEC),
 
@@ -111,32 +112,52 @@ static void riscv_cpu_register_csr_qtest_callback(void)
 }
 #endif
 
-static bool riscv_hart_realize(RISCVHartArrayState *s, int idx,
-                               char *cpu_type, Error **errp)
+static bool riscv_hart_realize(RISCVHartArrayState *s, int idx, char *cpu_type,
+			       Error **errp)
 {
+    unsigned int hartid;
+
+    hartid = s->hartid_base + idx;
     object_initialize_child(OBJECT(s), "harts[*]", &s->harts[idx], cpu_type);
+    if (s->k3_mixed_pmp) {
+	if (hartid >= 16) {
+	    error_setg(errp, "Jupiter2 mixed PMP requires Hart IDs 0-15");
+	    return false;
+	}
+	/* Configure before CPU realize, using QEMU's real PMP CSR backend.
+	 * Keep the CPU ISA unchanged: this reproduces PMP counts/grain only.
+	 */
+	if (!object_property_set_int(OBJECT(&s->harts[idx]), "num-pmp-regions",
+				     hartid < 8 ? 16 : 32, errp)) {
+	    return false;
+	}
+	if (!object_property_set_int(OBJECT(&s->harts[idx]), "pmp-granularity",
+				     4096, errp)) {
+	    return false;
+	}
+    }
     qdev_prop_set_uint64(DEVICE(&s->harts[idx]), "resetvec", s->resetvec);
 
     if (s->harts[idx].cfg.ext_smrnmi) {
-        if (idx < s->num_rnmi_irqvec) {
-            qdev_prop_set_uint64(DEVICE(&s->harts[idx]),
-                                 "rnmi-interrupt-vector", s->rnmi_irqvec[idx]);
-        }
+	if (idx < s->num_rnmi_irqvec) {
+	    qdev_prop_set_uint64(DEVICE(&s->harts[idx]),
+				 "rnmi-interrupt-vector", s->rnmi_irqvec[idx]);
+	}
 
-        if (idx < s->num_rnmi_excpvec) {
-            qdev_prop_set_uint64(DEVICE(&s->harts[idx]),
-                                 "rnmi-exception-vector", s->rnmi_excpvec[idx]);
-        }
+	if (idx < s->num_rnmi_excpvec) {
+	    qdev_prop_set_uint64(DEVICE(&s->harts[idx]),
+				 "rnmi-exception-vector", s->rnmi_excpvec[idx]);
+	}
     } else {
-        if (s->num_rnmi_irqvec > 0) {
-            warn_report_once("rnmi-interrupt-vector property is ignored "
-                             "because Smrnmi extension is not enabled.");
-        }
+	if (s->num_rnmi_irqvec > 0) {
+	    warn_report_once("rnmi-interrupt-vector property is ignored "
+			     "because Smrnmi extension is not enabled.");
+	}
 
-        if (s->num_rnmi_excpvec > 0) {
-            warn_report_once("rnmi-exception-vector property is ignored "
-                             "because Smrnmi extension is not enabled.");
-        }
+	if (s->num_rnmi_excpvec > 0) {
+	    warn_report_once("rnmi-exception-vector property is ignored "
+			     "because Smrnmi extension is not enabled.");
+	}
     }
 
     s->harts[idx].env.mhartid = s->hartid_base + idx;

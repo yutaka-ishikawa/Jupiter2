@@ -37,6 +37,17 @@ const MemMapEntry jupiter2_memmap[] = {
     [VIRT_IOMMU_SYS] =    { 0x3010000, 0x1000 }, /* placeholder */
 };
 
+/* PMP topology only: this does not implement X100/A100 CPU microarchitecture. */
+static bool mixed_pmp_get(Object *obj, Error **errp)
+{
+    return ((Jupiter2State *)obj)->mixed_pmp;
+}
+
+static void mixed_pmp_set(Object *obj, bool value, Error **errp)
+{
+    ((Jupiter2State *)obj)->mixed_pmp = value;
+}
+
 static bool wtm_get(Object *obj, Error **errp)
 {
     return ((Jupiter2State *)obj)->wtm_rng;
@@ -72,6 +83,7 @@ static void jupiter2_machine_instance_init(Object *obj)
 
     s = RISCV_VIRT_MACHINE(obj);
     ((Jupiter2State *)obj)->wtm_rng_fault = g_strdup("none");
+    object_property_add_bool(obj, "mixed-pmp", mixed_pmp_get, mixed_pmp_set);
     object_property_add_bool(obj, "wtm-rng", wtm_get, wtm_set);
     object_property_add_str(obj, "wtm-rng-fault", fault_get, fault_set);
     s->aia_type = VIRT_AIA_TYPE_APLIC_IMSIC;

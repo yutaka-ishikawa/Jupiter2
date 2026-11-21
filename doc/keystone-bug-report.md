@@ -83,8 +83,8 @@
 | KSB-056 | PMU FW counter探索失敗時の配列index | OpenSBI取込コード・上流修正照合済み | 未修正・ソース確認、実ゲスト未検証 |
 | KSB-057 | RAM FIT作成が共通ESOS構成・LZOを扱えない | 本リポジトリの実機導入ツール | 修正済・ホスト検査のみ |
 | KSB-058 | Jupiter2 RPMI小領域と4 KiB PMP粒度の不一致で起動停止 | K3/OpenSBI domain登録とKeystone統合 | 粒度検査通過を実機確認・後続KSB-059で停止 |
-| KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | 修正候補・クロスリンク済・実機再試験待ち |
-| KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | 修正候補・クロスリンク済・実機未検証 |
+| KSB-059 | 実機root PMP 14個＋Keystone最低3個で16個を超過 | K3実機と現行slot割当の制約 | X100のroot配置・SM初期化を実機確認、A100はKSB-071で停止 |
+| KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | X100で正規ロックの検証通過を実機確認、A100はKSB-071で停止 |
 | KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 参照構成とESOS整合修正後のUFS・Linux起動を実機確認 |
@@ -95,7 +95,8 @@
 | KSB-068 | 両RCPU応答後、OpenSBI引渡し直前の表示を最後に無出力 | 参照RAM起動と販売元OpenSBI/DTの統合 | KSB-069修正後にU-Boot到達を実機確認 |
 | KSB-069 | OpenSBI用DTのRPMI queueが同梱ESOSの有効サーバーと不一致 | 参照U-Boot DTと販売元ESOSの統合 | 整合修正後のU-Boot・UFS・Linux起動を実機確認 |
 | KSB-070 | Linux用DTがSMのM-only mailboxページ内の直接controllerを有効化 | Bianbu Linux DTとK3 SMの所有契約 | 提供DTBで不整合確認・別名DTBで限定修正候補 |
-| KSB-071 | X100/A100のPMP数混在を16個固定の移植処理が拒否 | K3 Keystone移植のroot配置・PMP証拠管理 | 実機UARTとソースで原因確認・修正計画作成、未実装 |
+| KSB-071 | X100/A100のPMP数混在を16個固定の移植処理が拒否 | K3 Keystone移植のroot配置・PMP証拠管理 | 混在対応候補実装・SM/OpenSBIクロスリンク済み、実機未検証 |
+| KSB-072 | QEMU回帰試験が実機の混在PMP・粒度・domain条件を含まない | Jupiter2部分モデルと試験範囲の制約 | 混在PMP/4 KiBオプション実装、実機相当domain等は未実装 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -894,8 +895,7 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   legacy policyを確認し、同じS/U禁止を一つのハードウェアentryで表す。domain記録は残す。
   canonical配置を計画・書込み・全CSR readback・admissionで共有し、最低3個は維持する。
   今回はOpenSBI用13個、Keystone用3個の予算。一般的なEnclave機能や同時実行数の保証ではない。
-- 検証限界：今回の実機ログではslot計画の拒否まで。PMP書込み・readback、U-Boot、
-  Linux、Enclaveの成功は未確認。詳細：[PMP実機再試験結果](jupiter2-pmp-granularity-issue.md#7-修正後の実機結果粒度を通過しpmp容量で停止ksb-059)。
+- 後続の実機UART追記：root13個・Keystone空き3個の配置とreadback、X100全8 HartのSM初期化、U-BootとLinux起動を確認。A100は別件KSB-071で停止し、Enclave成功は未確認。初回の拒否記録の詳細：[PMP実機再試験結果](jupiter2-pmp-granularity-issue.md#7-修正後の実機結果粒度を通過しpmp容量で停止ksb-059)。
 
 
 ### KSB-060: 正規rootのロック付き保護とboot preflightが不整合
@@ -913,7 +913,7 @@ K3移植固有のadmission経路。driverは保護不明のページをquarantin
   不明なL、free slotやfallbackのL、不一致は引き続き拒否する。
 - 修正候補：domain由来の全entry・fallback・free slotを実CSRで再検証して得たlock maskのみ、
   専用preflight経路へ渡す。既定preflightはLを許可しないまま。未知のlock・不一致は拒否。
-  実機での当該gate通過は未検証。
+  後続の実機UARTでX100全8 Hartがroot readbackとSM初期化まで通過した。A100は別件KSB-071で停止。
 
 
 ### KSB-061: 共有bottom PMP slotの解放が残るOS／UTM予約を失う
@@ -1141,7 +1141,7 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   入出力DTB全体は公開せず、変更対象・hash・利用者の状態だけを記録する。
 - 検証範囲：実DTBを実fdtputで変更して全ノード・プロパティを照合。
   新しいDTホスト試験6件で有効利用者の拒否、元ファイル保持、他ノード保持、再実行を確認。
-  新DTBによる販売元/SM版Linuxの実機起動、hello二種、QEMU guest統合は未検証。
+  実機追記：別名DTB（148457 bytes）のloadとLinux起動を利用者が確認。SM版Linuxは8 CPUのみ起動し、helloはKSB-071に関連する受付条件で停止。hello二種の成功と同じ実機DTを使うQEMU統合は未検証。
   [SM起動からアプリ試験までの手順](jupiter2-keystone-app-test.md)に段階と判定を記載。
 
 ### KSB-071: X100/A100のPMP数混在を16個固定の移植処理が拒否
@@ -1151,4 +1151,13 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 直接原因：opensbi/lib/sbi/sbi_hart.c の k3_root_pmp_layout_build() が count != K3_BOOT_PMP_COUNT（16）を拒否する。関連するboot slot計算、snapshot、preflight、partition evidenceにも16個固定の表現がある。
 - 影響：A100がLinuxへ到達せず、sm_is_ready()の全16 Hart STARTED条件を満たせない。CPU3へのtasksetでもhello CREATEが100100で拒否される。SM not initializedという共通診断は実際の拒否条件を区別できない。
 - 方針：[混在PMP対応計画](jupiter2-heterogeneous-pmp-plan.md)。共通16個の配置を維持し、32個側の追加範囲は全数検証して無効状態を要求する。追加範囲の実態を未確認のまま無視・解除しない。
-- 状態：原因と計画を記録。コード修正・修正commitはまだない。ビルド、QEMU guest、修正版実機起動、hello成功は未検証。提供ログには複数回の過去試行が含まれ、末尾側の起動を根拠としている。
+- 状態：共通16個と実装16/32個の分離、全追加範囲の検査、32個snapshot/証拠管理、SM拒否理由の診断を実装。SMのmixed/qemu16各30単位コンパイルとmixedのOpenSBIリンクを確認。QEMU専用S-mode guestで一律16個と16/32混在の全16 Hart readback・HSM到達を確認。Linux/SDKのguest統合、修正版実機起動、hello成功は未検証。提供ログには複数回の過去試行が含まれ、末尾側の起動を根拠としている。修正commitは本更新を含むcommit。
+
+### KSB-072: QEMU試験条件と実機のPMP・起動契約が不一致
+
+- 区分：Jupiter2部分モデルの検証範囲不足。上流QEMUが32 PMPを扱えないという欠陥ではない。
+- 証拠：run-k3.shは全Hartにrva23s64、num-pmp-regions=16、pmp-granularity=16バイトを指定。実機UARTではX100=16、A100=32、全体の粒度4 KiB。実機root規則数・ロックとESOS/RPMI等も従来モデルでは再現していない。
+- 影響：KSB-058〜060/071等の実機固有条件を従来のQEMU PASSから判断できない。既存の部分モデルという説明だけで回帰試験の不足を補えない。
+- 候補：QEMUのCPU realize前に実PMP CSR backendのHart別個数と粒度を設定するmixed-pmpオプションを追加。一律16個の既定構成も維持。CPU ISAは同一rva23s64のままで、X100/A100全体の再現とはしない。
+- 残課題：[QEMU差分一覧](jupiter2-qemu-hardware-test-gaps.md)に優先順位、実機domain fixture、上位PMPの負の試験、mailbox/RPMI/ESOS/UFSの未再現範囲を記載。
+- 検証：QEMUビルド成功。実QMPで両構成の全CPU設定を確認し、実OpenSBI/SM＋専用S-mode guestで全16 HartのreadbackとHSM到達を確認。ただし実測root7個・空き9個・PMPADDR幅54ビットであり実機の13個・3個・38ビットとは異なる。Linux/SDKのguest統合と実機試験は未実施。修正commitは本更新を含むcommit。

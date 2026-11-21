@@ -236,3 +236,12 @@ OSがrootfsへ書いた内容や既に行った永続更新の復元とは区別
 ホスト回帰はscripts/tests/jupiter2-ram-boot/test_linux_dtb_preparation.pyで実dtc/fdtputを使う。
 CPU/SBI/PMPは模擬せず、USBや実機を操作しない。
 この候補による販売元/SM版Linux起動とhello実行は未検証で、上記の実機試験で確認する。
+
+
+## 混在PMP修正後の再試験
+
+CPU8〜15が起動せずhello CREATEが100100になる場合は
+[KSB-071の修正と判定](jupiter2-heterogeneous-pmp-plan.md#7-修正候補の実装結果)を確認する。
+今回の修正はSM/OpenSBIのみを更新したRAM起動で試せる。Linuxのonlineが0-15であることを確認してからhelloへ進む。
+`admission denied:` や `extra rejected` が出た場合はそのUARTログを保存し、検査を無効化して続行しない。
+QEMU試験の範囲は[実機との差分](jupiter2-qemu-hardware-test-gaps.md)を参照。

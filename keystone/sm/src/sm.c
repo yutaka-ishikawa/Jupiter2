@@ -29,25 +29,41 @@ static int sm_enclave_admission_ready = 0;
 int sm_is_ready(void)
 {
 #ifdef KEYSTONE_K3_PMP_N_REG
-  /* Existing OpenSBI startup order:
-   * local PMP + sm_init(false) -> HSM STARTED -> first S-mode entry.
-   * Do not duplicate the HSM state with a separate Hart bitmap.
-   * The actual EPM deny + remote CSR ACK remain mandatory in CREATE.
-   * Reject until all configured QEMU Harts are STARTED. */
-  unsigned int i;
-  if (!__atomic_load_n(&sm_init_done, __ATOMIC_ACQUIRE) ||
-      !k3_pmp_partition_is_prepared() || !k3_pmp_sync_healthy() ||
-      sbi_scratch_last_hartindex() != MAX_HARTS - 1)
-    return 0;
-  for (i = 0; i < MAX_HARTS; ++i) {
-    if (!sbi_hartindex_to_scratch(i) ||
-        sbi_hartindex_to_hartid(i) >= MAX_HARTS ||
-        __sbi_hsm_hart_get_state(i) != SBI_HSM_STATE_STARTED)
-      return 0;
-  }
-  return 1;
+    unsigned int i, state;
+    const char *reason = NULL;
+
+    if (!__atomic_load_n(&sm_init_done, __ATOMIC_ACQUIRE)) {
+	reason = "global initialization incomplete";
+    } else if (!k3_pmp_partition_is_prepared()) {
+	reason = "PMP partition not prepared";
+    } else if (!k3_pmp_sync_healthy()) {
+	reason = "PMP synchronization unavailable or poisoned";
+    } else if (sbi_scratch_last_hartindex() != MAX_HARTS - 1) {
+	reason = "unexpected Hart inventory";
+    }
+    if (reason) {
+	sbi_printf("[SM/K3] admission denied: %s\n", reason);
+	return 0;
+    }
+    for (i = 0; i < MAX_HARTS; ++i) {
+	if (!sbi_hartindex_to_scratch(i) ||
+	    sbi_hartindex_to_hartid(i) >= MAX_HARTS) {
+	    sbi_printf("[SM/K3] admission denied: invalid Hart index=%u\n", i);
+	    return 0;
+	}
+	state = __sbi_hsm_hart_get_state(i);
+	if (state != SBI_HSM_STATE_STARTED) {
+	    sbi_printf("[SM/K3] admission denied: hart=%u state=%u expected=%u\n",
+		       sbi_hartindex_to_hartid(i), state, SBI_HSM_STATE_STARTED);
+	    return 0;
+	}
+    }
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return 0;
+    }
+    return 1;
 #else
-  return __atomic_load_n(&sm_enclave_admission_ready, __ATOMIC_ACQUIRE);
+    return __atomic_load_n(&sm_enclave_admission_ready, __ATOMIC_ACQUIRE);
 #endif
 }
 /* K3 SM text and static data are part of the OpenSBI firmware image.

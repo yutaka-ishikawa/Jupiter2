@@ -10,6 +10,7 @@
 #include "page.h"
 #include "ipi.h"
 #include <sbi/sbi_hart.h>
+#include <sbi/sbi_scratch.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_locks.h>
 #include <sbi/riscv_atomic.h>
@@ -312,77 +313,118 @@ int pmp_set_global(int region_idx, uint8_t perm)
 
 int pmp_init(void)
 {
+    uintptr_t pmpaddr = 0;
+    uintptr_t pmpcfg = 0;
+    int i;
 #ifdef KEYSTONE_K3_PMP_N_REG
-  if (!k3_pmp_partition_prepared) {
-    sbi_printf("[SM/K3] PMP partition not verified\n");
-    return SBI_ERR_SM_NOT_IMPLEMENTED;
-  }
-#endif
-  uintptr_t pmpaddr = 0;
-  uintptr_t pmpcfg = 0;
-  int i;
-  for (i=0; i < PMP_N_REG; i++)
-  {
-#ifdef KEYSTONE_K3_PMP_N_REG
-    /* Preserve every OpenSBI-owned PMP entry and its locked state. */
-    if (!k3_pmp_index_allowed(i)) continue;
-#endif
-    switch(i) {
-#define X(n,g) case n: { PMP_SET(n, g, pmpaddr, pmpcfg); break; }
-      LIST_OF_PMP_REGS
-#undef X
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return SBI_ERR_SM_PMP_REGION_INVALID;
     }
-  }
-  return SBI_ERR_SM_PMP_SUCCESS;
+#endif
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (!k3_pmp_partition_prepared) {
+	sbi_printf("[SM/K3] PMP partition not verified\n");
+	return SBI_ERR_SM_NOT_IMPLEMENTED;
+    }
+#endif
+    for (i = 0; i < PMP_N_REG; i++) {
+#ifdef KEYSTONE_K3_PMP_N_REG
+	/* Preserve every OpenSBI-owned PMP entry and its locked state. */
+	if (!k3_pmp_index_allowed(i)) {
+	    continue;
+	}
+#endif
+	switch (i) {
+#define X(n, g)                                                                \
+    case n: {                                                                  \
+	PMP_SET(n, g, pmpaddr, pmpcfg);                                        \
+	break;                                                                 \
+    }
+	    LIST_OF_PMP_REGS
+#undef X
+	}
+    }
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return SBI_ERR_SM_PMP_REGION_INVALID;
+    }
+#endif
+    return SBI_ERR_SM_PMP_SUCCESS;
 }
 
 int pmp_set_keystone(int region_idx, uint8_t perm)
 {
-  if(!is_pmp_region_valid(region_idx))
-    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index");
-
-  uint8_t perm_bits = perm & PMP_ALL_PERM;
-  pmpreg_id reg_idx = region_register_idx(region_idx);
+    uint8_t perm_bits;
+    pmpreg_id reg_idx;
+    uintptr_t pmpcfg, pmpaddr;
+    int n;
 #ifdef KEYSTONE_K3_PMP_N_REG
-  if (!k3_pmp_index_allowed(reg_idx) ||
-      (region_needs_two_entries(region_idx) && !k3_pmp_index_allowed(reg_idx-1)))
-    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "PMP slot not Keystone-owned");
-#endif
-  uintptr_t pmpcfg = region_pmpcfg_val(region_idx, reg_idx, perm_bits);
-  uintptr_t pmpaddr;
-
-  pmpaddr = region_pmpaddr_val(region_idx);
-
-  //sbi_printf("pmp_set() [hart %d]: reg[%d], mode[%s], range[0x%lx-0x%lx], perm[0x%x]\r\n",
-  //       current_hartid(), reg_idx, (region_is_tor(region_idx) ? "TOR":"NAPOT"),
-  //       region_get_addr(region_idx), region_get_addr(region_idx) + region_get_size(region_idx), perm);
-  //sbi_printf("  pmp[%d] = pmpaddr: 0x%lx, pmpcfg: 0x%lx\r\n", reg_idx, pmpaddr, pmpcfg);
-
-  int n=reg_idx;
-
-  switch(n) {
-#define X(n,g) case n: { PMP_SET(n, g, pmpaddr, pmpcfg); break; }
-  LIST_OF_PMP_REGS
-#undef X
-    default:
-      sm_assert(false);
-  }
-
-  /* TOR decoding with 2 registers */
-  if(region_needs_two_entries(region_idx))
-  {
-    n--;
-    pmpcfg = 0;
-    pmpaddr = region_get_addr(region_idx) >> 2;
-    switch(n) {
-#define X(n,g) case n: { PMP_SET(n, g, pmpaddr, pmpcfg); break; }
-  LIST_OF_PMP_REGS
-#undef X
-    default:
-      sm_assert(false);
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return SBI_ERR_SM_PMP_REGION_INVALID;
     }
-  }
-  return SBI_ERR_SM_PMP_SUCCESS;
+#endif
+    if (!is_pmp_region_valid(region_idx)) {
+	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index");
+    }
+
+    perm_bits = perm & PMP_ALL_PERM;
+    reg_idx = region_register_idx(region_idx);
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (!k3_pmp_index_allowed(reg_idx) ||
+	(region_needs_two_entries(region_idx) &&
+	 !k3_pmp_index_allowed(reg_idx - 1))) {
+	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "PMP slot not Keystone-owned");
+    }
+#endif
+    pmpcfg = region_pmpcfg_val(region_idx, reg_idx, perm_bits);
+
+    pmpaddr = region_pmpaddr_val(region_idx);
+
+    // sbi_printf("pmp_set() [hart %d]: reg[%d], mode[%s], range[0x%lx-0x%lx],
+    // perm[0x%x]\r\n",
+    //        current_hartid(), reg_idx, (region_is_tor(region_idx) ?
+    //        "TOR":"NAPOT"), region_get_addr(region_idx),
+    //        region_get_addr(region_idx) + region_get_size(region_idx), perm);
+    // sbi_printf("  pmp[%d] = pmpaddr: 0x%lx, pmpcfg: 0x%lx\r\n", reg_idx,
+    // pmpaddr, pmpcfg);
+
+    n = reg_idx;
+
+    switch (n) {
+#define X(n, g)                                                                \
+    case n: {                                                                  \
+	PMP_SET(n, g, pmpaddr, pmpcfg);                                        \
+	break;                                                                 \
+    }
+	LIST_OF_PMP_REGS
+#undef X
+    default:
+	sm_assert(false);
+    }
+
+    /* TOR decoding with 2 registers */
+    if (region_needs_two_entries(region_idx)) {
+	n--;
+	pmpcfg = 0;
+	pmpaddr = region_get_addr(region_idx) >> 2;
+	switch (n) {
+#define X(n, g)                                                                \
+    case n: {                                                                  \
+	PMP_SET(n, g, pmpaddr, pmpcfg);                                        \
+	break;                                                                 \
+    }
+	    LIST_OF_PMP_REGS
+#undef X
+	default:
+	    sm_assert(false);
+	}
+    }
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return SBI_ERR_SM_PMP_REGION_INVALID;
+    }
+#endif
+    return SBI_ERR_SM_PMP_SUCCESS;
 }
 
 int pmp_unset(int region_idx);
@@ -480,6 +522,11 @@ int k3_pmp_apply_verified(int region, int operation, uint8_t permissions)
     if (rc != SBI_ERR_SM_PMP_SUCCESS) {
 	return -1;
     }
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return -1;
+    }
+#endif
     /* Flush cached translations before acknowledging the new permissions. */
     asm volatile("fence iorw, iorw\n\tsfence.vma" ::: "memory");
     if (region_is_tor(region)) {
@@ -511,37 +558,59 @@ int k3_pmp_apply_verified(int region, int operation, uint8_t permissions)
 
 int pmp_unset(int region_idx)
 {
-  if(!is_pmp_region_valid(region_idx))
-    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID,"Invalid PMP region index");
-
-  pmpreg_id reg_idx = region_register_idx(region_idx);
+    pmpreg_id reg_idx;
+    int n;
 #ifdef KEYSTONE_K3_PMP_N_REG
-  if (!k3_pmp_index_allowed(reg_idx) ||
-      (region_needs_two_entries(region_idx) && !k3_pmp_index_allowed(reg_idx-1)))
-    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "PMP slot not Keystone-owned");
-#endif
-  int n=reg_idx;
-  switch(n) {
-#define X(n,g) case n: { PMP_UNSET(n, g); break;}
-  LIST_OF_PMP_REGS
-#undef X
-    default:
-      sm_assert(false);
-  }
-
-  if(region_needs_two_entries(region_idx))
-  {
-    n--;
-    switch(n) {
-#define X(n,g) case n: { PMP_UNSET(n,g); break; }
-  LIST_OF_PMP_REGS
-#undef X
-    default:
-      sm_assert(false);
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return SBI_ERR_SM_PMP_REGION_INVALID;
     }
-  }
+#endif
+    if (!is_pmp_region_valid(region_idx)) {
+	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index");
+    }
 
-  return SBI_ERR_SM_PMP_SUCCESS;
+    reg_idx = region_register_idx(region_idx);
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (!k3_pmp_index_allowed(reg_idx) ||
+	(region_needs_two_entries(region_idx) &&
+	 !k3_pmp_index_allowed(reg_idx - 1))) {
+	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "PMP slot not Keystone-owned");
+    }
+#endif
+    n = reg_idx;
+    switch (n) {
+#define X(n, g)                                                                \
+    case n: {                                                                  \
+	PMP_UNSET(n, g);                                                       \
+	break;                                                                 \
+    }
+	LIST_OF_PMP_REGS
+#undef X
+    default:
+	sm_assert(false);
+    }
+
+    if (region_needs_two_entries(region_idx)) {
+	n--;
+	switch (n) {
+#define X(n, g)                                                                \
+    case n: {                                                                  \
+	PMP_UNSET(n, g);                                                       \
+	break;                                                                 \
+    }
+	    LIST_OF_PMP_REGS
+#undef X
+	default:
+	    sm_assert(false);
+	}
+    }
+
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
+	return SBI_ERR_SM_PMP_REGION_INVALID;
+    }
+#endif
+    return SBI_ERR_SM_PMP_SUCCESS;
 }
 
 int pmp_region_init_atomic(uintptr_t start, uint64_t size, enum pmp_priority priority, region_id* rid, int allow_overlap)

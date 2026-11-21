@@ -528,21 +528,20 @@ static bool k3_root_firmware_pair(const struct sbi_scratch *scratch,
 }
 
 static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
-				   unsigned int count, unsigned int gran,
-				   unsigned long addr_max,
-				   struct k3_root_pmp_layout *layout)
+				    unsigned int count, unsigned int gran,
+				    unsigned long addr_max,
+				    struct k3_root_pmp_layout *layout)
 {
     struct sbi_domain *dom = sbi_domain_thishart_ptr();
     struct sbi_domain_memregion *reg;
     unsigned int broad = 0;
 
     sbi_memset(layout, 0, sizeof(*layout));
-    if (!dom || !dom->regions || count != K3_BOOT_PMP_COUNT) {
+    if (!dom || !dom->regions || !k3_pmp_count_supported(count)) {
 	return SBI_ENOTSUPP;
     }
     if (sbi_hart_has_extension(scratch, SBI_HART_EXT_SMEPMP) &&
-	(csr_read(CSR_MSECCFG) &
-	 (MSECCFG_MML | MSECCFG_MMWP | MSECCFG_RLB))) {
+	(csr_read(CSR_MSECCFG) & (MSECCFG_MML | MSECCFG_MMWP | MSECCFG_RLB))) {
 	return SBI_EDENIED;
     }
 
@@ -555,8 +554,9 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
 	 */
 	if (reg->order > __riscv_xlen || gran > reg->order ||
 	    (reg->base >> PMP_SHIFT) >= addr_max) {
-	    K3_PMP_TRACE("REJECT unrepresentable region base=0x%lx order=%lu gran=%u\n",
-			 reg->base, reg->order, gran);
+	    K3_PMP_TRACE(
+		"REJECT unrepresentable region base=0x%lx order=%lu gran=%u\n",
+		reg->base, reg->order, gran);
 	    return SBI_ENOTSUPP;
 	}
 	if (k3_root_is_global_allow(reg)) {
@@ -567,8 +567,9 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
 	if (!layout->folded && k3_root_firmware_pair(scratch, reg)) {
 	    layout->folded = reg;
 	    layout->carrier = reg + 1;
-	    K3_PMP_TRACE("share firmware deny base=0x%lx order=%lu via order=%lu\n",
-			 reg->base, reg->order, layout->carrier->order);
+	    K3_PMP_TRACE(
+		"share firmware deny base=0x%lx order=%lu via order=%lu\n",
+		reg->base, reg->order, layout->carrier->order);
 	    continue;
 	}
 	if (layout->regular >= K3_BOOT_FALLBACK) {
@@ -578,16 +579,17 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
     }
 
     if (k3_boot_plan_slots(count, layout->regular, broad, &layout->slots)) {
-	K3_PMP_TRACE("REJECT root PMP capacity/order regular=%u broad=%u count=%u\n",
-		     layout->regular, broad, count);
+	K3_PMP_TRACE(
+	    "REJECT root PMP capacity/order regular=%u broad=%u count=%u\n",
+	    layout->regular, broad, count);
 	return SBI_ENOTSUPP;
     }
     return 0;
 }
 
 static int k3_root_pmp_layout_verify(struct sbi_scratch *scratch,
-				    const struct k3_root_pmp_layout *layout,
-				    unsigned short *locked_mask)
+				     const struct k3_root_pmp_layout *layout,
+				     unsigned short *locked_mask)
 {
     const struct sbi_domain_memregion *reg;
     unsigned long prot, addr, len, expected;
@@ -597,6 +599,10 @@ static int k3_root_pmp_layout_verify(struct sbi_scratch *scratch,
 
     *locked_mask = 0;
     required_order = sbi_hart_pmp_addrbits(scratch) + PMP_SHIFT;
+    rc = sbi_hart_keystone_verify_extra_pmp(scratch);
+    if (rc) {
+	return rc;
+    }
     for (i = 0; i < K3_BOOT_PMP_COUNT; i++) {
 	rc = pmp_get(i, &prot, &addr, &len);
 	if (rc) {
@@ -608,17 +614,18 @@ static int k3_root_pmp_layout_verify(struct sbi_scratch *scratch,
 	    reg = layout->fallback;
 	} else {
 	    if (prot & ~(PMP_R | PMP_W | PMP_X)) {
-		K3_PMP_TRACE("FAIL nonfree Keystone slot=%u prot=0x%lx\n", i, prot);
+		K3_PMP_TRACE("FAIL nonfree Keystone slot=%u prot=0x%lx\n", i,
+			     prot);
 		return SBI_EFAIL;
 	    }
 	    continue;
 	}
 
 	expected = k3_root_pmp_permissions(reg);
-	if (prot != (PMP_A_NAPOT | expected) ||
-	    addr != reg->base ||
+	if (prot != (PMP_A_NAPOT | expected) || addr != reg->base ||
 	    (i < layout->regular ? len != reg->order : len < required_order)) {
-	    K3_PMP_TRACE("FAIL root readback slot=%u prot=0x%lx expected=0x%lx addr=0x%lx len=%lu\n",
+	    K3_PMP_TRACE("FAIL root readback slot=%u prot=0x%lx expected=0x%lx "
+			 "addr=0x%lx len=%lu\n",
 			 i, prot, expected, addr, len);
 	    return SBI_EFAIL;
 	}
@@ -631,7 +638,8 @@ static int k3_root_pmp_layout_verify(struct sbi_scratch *scratch,
 		addr != layout->folded->base || len < layout->folded->order) {
 		return SBI_EFAIL;
 	    }
-	    K3_PMP_TRACE("verified shared firmware deny slot=%u base=0x%lx\n", i, addr);
+	    K3_PMP_TRACE("verified shared firmware deny slot=%u base=0x%lx\n",
+			 i, addr);
 	}
 	if (prot & PMP_L) {
 	    locks |= (unsigned short)(1U << i);
@@ -646,7 +654,7 @@ static int k3_root_pmp_layout_verify(struct sbi_scratch *scratch,
  * Only this trusted result may authorize locks in the CSR shape preflight.
  */
 int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
-				       unsigned short *locked_mask)
+					 unsigned short *locked_mask)
 {
     struct k3_root_pmp_layout layout;
     unsigned int bits;
@@ -663,7 +671,8 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
     }
     addr_max = (1UL << bits) - 1;
     rc = k3_root_pmp_layout_build(scratch, sbi_hart_pmp_count(scratch),
-				sbi_hart_pmp_log2gran(scratch), addr_max, &layout);
+				  sbi_hart_pmp_log2gran(scratch), addr_max,
+				  &layout);
     if (rc) {
 	return rc;
     }
@@ -671,9 +680,8 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
 }
 
 static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
-					 unsigned int count,
-					 unsigned int gran,
-					 unsigned long addr_max)
+					  unsigned int count, unsigned int gran,
+					  unsigned long addr_max)
 {
     struct k3_root_pmp_layout layout;
     unsigned short locked_mask;
@@ -686,9 +694,10 @@ static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
 	return rc;
     }
     free_slots = __builtin_popcount((unsigned int)layout.slots.keystone_mask);
-    K3_PMP_TRACE("root plan regular=%u opensbi-mask=0x%x keystone-mask=0x%x free=%u\n",
-		 layout.regular, layout.slots.opensbi_mask,
-		 layout.slots.keystone_mask, free_slots);
+    K3_PMP_TRACE(
+	"root plan regular=%u opensbi-mask=0x%x keystone-mask=0x%x free=%u\n",
+	layout.regular, layout.slots.opensbi_mask, layout.slots.keystone_mask,
+	free_slots);
 
     /* Never overwrite any active or locked entry left by earlier code. */
     for (i = 0; i < count; i++) {
@@ -716,11 +725,14 @@ static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
     if (rc) {
 	return rc;
     }
-    sbi_printf("K3 PMP: OpenSBI entries=%u fallback=%u Keystone free=%u mask=0x%x\n",
-	       layout.regular, layout.slots.fallback_index,
-	       free_slots, layout.slots.keystone_mask);
-    K3_PMP_TRACE("root-config PASS hart=%lu root=%u Keystone-free=%u\n",
-		 csr_read(CSR_MHARTID), layout.regular + 1, free_slots);
+    sbi_printf(
+	"K3 PMP: OpenSBI entries=%u fallback=%u Keystone free=%u mask=0x%x\n",
+	layout.regular, layout.slots.fallback_index, free_slots,
+	layout.slots.keystone_mask);
+    K3_PMP_TRACE("root-config PASS hart=%lu implemented=%u common=%u "
+		 "extra-off=%u root=%u Keystone-free=%u\n",
+		 csr_read(CSR_MHARTID), count, K3_PMP_COMMON_REGS,
+		 count - K3_PMP_COMMON_REGS, layout.regular + 1, free_slots);
     return 0;
 }
 
@@ -782,31 +794,66 @@ static int sbi_hart_oldpmp_configure(struct sbi_scratch *scratch,
  * This bit is a preparatory fail-closed gate; production handoff remains
  * disabled pending PMP capability, CSR readback and Hart admission proof.
  */
+int sbi_hart_keystone_verify_extra_pmp(struct sbi_scratch *scratch)
+{
+    unsigned int i, count;
+    unsigned long prot, addr, len;
+    int rc;
+
+    if (!scratch) {
+	return SBI_EINVAL;
+    }
+    count = sbi_hart_pmp_count(scratch);
+    if (!k3_pmp_count_supported(count)) {
+	sbi_printf("[K3-PMP] unsupported hart=%lu implemented=%u common=%u\n",
+		   csr_read(CSR_MHARTID), count, K3_PMP_COMMON_REGS);
+	return SBI_ENOTSUPP;
+    }
+    for (i = K3_PMP_COMMON_REGS; i < count; i++) {
+	rc = pmp_get(i, &prot, &addr, &len);
+	if (rc || (prot & (PMP_A | PMP_L))) {
+	    sbi_printf(
+		"[K3-PMP] extra rejected hart=%lu index=%u rc=%d prot=0x%lx\n",
+		csr_read(CSR_MHARTID), i, rc, prot);
+	    return SBI_EDENIED;
+	}
+    }
+    return 0;
+}
+
 /* K3 A1: collect local CSR facts without modifying PMP state.
  * Unsafe to invoke from ordinary S-mode; it is only callable from M-mode.
  * All-Hart completeness, priority analysis, park and ownership handoff are
  * deliberately NOT inferred from this function's return value. */
-int sbi_hart_keystone_a1_read_pmp_snapshot(
-  struct sbi_scratch *scratch, struct k3_a1_local_pmp_snapshot *out)
+int sbi_hart_keystone_a1_read_pmp_snapshot(struct sbi_scratch *scratch,
+					   struct k3_a1_local_pmp_snapshot *out)
 {
- unsigned int i, count;
- int rc;
- if (!scratch || !out) return SBI_EINVAL;
- count=sbi_hart_pmp_count(scratch);
- if (!count || count > K3_A1_SNAPSHOT_REGS) return SBI_ENOTSUPP;
- sbi_memset(out, 0, sizeof(*out));
- out->pmp_count=count;
- out->pmp_log2gran=sbi_hart_pmp_log2gran(scratch);
- if (sbi_hart_has_extension(scratch,SBI_HART_EXT_SMEPMP)) {
-  out->mseccfg=csr_read(CSR_MSECCFG);
-  out->mseccfg_valid=1;
- }
- for (i=0;i<count;i++) {
-  rc=pmp_get(i,&out->entry[i].prot,&out->entry[i].addr,
-             &out->entry[i].log2len);
-  if (rc) { sbi_memset(out,0,sizeof(*out)); return rc; }
- }
- return 0;
+    unsigned int i, count;
+    int rc;
+    if (!scratch || !out) {
+	return SBI_EINVAL;
+    }
+    count = sbi_hart_pmp_count(scratch);
+    if (!k3_pmp_count_supported(count)) {
+	return SBI_ENOTSUPP;
+    }
+    sbi_memset(out, 0, sizeof(*out));
+    out->pmp_count = count;
+    out->common_count = K3_PMP_COMMON_REGS;
+    out->pmp_log2gran = sbi_hart_pmp_log2gran(scratch);
+    if (sbi_hart_has_extension(scratch, SBI_HART_EXT_SMEPMP)) {
+	out->mseccfg = csr_read(CSR_MSECCFG);
+	out->mseccfg_valid = 1;
+    }
+    for (i = 0; i < count; i++) {
+	rc = pmp_get(i, &out->entry[i].prot, &out->entry[i].addr,
+		     &out->entry[i].log2len);
+	if (rc) {
+	    sbi_memset(out, 0, sizeof(*out));
+	    return rc;
+	}
+    }
+    return 0;
 }
 
 static unsigned long k3_keystone_block_opensbi_pmp;

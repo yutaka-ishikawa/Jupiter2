@@ -31,6 +31,8 @@ def main():
     p.add_argument('--compiler', default='clang')
     p.add_argument('--opt-level', choices=['0', '1', '2', '3', 's', 'z'],
                    default='2', help='SM optimization level (default: 2)')
+    p.add_argument('--pmp-profile', choices=['mixed', 'qemu16'], default='mixed',
+                   help='Hardware inventory: 16/32 mixed (default), or strict QEMU16')
     p.add_argument('--dev-embedded-key', action='store_true',
                    help='Diagnostic only: compile with build-time-generated dev key. Never production.')
     p.add_argument("--trace", action="store_true", help="Enable SM progress markers for hang diagnosis")
@@ -45,12 +47,13 @@ def main():
            '-fno-stack-protector','-D__riscv_xlen=64',
            # SM is linked into OpenSBI; no standalone SM address macros.
            '-DKEYSTONE_K3_PMP_N_REG=16',
-           '-DK3_QEMU_PMP16=1',
            '-DTARGET_PLATFORM_HEADER="platform/spacemit_k3/platform.h"',
            '-I'+str(sm),'-I'+str(a.opensbi/'include'),
            '-I'+str(a.opensbi/'lib/utils/libfdt'),
            '-I'+str(a.opensbi/'platform/generic/include'),
            '-I'+str(sm.parent/'../sdk/include'),'-I'+str(sm.parent.parent/'sdk/include/shared'),'-Wno-unused-function']
+    if a.pmp_profile == 'qemu16':
+        flags.append('-DK3_QEMU_PMP16=1')
     flags.append("-DKEYSTONE_RNG_BACKEND=" + str(["auto", "zkr", "jupiter2", "counter"].index(a.rng)))
     flags.append("-I" + str(a.output))
     if a.crypto == "qemu-dev":
@@ -70,6 +73,7 @@ def main():
                'compiler_version': subprocess.check_output(
                    [a.compiler, '--version'], text=True).splitlines()[0],
                'optimization': '-O' + a.opt_level,
+               'pmp_profile': a.pmp_profile,
                'flags': flags, 'sources': SOURCES}
     (a.output / 'compile-options.json').write_text(
         json.dumps(options, indent=2) + '\n')

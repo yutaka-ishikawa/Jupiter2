@@ -9,7 +9,7 @@ W=$(realpath -m "$3")
 [ -f "$S/include/sbi/sbi_types.h" ] || { echo 'ERROR: OpenSBI source missing' >&2; exit 3; }
 [ -f "$K/sm/src/platform/spacemit_k3/platform.c" ] || { echo 'ERROR: K3 platform missing' >&2; exit 3; }
 for tool in python3 clang ld.lld readelf nm; do command -v "$tool" >/dev/null || { echo "ERROR missing $tool" >&2; exit 3; }; done
-trace_args=(--rng "${KEYSTONE_RNG_BACKEND:-auto}" --crypto "${KEYSTONE_CRYPTO_PROVIDER:-unavailable}")
+trace_args=(--pmp-profile "${KEYSTONE_PMP_PROFILE:-mixed}" --rng "${KEYSTONE_RNG_BACKEND:-auto}" --crypto "${KEYSTONE_CRYPTO_PROVIDER:-unavailable}")
 case ${KEYSTONE_SM_OPT_LEVEL:-2} in
  0|1|2|3|s|z) trace_args+=(--opt-level "${KEYSTONE_SM_OPT_LEVEL:-2}");;
  *) echo 'KEYSTONE_SM_OPT_LEVEL must be 0, 1, 2, 3, s or z' >&2; exit 2;;

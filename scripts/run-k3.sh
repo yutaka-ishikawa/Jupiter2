@@ -23,6 +23,7 @@ ZKR=""
 SSTC=""
 WTM=""
 WTM_FAULT=none
+PMP_PROFILE=uniform16
 ROOTFS_FORMAT=raw
 usage() {
 cat <<'EOF'
@@ -35,6 +36,7 @@ Usage: bash scripts/run-k3.sh [options]
   --rootfs FILE            Raw guest rootfs image (default: selected profile image)
   --crypto unavailable|qemu-dev  Choose normal or explicit development crypto firmware
   --rng auto|zkr|jupiter2|counter  Select matching RNG firmware and devices
+  --pmp-profile uniform16|mixed  PMP regression profile (default: uniform16)
   --sstc on|off            Select host Sstc support (default: CPU model)
   --zkr on|off             Override Zkr CPU extension for negative tests
   --wtm-rng on|off         Override WTM MMIO peripheral
@@ -57,9 +59,10 @@ EOF
 }
 while (($#)); do
  case "$1" in
-  --sstc|--crypto|--rng|--zkr|--wtm-rng|--wtm-rng-fault|--rootfs-format|--image|--prefix|--qemu|--kernel|--bios|--rootfs|--hostfs|--gdb-port|--monitor-port|--smp|--memory|--append)
+  --pmp-profile|--sstc|--crypto|--rng|--zkr|--wtm-rng|--wtm-rng-fault|--rootfs-format|--image|--prefix|--qemu|--kernel|--bios|--rootfs|--hostfs|--gdb-port|--monitor-port|--smp|--memory|--append)
    (($#>=2)) || { echo "Missing value for $1" >&2; exit 2; }
    case "$1" in
+    --pmp-profile) PMP_PROFILE=$2;;
     --sstc) SSTC=$2;; --crypto) CRYPTO=$2;; --rng) RNG=$2;; --zkr) ZKR=$2;; --wtm-rng) WTM=$2;;
     --wtm-rng-fault) WTM_FAULT=$2;; --rootfs-format) ROOTFS_FORMAT=$2;;
     --image) IMAGE=$2;; --qemu) QEMU=$2;; --kernel) KERNEL=$2;; --bios) BIOS=$2;;
@@ -136,6 +139,11 @@ ROOTFS="$(realpath -e "$ROOTFS")"
 HOSTFS="$(realpath -e "$HOSTFS")"
 args=(-accel tcg -smp "$SMP" -m "$MEM" -bios "$BIOS" -kernel "$KERNEL")
 machine=jupiter2
+case "$PMP_PROFILE" in
+ uniform16) :;;
+ mixed) machine+=",mixed-pmp=on";;
+ *) echo 'Invalid --pmp-profile (use uniform16 or mixed)' >&2; exit 2;;
+esac
 cpu=rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16
 if [[ -n $SSTC ]]; then cpu+=",sstc=$SSTC"; fi
 if [[ -n $ZKR ]]; then cpu+=",zkr=$ZKR"; fi
