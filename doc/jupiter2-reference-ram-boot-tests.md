@@ -428,3 +428,52 @@ part list scsi 0
 パーティション番号やLinuxのroot=を推測してbootコマンドを実行しない。
 既存Bianbuの起動設定に合わせ、UARTで一時指定して販売元OpenSBIとのLinux起動を確認してから、
 OpenSBIだけを開発版へ差し替える比較へ進む。
+
+## 15. 実機bootfsからLinuxを一時起動する
+
+ユーザー実機のGPT一覧でscsi 0:2がbootfs、scsi 0:3がrootfs。
+rootfsのPARTUUIDは73708e51-d3a9-4b6f-ab55-894cd1d8b4a0である。
+これは今回の実機固有の値。他の実機へそのまま流用しない。
+Partition Type: EFIはGPT形式の表示で、GRUB起動の証拠ではない。
+bootfsのenv_k3.txtをRAMへ取り込み、次のファイルと値を確認済み。
+
+| 項目 | 今回の値 |
+| --- | --- |
+| カーネル | /Image-6.18.3-keystone、44638208 bytes |
+| initrd | /initrd.img-6.18.3、41886729 bytes |
+| Linux用DTB | /spacemit/6.18.3-generic/k3-pico-itx.dtb、148441 bytes |
+| kernel_addr_r | 0x140000000 |
+| ramdisk_addr | 0x130000000 |
+| fdt_addr_r | 0x138000000 |
+
+fdtfileは未定義だったため、実際に存在するk3-pico-itx.dtbを指定する。
+commonargsはsplash等だけでroot=がないため、今回の試験ではUARTとrootfsを明示する。
+以下はUARTのU-Bootで実行する。各loadのbytes read成功を確認し、失敗した場合は次へ進まない。
+
+```text
+setenv fdtfile k3-pico-itx.dtb
+load scsi 0:2 ${kernel_addr_r} /${knl_name}
+load scsi 0:2 ${ramdisk_addr} /${ramdisk_name}
+setenv initrd_size ${filesize}
+load scsi 0:2 ${fdt_addr_r} /${dtb_dir}/${fdtfile}
+printenv kernel_addr_r ramdisk_addr initrd_size fdt_addr_r
+```
+
+filesizeはload成功のたびに更新される。initrdのサイズはDTBのload前に保存する。
+
+```text
+setenv bootargs console=ttyS0,115200 earlycon=sbi root=PARTUUID=73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 rootwait rw loglevel=8
+booti ${kernel_addr_r} ${ramdisk_addr}:${initrd_size} ${fdt_addr_r}
+```
+
+env_k3.txtと永続envは変更しない。ここではsaveenvを実行しない。
+固定参照ソースの非SPL dram_init()は先頭32 MiBを除外してgd->ram_baseを設定する。
+arch/riscv/lib/image.cのbooti_setup()はそのbaseにLinux Imageのtext_offsetを足した位置へ移動する。
+通常の2 MiB offsetなら0x102200000で、先頭のESOS実行領域へ移動する構成ではない。
+起動ログのMoving Image表示も保存する。initrdとDTBの追加移動が表示される場合もログを残す。
+
+確認点はLinuxの起動ログ、rootfsのmount、login promptへの到達。起動後はuname -rを確認する。
+今回のカーネルの実releaseは6.18.3であり、Image名の-keystoneだけからunameの値を判断しない。
+販売元OpenSBIによるLinux起動の確認で、Keystone SM/Enclaveの実行成功とは分ける。
+停止・panic・root mount失敗時は最初のエラーを含むUART全ログを保存する。
+この段階のLinux起動はまだ実機結果待ちである。
