@@ -117,3 +117,80 @@ DDR初期化、ESOS開始、OpenSBI、UFSのどこで停止したかを記録す
 | QEMU guest統合 | 未実施。ホスト検査をguest PASSとは扱わない |
 
 形式試験用SPL/ESOSは起動用ファームウェアではなく、実機へ転送しない。
+
+## 8. 参照FSBLでの停止と診断版の再試験（KSB-065）
+
+ユーザー実機のSPL 2022.10-g4c294a06-dirty（2026-11-21 11:56:38 +0900）は、
+DDR training 5623ms、memory verify pass、2191805 bytesの転送、k3-pico-itxの選択後に
+次のログで止まった。OpenSBIの表示はない。
+
+```text
+k3-rproc rcpu@1: try start rproc-1 failed
+unknown boot device: 13
+load failed: uboot=-1 esos=-1
+```
+
+13は固定ソースのBOOT_DEVICE_BOARDである。後二行は追加FITローダーにRAM起動のcaseがないため
+表示されるが、その戻り値は旧コードで無視される。これだけを停止原因とは判断しない。
+core 1の同期応答待ち失敗も旧ドライバーは成功として返すため、ESOSが正常でない状態で
+OpenSBIへの引渡しまで進み得る。ESOS版・DDR/DT設定・ELF配置・共有データと
+キャッシュ可視性等のどれが応答失敗の原因かはまだ確定していない。
+
+診断版はpatches/jupiter2-reference-ram-boot-diagnostics.patchを固定ソースへ適用する。
+RCPU同期timeoutをエラーとして返し、SPLで停止する。展開失敗も黙って省略しない。
+RAM統合FITでは追加FIT読込みを省略し、loaded U-Boot metadataとentryを必須検査する。
+各coreの設定済み起動アドレスと応答状態、成功時にはOpenSBIのentry/next/DTB/hartを表示する。
+source.patchへ全変更を、build-manifest.jsonへ適用パッチのSHA-256を記録する。
+
+これは起動失敗を隠さず原因を絞る版であり、core 1の起動失敗そのものを解消したとは扱わない。
+DDR、RCPUのリセット順、応答確認、PMP保護を省略して先へ進める変更ではない。
+
+開発PCのpublicルートで、これまで確認して設定した変数を使い、新しい出力先へ再ビルドする。
+
+```bash
+git pull --ff-only
+: "${VENDOR_SBI_RESERVE_BYTES:?確認済み販売元OpenSBI実行時領域を設定する}"
+: "${SPL_DOWNLOAD_BYTES:?確認済みSPL転送上限を設定する}"
+: "${CROSS_COMPILE:?K3クロスコンパイラーのprefixを設定する}"
+OUT="$PWD/work/jupiter2-ram-boot/reference-vendor-diag-$(date +%Y%m%d-%H%M%S)"
+
+python3 scripts/build-jupiter2-reference-ram-boot.py \
+  --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --esos-configuration conf_dual \
+  --variant vendor \
+  --opensbi-reserve-bytes "$VENDOR_SBI_RESERVE_BYTES" \
+  --max-download-bytes "$SPL_DOWNLOAD_BYTES" \
+  --cross-compile "$CROSS_COMPILE" \
+  --output "$OUT"
+```
+
+ビルドが成功してから、段階4と同じ完全電源断・FDLで、今回の対を転送する。
+
+```bash
+cd "$OUT/release"
+sudo fastboot devices
+sudo fastboot stage images/FSBL.bin
+sudo fastboot continue
+# UARTでDDR完了、devicesでSPL再認識を確認してから次へ進む。
+sudo fastboot devices
+sudo fastboot -s HW4MPK3321280144 getvar max-download-size
+# 報告された上限がFITサイズ以上であることを確認する。
+stat -c '%s bytes' images/ram-boot-vendor.itb
+sudo fastboot -s HW4MPK3321280144 stage images/ram-boot-vendor.itb
+sudo fastboot -s HW4MPK3321280144 continue
+```
+
+再試験の判定：
+
+- core 1の`handshake timeout`と`stop before OpenSBI`なら、意図した失敗時停止である。
+  `start core=... entry=...`からの全UARTログを保存し、UFS試験へ進まない。
+- 両coreが`handshake acknowledged`でも、ESOS全機能の正常性を保証しない。
+  その後のOpenSBI起動、RPMI、U-Bootのログを確認する。
+- `[RAMBOOT] OpenSBI entry=... next=... dtb=... hart=...`が最後なら、引渡し直前まで到達した。
+  この表示だけでOpenSBI内部へ入ったとは判定しない。
+- 古い`unknown boot device: 13`が出る、または新しい診断表示が一切ない場合は、
+  転送したFSBL/FITとmanifestのハッシュを確認する。
+
+診断版のパッチ適用とホスト梱包試験は開発環境で確認する。対応K3 GCCでの完全ビルド、
+修正後の実機動作、実QEMU統合は未検証であり、今回の再試験で確認する。

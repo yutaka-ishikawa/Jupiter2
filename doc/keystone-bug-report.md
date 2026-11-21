@@ -89,6 +89,7 @@
 | KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 原因未確定・ユーザー実機観測 |
 | KSB-064 | 参照ESOS結合スクリプトのdescription一致とconf_dualが不一致 | 第三者K3手順を今回の入力へ適用する場合 | 統合上の制約・明示構成による回避実装、ホスト検査済 |
+| KSB-065 | 参照FSBLがESOS開始失敗を成功として扱いRAM追加FITも誤判定 | 参照U-Bootと販売元ESOSの統合 | core 1応答待ち失敗を実機観測・診断修正候補 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -978,3 +979,27 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
   参照側combine-esos.shは呼び出さない。組込みOpenSBIのバイト一致も検査する。
 - 検証：実dtc/mkimage/dumpimage/lzopを使う参照FIT＋27 loadablesのホスト回帰試験を追加。
   実ESOSのバイナリー検証、ESOS開始とUFS列挙の実機確認は未実施。
+
+### KSB-065: 参照FSBLのESOS開始失敗とRAM起動時のエラー処理
+
+- 登録日：2026-11-21。ユーザー実機ログはSPL 2022.10-g4c294a06-dirty、
+  Nov 21 2026 11:56:38 +0900。DDR training 5623ms、memory verify pass、
+  2191805 bytesのFIT転送後、k3-pico-itx選択に成功。
+  rproc-1開始失敗、unknown boot device: 13、load failed: uboot=-1 esos=-1でログが終わる。
+  OpenSBIの起動表示はない。JTAG enabled on MMC1 pinsも記録されている。
+- ソース証拠：固定コミットのdrivers/remoteproc/k3-rproc.cは約6秒の同期応答待ちが
+  失敗しても0を返す。board/spacemit/k3/spl.cも開始失敗を表示するだけで続行する。
+  arch/riscv/include/asm/spl.hで13はBOOT_DEVICE_BOARDだが、spl_extra_fit.cの
+  switchにはこのcaseがない。common/spl/spl_opensbi.cは追加FIT処理の戻り値を無視し、
+  U-Boot metadata探索失敗後にも未確定node/entryを使用し得る。
+- 帰属：上記固定参照ソースと今回の入力組合せで確認。販売元4月版や上流一般に帰属しない。
+  core 1が応答しない原因、OpenSBI無表示の直接原因、以前のUFS障害との因果は未確定。
+- 修正候補：RAM統合FITでは永続媒体の追加FIT読込みを省略し、後段でloaded U-Boot metadataを
+  必須検査する。RCPU同期timeoutを-ETIMEDOUTとし、SPLフックで失敗時に停止する。
+  ESOS展開・ELFロード／開始とOpenSBI引渡しの診断ログを追加する。
+  ESOSのタイムアウトを無視してOpenSBIへ進めたり、保護やリセット手順を省略したりしない。
+- 検証範囲：固定ソースへのgit apply --checkと、実際のprepare-only CLIによる適用・
+  source.patch生成・パッチSHA記録・既存output拒否を確認。Python構文、実FITツールの
+  ホスト回帰23件に合格。実機の再試験とは分けて記録する。
+  対応するK3 GCCでの修正候補の完全ビルド、実機再試験、QEMU guest統合は未検証。
+  詳細：[参照FSBLの停止調査](jupiter2-reference-ram-boot-tests.md#8-参照fsblでの停止と診断版の再試験ksb-065)。

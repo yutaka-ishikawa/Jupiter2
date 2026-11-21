@@ -118,6 +118,9 @@ def build(args):
     actual = subprocess.check_output(['git', '-C', source, 'rev-parse', 'HEAD'], text=True).strip()
     if actual != COMMIT:
         raise ValueError('reference source commit mismatch')
+    diagnostic_patch = Path(__file__).resolve().parents[1] / 'patches/jupiter2-reference-ram-boot-diagnostics.patch'
+    run(['git', 'apply', '--check', diagnostic_patch], cwd=source)
+    run(['git', 'apply', diagnostic_patch], cwd=source)
     # Vendor config.mk writes to srctree, so each run uses its own checkout.
     shutil.copyfile(args.opensbi_bin, source / 'board/spacemit/k3/fw_dynamic.bin')
     defconfig = source / 'configs/k3_defconfig'
@@ -131,14 +134,14 @@ def build(args):
         raise ValueError('pinned board USB bootcmd override changed unexpectedly')
     board.write_text(content.replace(old, '\t\tenv_set("bootcmd", "");\n'
                                     '\t\tenv_set("bootdelay", "-1");'))
-    diff = subprocess.check_output(['git', '-C', source, 'diff', '--',
-                                    'configs/k3_defconfig', 'board/spacemit/k3/k3.c'])
+    diff = subprocess.check_output(['git', '-C', source, 'diff', '--'])
     (records / 'source.patch').write_bytes(diff)
     manifest = {'source_repository': args.source_repository, 'source_commit': actual,
                 'variant': args.variant, 'board': 'k3-pico-itx', 'configuration': 'conf_11',
                 'esos_configuration': args.esos_configuration,
                 'inputs': {str(p): sha(p) for p in (args.opensbi_bin, args.esos_itb)},
-                'settings': SETTINGS, 'hardware_verified': False, 'status': 'prepared'}
+                'settings': SETTINGS, 'diagnostic_patch_sha256': sha(diagnostic_patch),
+                'hardware_verified': False, 'status': 'prepared'}
     (records / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     if args.prepare_only:
         print(f'Prepared pinned source and patch: {args.output}; no images built.')

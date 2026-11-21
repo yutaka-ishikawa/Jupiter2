@@ -1,0 +1,411 @@
+--- a/board/spacemit/k3/spl_extra_fit.c
++++ b/board/spacemit/k3/spl_extra_fit.c
+@@ -768,6 +768,12 @@
+ 
+ 	board_boot_order(spl_boot_list);
+ 
++	if (spl_boot_list[0] == BOOT_DEVICE_BOARD) {
++	    pr_info(
++		"[RAMBOOT] combined FIT: skip persistent extra FIT loads\n");
++	    return 0;
++	}
++
+ 	/*
+ 	 * UFS path already imported env in SPL UFS loader. Avoid reloading here
+ 	 * to skip duplicated UFS/SCSI initialization work.
+--- a/drivers/remoteproc/k3-rproc.c
++++ b/drivers/remoteproc/k3-rproc.c
+@@ -95,74 +95,91 @@
+ 
+ static int k3_rproc_start(struct udevice *dev)
+ {
+-	int try_count = 6000;
+-	struct k3_rproc_privdata *priv;
+-
+-	priv = dev_get_priv(dev);
+-
+-	switch (priv->coreid) {
+-	case 0:
+-		/* set the boot-entry */
+-		writel(priv->fw_boot_entry & 0xffffffff, (void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO);
+-		writel((priv->fw_boot_entry >> 32) & 0xffffffff, (void __iomem *)RCPU_CORE0_BOOT_ENTRY_HI);
+-
+-		/* set the hartid */
+-		writel(priv->coreid, (void __iomem *)RCPU_CORE0_HART_ID_SET);
+-
+-		/* sync flag */
+-		writel(0, (void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO);
+-
+-		/* reset core0 sw reset */
+-		writel(1, (void __iomem *)RT24_CORE0_SW_RESET_REG);
+-
+-		/* sw wakeup core 0 */
+-		writel(1, (void __iomem *)RT24_CORE0_SW_WAKEUP_REG);
+-
+-		/* sync flag */
+-		while (try_count-- >= 0) {
+-			if (readl((void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO) != 0)
+-				break;
+-			mdelay(1);
+-		}
+-
+-		if (try_count <= 0)
+-			dev_err(dev, "try start rproc-0 failed\n");
+-
+-		break;
+-
+-	case 1:
+-		/* set the boot-entry */
+-		writel(priv->fw_boot_entry & 0xffffffff, (void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO);
+-		writel((priv->fw_boot_entry >> 32) & 0xffffffff, (void __iomem *)RCPU_CORE1_BOOT_ENTRY_HI);
+-
+-		/* set the hartid */
+-		writel(priv->coreid, (void __iomem *)RCPU_CORE1_HART_ID_SET);
+-
+-		/* sync flag */
+-		writel(0, (void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO);
+-
+-		/* reset core1 sw reset */
+-		writel(1, (void __iomem *)RT24_CORE1_SW_RESET_REG);
+-
+-		/* sw wakeup core 1 */
+-		writel(1, (void __iomem *)RT24_CORE1_SW_WAKEUP_REG);
+-
+-		/* sync flag */
+-		while (try_count-- >= 0) {
+-			if (readl((void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO) != 0)
+-				break;
+-			mdelay(1);
+-		}
+-
+-		if (try_count <= 0)
+-			dev_err(dev, "try start rproc-1 failed\n");
+-		break;
+-
+-	default:
+-		break;
+-	}
+-
+-	return 0;
++    int try_count = 6000;
++    struct k3_rproc_privdata *priv;
++
++    priv = dev_get_priv(dev);
++
++    dev_info(dev, "[RAMBOOT] start core=%d entry=0x%llx\n", priv->coreid,
++	     priv->fw_boot_entry);
++
++    switch (priv->coreid) {
++    case 0:
++	/* set the boot-entry */
++	writel(priv->fw_boot_entry & 0xffffffff,
++	       (void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO);
++	writel((priv->fw_boot_entry >> 32) & 0xffffffff,
++	       (void __iomem *)RCPU_CORE0_BOOT_ENTRY_HI);
++
++	/* set the hartid */
++	writel(priv->coreid, (void __iomem *)RCPU_CORE0_HART_ID_SET);
++
++	/* sync flag */
++	writel(0, (void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO);
++
++	/* reset core0 sw reset */
++	writel(1, (void __iomem *)RT24_CORE0_SW_RESET_REG);
++
++	/* sw wakeup core 0 */
++	writel(1, (void __iomem *)RT24_CORE0_SW_WAKEUP_REG);
++
++	/* sync flag */
++	while (try_count-- >= 0) {
++	    if (readl((void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO) != 0) {
++		break;
++	    }
++	    mdelay(1);
++	}
++
++	if (!readl((void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO)) {
++	    dev_err(dev, "[RAMBOOT] core=0 handshake timeout: sync=0x%08x\n",
++		    readl((void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO));
++	    return -ETIMEDOUT;
++	}
++
++	break;
++
++    case 1:
++	/* set the boot-entry */
++	writel(priv->fw_boot_entry & 0xffffffff,
++	       (void __iomem *)RCPU_CORE1_BOOT_ENTRY_LO);
++	writel((priv->fw_boot_entry >> 32) & 0xffffffff,
++	       (void __iomem *)RCPU_CORE1_BOOT_ENTRY_HI);
++
++	/* set the hartid */
++	writel(priv->coreid, (void __iomem *)RCPU_CORE1_HART_ID_SET);
++
++	/* sync flag */
++	writel(0, (void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO);
++
++	/* reset core1 sw reset */
++	writel(1, (void __iomem *)RT24_CORE1_SW_RESET_REG);
++
++	/* sw wakeup core 1 */
++	writel(1, (void __iomem *)RT24_CORE1_SW_WAKEUP_REG);
++
++	/* sync flag */
++	while (try_count-- >= 0) {
++	    if (readl((void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO) != 0) {
++		break;
++	    }
++	    mdelay(1);
++	}
++
++	if (!readl((void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO)) {
++	    dev_err(dev, "[RAMBOOT] core=1 handshake timeout: sync=0x%08x\n",
++		    readl((void __iomem *)RCPU_CORE0_BOOT_ENTRY_LO));
++	    return -ETIMEDOUT;
++	}
++	break;
++
++    default:
++	break;
++    }
++
++    dev_info(dev, "[RAMBOOT] core=%d handshake acknowledged\n", priv->coreid);
++
++    return 0;
+ }
+ 
+ static int k3_rproc_stop(struct udevice *dev)
+--- a/board/spacemit/k3/spl.c
++++ b/board/spacemit/k3/spl.c
+@@ -12,6 +12,7 @@
+ #include <remoteproc.h>
+ #include <image.h>
+ #include <common.h>
++#include <hang.h>
+ #include <env.h>
+ #include <env_internal.h>
+ #include <malloc.h>
+@@ -689,49 +690,63 @@
+ void board_fit_image_post_process(const void *fit, int node, void **p_image,
+ 				  size_t *p_size)
+ {
+-	const char *name = fit_get_name(fit, node, NULL);
+-
+-	/*
+-	 * Keep the standard pre-load FIT post-process hook intact for
+-	 * compatibility. Spacemit still needs this early hook for rcpu firmware
+-	 * images, since the generic SPL load path would otherwise copy or
+-	 * decompress the ELF payload into the remote processor reserved memory
+-	 * before rproc_load() parses it.
+-	 */
++    const char *name = fit_get_name(fit, node, NULL);
++
++    /*
++     * Keep the standard pre-load FIT post-process hook intact for
++     * compatibility. Spacemit still needs this early hook for rcpu firmware
++     * images, since the generic SPL load path would otherwise copy or
++     * decompress the ELF payload into the remote processor reserved memory
++     * before rproc_load() parses it.
++     */
+ #ifdef CONFIG_SPL_REMOTEPROC_K3_PROC
+-	bool fw_image = name && (!strncmp(name, "rcpu0-fw", 8) ||
+-				 !strncmp(name, "rcpu1-fw", 8));
+-	bool free_image = false;
+-	int ret;
+-
+-	if (!fw_image)
+-		return;
+-
+-	ret = decompress_lzo_fit_image_to_malloc(fit, node, p_image, p_size);
+-	if (ret < 0) {
+-		*p_size = 0;
+-		return;
+-	}
+-	free_image = ret > 0;
+-
+-	if (!strncmp(name, "rcpu0-fw", 8)) {
+-		ret = rproc_load(0, (ulong)*p_image, *p_size);
+-		if (!ret)
+-			ret = rproc_start(0);
+-		if (ret)
+-			pr_err("failed to start rcpu0 firmware: %d\n", ret);
+-	} else {
+-		ret = rproc_load(1, (ulong)*p_image, *p_size);
+-		if (!ret)
+-			ret = rproc_start(1);
+-		if (ret)
+-			pr_err("failed to start rcpu1 firmware: %d\n", ret);
+-	}
+-
+-	if (free_image)
+-		free(*p_image);
+-
+-	*p_size = 0;
++    bool fw_image = name && (!strncmp(name, "rcpu0-fw", 8) ||
++			     !strncmp(name, "rcpu1-fw", 8));
++    bool free_image = false;
++    int ret;
++
++    if (!fw_image) {
++	return;
++    }
++
++    ret = decompress_lzo_fit_image_to_malloc(fit, node, p_image, p_size);
++    if (ret < 0) {
++	pr_err("[RAMBOOT] %s decompression failed: %d\n", name, ret);
++	hang();
++    }
++    free_image = ret > 0;
++    pr_info("[RAMBOOT] ESOS %s payload=%p bytes=%lu\n", name, *p_image,
++	    (ulong)*p_size);
++
++    if (!strncmp(name, "rcpu0-fw", 8)) {
++	ret = rproc_load(0, (ulong)*p_image, *p_size);
++	if (!ret) {
++	    ret = rproc_start(0);
++	}
++	if (ret) {
++	    pr_err("failed to start rcpu0 firmware: %d\n", ret);
++	}
++    } else {
++	ret = rproc_load(1, (ulong)*p_image, *p_size);
++	if (!ret) {
++	    ret = rproc_start(1);
++	}
++	if (ret) {
++	    pr_err("failed to start rcpu1 firmware: %d\n", ret);
++	}
++    }
++
++    if (ret) {
++	pr_err("[RAMBOOT] ESOS %s failed: %d; stop before OpenSBI\n", name,
++	       ret);
++	hang();
++    }
++
++    if (free_image) {
++	free(*p_image);
++    }
++
++    *p_size = 0;
+ #endif
+ }
+ 
+--- a/common/spl/spl_opensbi.c
++++ b/common/spl/spl_opensbi.c
+@@ -55,57 +55,71 @@
+ 
+ void spl_invoke_opensbi(struct spl_image_info *spl_image)
+ {
+-	int ret, uboot_node;
+-	ulong uboot_entry;
+-	void (*opensbi_entry)(ulong hartid, ulong dtb, ulong info);
++    int ret, uboot_node = -1;
++    ulong uboot_entry = 0;
++    void (*opensbi_entry)(ulong hartid, ulong dtb, ulong info);
+ 
+-	board_load_extra_fits(spl_image, &uboot_entry);
++    ret = board_load_extra_fits(spl_image, &uboot_entry);
++    if (ret) {
++	pr_err("[RAMBOOT] extra FIT loading failed: %d\n", ret);
++	hang();
++    }
+ 
+-	if (!spl_image->fdt_addr) {
+-		pr_err("No device tree specified in SPL image\n");
+-		hang();
+-	}
++    if (!spl_image->fdt_addr) {
++	pr_err("No device tree specified in SPL image\n");
++	hang();
++    }
+ 
+-	/* Find U-Boot image in /fit-images */
+-	ret = spl_opensbi_find_uboot_node(spl_image->fdt_addr, &uboot_node);
+-	if (ret) {
+-		// uboot may NOT be combined with opensbi in the same itb image
+-		pr_debug("Can't find U-Boot node, %d\n", ret);
+-	}
++    /* Find U-Boot image in /fit-images */
++    ret = spl_opensbi_find_uboot_node(spl_image->fdt_addr, &uboot_node);
++    if (ret) {
++	pr_err("[RAMBOOT] missing loaded U-Boot metadata: %d\n", ret);
++	hang();
++    }
+ 
+-	/* Get U-Boot entry point */
+-	ret = fit_image_get_entry(spl_image->fdt_addr, uboot_node, &uboot_entry);
+-	if (ret)
+-		ret = fit_image_get_load(spl_image->fdt_addr, uboot_node, &uboot_entry);
++    /* Get U-Boot entry point */
++    ret = fit_image_get_entry(spl_image->fdt_addr, uboot_node, &uboot_entry);
++    if (ret) {
++	ret = fit_image_get_load(spl_image->fdt_addr, uboot_node, &uboot_entry);
++    }
++    if (ret || !uboot_entry) {
++	pr_err("[RAMBOOT] invalid U-Boot entry: ret=%d entry=0x%lx\n", ret,
++	       uboot_entry);
++	hang();
++    }
+ 
+-	/* Prepare opensbi_info object */
+-	opensbi_info.magic = FW_DYNAMIC_INFO_MAGIC_VALUE;
+-	opensbi_info.version = FW_DYNAMIC_INFO_VERSION;
+-	opensbi_info.next_addr = uboot_entry;
+-	opensbi_info.next_mode = FW_DYNAMIC_INFO_NEXT_MODE_S;
+-	opensbi_info.options = CONFIG_SPL_OPENSBI_SCRATCH_OPTIONS;
+-	opensbi_info.boot_hart = gd->arch.boot_hart;
++    /* Prepare opensbi_info object */
++    opensbi_info.magic = FW_DYNAMIC_INFO_MAGIC_VALUE;
++    opensbi_info.version = FW_DYNAMIC_INFO_VERSION;
++    opensbi_info.next_addr = uboot_entry;
++    opensbi_info.next_mode = FW_DYNAMIC_INFO_NEXT_MODE_S;
++    opensbi_info.options = CONFIG_SPL_OPENSBI_SCRATCH_OPTIONS;
++    opensbi_info.boot_hart = gd->arch.boot_hart;
+ 
+-	opensbi_entry = (void (*)(ulong, ulong, ulong))spl_image->entry_point;
+-	invalidate_icache_all();
++    opensbi_entry = (void (*)(ulong, ulong, ulong))spl_image->entry_point;
++    pr_info("[RAMBOOT] OpenSBI entry=0x%lx next=0x%lx dtb=%p hart=%lu\n",
++	    spl_image->entry_point, uboot_entry, spl_image->fdt_addr,
++	    gd->arch.boot_hart);
++    invalidate_icache_all();
+ 
+ #ifdef CONFIG_SPL_SMP
+-	/*
+-	 * Start OpenSBI on all secondary harts and wait for acknowledgment.
+-	 *
+-	 * OpenSBI first relocates itself to its link address. This is done by
+-	 * the main hart. To make sure no hart is still running U-Boot SPL
+-	 * during relocation, we wait for all secondary harts to acknowledge
+-	 * the call-function request before entering OpenSBI on the main hart.
+-	 * Otherwise, code corruption can occur if the link address ranges of
+-	 * U-Boot SPL and OpenSBI overlap.
+-	 */
+-	ret = smp_call_function((ulong)spl_image->entry_point,
+-				(ulong)spl_image->fdt_addr,
+-				(ulong)&opensbi_info, 1);
+-	if (ret)
+-		hang();
++    /*
++     * Start OpenSBI on all secondary harts and wait for acknowledgment.
++     *
++     * OpenSBI first relocates itself to its link address. This is done by
++     * the main hart. To make sure no hart is still running U-Boot SPL
++     * during relocation, we wait for all secondary harts to acknowledge
++     * the call-function request before entering OpenSBI on the main hart.
++     * Otherwise, code corruption can occur if the link address ranges of
++     * U-Boot SPL and OpenSBI overlap.
++     */
++    ret =
++	smp_call_function((ulong)spl_image->entry_point,
++			  (ulong)spl_image->fdt_addr, (ulong)&opensbi_info, 1);
++    if (ret) {
++	hang();
++    }
+ #endif
+-	opensbi_entry(gd->arch.boot_hart, (ulong)spl_image->fdt_addr,
+-		      (ulong)&opensbi_info);
++    opensbi_entry(gd->arch.boot_hart, (ulong)spl_image->fdt_addr,
++		  (ulong)&opensbi_info);
+ }
