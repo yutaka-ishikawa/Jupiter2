@@ -97,6 +97,7 @@
 | KSB-070 | Linux用DTがSMのM-only mailboxページ内の直接controllerを有効化 | Bianbu Linux DTとK3 SMの所有契約 | 提供DTBで不整合確認・別名DTBで限定修正候補 |
 | KSB-071 | X100/A100のPMP数混在を16個固定の移植処理が拒否 | K3 Keystone移植のroot配置・PMP証拠管理 | 混在対応候補実装・SM/OpenSBIクロスリンク済み、実機未検証 |
 | KSB-072 | QEMU回帰試験が実機の混在PMP・粒度・domain条件を含まない | Jupiter2部分モデルと試験範囲の制約 | 混在PMP/4 KiBオプション実装、実機相当domain等は未実装 |
+| KSB-073 | 全16 CPU起動後、hello二種のhost runnerがload access faultで停止 | 実機Linux・SDK/driver/SM統合、原因未確定 | 実機dmesgで両runnerのSIGSEGV確認・一致するELFで解析が必要 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1161,3 +1162,12 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 候補：QEMUのCPU realize前に実PMP CSR backendのHart別個数と粒度を設定するmixed-pmpオプションを追加。一律16個の既定構成も維持。CPU ISAは同一rva23s64のままで、X100/A100全体の再現とはしない。
 - 残課題：[QEMU差分一覧](jupiter2-qemu-hardware-test-gaps.md)に優先順位、実機domain fixture、上位PMPの負の試験、mailbox/RPMI/ESOS/UFSの未再現範囲を記載。
 - 検証：QEMUビルド成功。実QMPで両構成の全CPU設定を確認し、実OpenSBI/SM＋専用S-mode guestで全16 HartのreadbackとHSM到達を確認。ただし実測root7個・空き9個・PMPADDR幅54ビットであり実機の13個・3個・38ビットとは異なる。Linux/SDKのguest統合と実機試験は未実施。修正commit：[9bfb8bf74f62](https://github.com/yutaka-ishikawa/public/commit/9bfb8bf74f62f1c253be9fd11f6bc36a03b02105)。
+
+### KSB-073: 全16 CPU起動後、hello二種のhost runnerがload access faultで停止
+
+- 入力：2026年11月21日提供のdmesg.txtと、hello-native.keの終了コード139。Linux 6.18.3、最新ログではBrought up 1 node, 16 CPUsを確認。起動firmwareのhashは未照合であり、全CPU起動をEnclave成功とは扱わない。
+- 観測：hello-runnerはCPU2でepc=0x2aaefb129c、ELF内相対位置0x529c、badaddr=0x3fa252a000。hello-native-runnerはCPU1でepc=0x2ae5c49244、相対位置0x5244、badaddr=0x3fb2373000。両方ともcause=5（load access fault）、SIGSEGV code=2。直前にEPM 4 MiBを物理0x11c000000へ割り当てた記録がある。
+- 切り分け：ホスト側runnerのロード例外であり、TA/Enclave内コードの例外と断定しない。以前の100100による受付拒否とは異なる症状。dmesgだけではSM CREATE/RUNの到達位置やPMP・PMA・PTEのどれが原因かを確定できない。
+- 関連経路：SDK PhysicalEnclaveMemory::writeMem/allocMem、KeystoneDevice::map、およびdriver keystone_mmap_locked。これらは調査対象であって、現段階で原因箇所を確定したものではない。
+- 次の確認：実機に配置したhello.keとhello-native.keから同一のrunner ELFを取得し、0x529c/0x5244の命令・関数を特定。必要に応じてmmap/ioctlの順序、障害VAのmapping、実PMP/PMA/PTE属性、UART上のSM診断を照合する。
+- 帰属・状態：実機統合の障害として登録。SDK/driverの上流不具合とはまだ帰属しない。PMP検査を解除する修正は行わず、原因判明前のコード変更・修正成功は主張しない。
