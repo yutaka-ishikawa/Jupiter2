@@ -109,53 +109,94 @@ sha256sum -c records/host-tools.sha256
 
 ## 4. FSBLをRAMへ転送する（PC）
 
-Jupiter2を完全電源断する。FDLボタンを押して起動し、FDLを離す。
-PCにROM fastboot機器が一台だけある状態で実行する。
+以下は**開発PCのターミナル**で直接入力する。UART端末では実行しない。
+作業ディレクトリは第2節で作ったreleaseである。
+Jupiter2を完全電源断し、FDLボタンを押して起動してから離す。
+DRD Type-CをデータケーブルでPCへ接続し、ROMのダウンロード待機にする。
 
 ```bash
-# 内容を確認するだけ。USBコマンドは実行しない。
-python3 tools/ram-boot.py --phase fsbl --dry-run
+cd "$REL"
+sha256sum -c records/FSBL.bin.sha256
+sudo fastboot devices
+```
 
-# 実機へ転送し、continueでFSBLを起動する。
-python3 tools/ram-boot.py --phase fsbl --sudo
+checksumがOKで、ROMのfastboot機器が一台だけ表示されることを確認する。
+機器が出ない場合は、FDL操作、DRDポート、データケーブル、PCのUSB認識を確認する。
+
+FSBLを転送する。
+
+```bash
+sudo fastboot stage images/FSBL.bin
+```
+
+stageが成功したら、FSBLを実行する。
+
+```bash
+sudo fastboot continue
 ```
 
 UARTでDDR training完了とmemory verify passを確認する。
-ROMのUSB機器が消え、SPLとして再認識されるまで待つ。
-スクリプトは次の段階を勝手に始めない。
-
-操作内容は画像checksum確認、fastboot devices、stage images/FSBL.bin、continue。
-実行ログはrelease/logs/へ保存する。
+ROMのUSB機器がいったん消え、SPLとして再認識されるまで待ってから第5節へ進む。
+stageまたはDDR初期化に失敗した場合は、後続の転送を行わずログを保存する。
 
 ## 5. 統合FITをRAMへ転送する（PC）
 
-今回の実機のSPL serialはHW4MPK3321280144。他の実機はfastboot devicesの実測値を使う。
+引き続き**開発PCのターミナル**で実行する。
+今回のSPL serialはHW4MPK3321280144。他の実機ではdevicesの実測値を指定する。
 
 ```bash
-python3 tools/ram-boot.py --phase fit --serial HW4MPK3321280144 --dry-run
-python3 tools/ram-boot.py --phase fit --serial HW4MPK3321280144 --sudo
+cd "$REL"
+sudo fastboot devices
+sudo fastboot -s HW4MPK3321280144 getvar max-download-size
+stat -c '%s bytes' images/ram-boot-vendor.itb
+sha256sum -c records/ram-boot-vendor.itb.sha256
 ```
 
-実際のSPLからmax-download-sizeを取得し、FITが収まる場合だけstageしてcontinueする。
-USBが消えた後はUARTを見る。新しい対ではU-Bootへの追加continueを前提としない。
+今回の転送上限の報告値は0x20000000（536870912 bytes、512 MiB）。
+**実際に報告された上限がstatのFITサイズ以上で、checksumがOKであることを確認してから転送する。**
+上限を取得できない、serialが表示されない、FITが収まらない場合は次へ進まない。
 
+```bash
+sudo fastboot -s HW4MPK3321280144 stage images/ram-boot-vendor.itb
+```
+
+stageが成功したら、統合FITを実行する。
+
+```bash
+sudo fastboot -s HW4MPK3321280144 continue
+```
+
+USBが消えた後はUARTを見る。新しい対ではU-Bootへの追加continueを前提としない。
 UARTで次を確認する。
 
 1. 両coreのhandshake acknowledged。
 2. OpenSBIへの引渡しを経てU-Bootの=>へ到達。
 3. U-Bootの入出力がserialであること。
 
+ここで指定するのは販売元OpenSBI用ram-boot-vendor.itb。
+SM版のファイル名と試験順序は[Keystoneアプリ試験手順](jupiter2-keystone-app-test.md)を参照する。
+
 この操作はflash/eraseを送らない。ファームウェア内部の自動保存までUSBコマンドだけで
 保証するものではなく、ビルダーはDDR情報保存・FSBL更新等を無効化している。
 UARTに書込み表示があれば、その操作も記録する。
+手動操作のPCログはターミナルのログ保存機能等で残す。UARTログも別途保存する。
+自動でPCログを残す操作補助スクリプトは第8節で紹介する。
 
 ## 6. UFSと起動ファイルを確認する（UART）
 
-U-Bootで実行する。
+以下は**UART端末のU-Bootプロンプト（=>）**へ直接入力する。
+開発PCのBashでは実行しない。
 
 ```text
 scsi scan
 scsi info
+```
+
+デバイス名と容量を取得でき、descriptor失敗やUTP timeoutが出ないことを確認する。
+失敗した場合はscanを繰り返さずログを保存する。
+成功したら、パーティションと起動ファイルを確認する。
+
+```text
 part list scsi 0
 ls scsi 0:2 /
 ls scsi 0:2 /spacemit/6.18.3-generic/
@@ -166,6 +207,7 @@ kernel=/Image-6.18.3-keystone、initrd=/initrd.img-6.18.3、
 DTB=/spacemit/6.18.3-generic/k3-pico-itx.dtbを確認した。
 Partition Type: EFIはGPT形式の表示で、GRUBの起動指定ではない。
 別実機ではpart listとファイル一覧に合わせる。
+これらのファイルを確認したら、第7節のLinux一時起動へ進む。
 
 ## 7. Linuxの一時起動コマンドを作る（PC）、実行する（UART）
 
@@ -203,7 +245,30 @@ cat /proc/cmdline
 Image名が-keystoneでも、kernel releaseはビルド設定で決まる（今回の導入例は6.18.3）。
 今回の販売元OpenSBIでの起動は、Keystone SM/Enclaveの成功を意味しない。
 
-## 8. 既存releaseをそのまま使う場合
+## 8. 操作補助スクリプトの紹介（任意）
+
+第4〜6節は上記のコマンドを直接入力して実施できる。
+同じFSBL/FIT転送を補助するtools/ram-boot.pyも同梱している。
+補助スクリプトは画像checksum、ROM機器の台数、SPL serial、転送上限を検査し、PCログをlogs/へ保存する。
+UARTでの到達確認と第6節のUFS確認は利用者が行う。
+
+新しく作ったrelease内で使う場合：
+
+```bash
+python3 tools/ram-boot.py --phase fsbl --dry-run
+python3 tools/ram-boot.py --phase fsbl --sudo
+```
+
+UARTでDDR完了とSPLのUSB再認識を確認してから：
+
+```bash
+python3 tools/ram-boot.py --phase fit --serial HW4MPK3321280144 --dry-run
+python3 tools/ram-boot.py --phase fit --serial HW4MPK3321280144 --sudo
+```
+
+--dry-runは画像を検査して予定コマンドを表示するだけで、USB操作は実行しない。
+
+### 既存releaseをそのまま使う場合
 
 以前作ったreleaseにはtools/がない。再ビルドしなくても、更新したpublicの操作スクリプトを使える。
 RELを既存のreleaseの絶対パスへ設定し、開発PCで実行する。
