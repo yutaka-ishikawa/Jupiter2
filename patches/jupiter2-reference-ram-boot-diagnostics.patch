@@ -92,8 +92,8 @@
 +
 +    priv = dev_get_priv(dev);
 +
-+    dev_info(dev, "[RAMBOOT] start core=%d entry=0x%llx\n", priv->coreid,
-+	     priv->fw_boot_entry);
++    dev_info(dev, "[RAMBOOT] start core=%d entry=0x%lx\n", priv->coreid,
++	     (ulong)priv->fw_boot_entry);
 +
 +    switch (priv->coreid) {
 +    case 0:

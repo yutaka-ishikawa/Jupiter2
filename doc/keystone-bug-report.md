@@ -90,6 +90,7 @@
 | KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 原因未確定・ユーザー実機観測 |
 | KSB-064 | 参照ESOS結合スクリプトのdescription一致とconf_dualが不一致 | 第三者K3手順を今回の入力へ適用する場合 | 統合上の制約・明示構成による回避実装、ホスト検査済 |
 | KSB-065 | 参照FSBLがESOS開始失敗を成功として扱いRAM追加FITも誤判定 | 参照U-Bootと販売元ESOSの統合 | core 1応答待ち失敗を実機観測・診断修正候補 |
+| KSB-066 | 診断版のRCPU entryがSPLで0xxと表示される | 本リポジトリの診断パッチとtiny printf | %lxとulongへ修正・実機表示の再確認待ち |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1003,3 +1004,22 @@ SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機�
   ホスト回帰23件に合格。実機の再試験とは分けて記録する。
   対応するK3 GCCでの修正候補の完全ビルド、実機再試験、QEMU guest統合は未検証。
   詳細：[参照FSBLの停止調査](jupiter2-reference-ram-boot-tests.md#8-参照fsblでの停止と診断版の再試験ksb-065)。
+- 診断版のユーザー実機結果：rcpu0-fw展開260096 bytes、core 0 handshake acknowledged。
+  rcpu1-fw展開284080 bytes、core 1同期値0のままtimeoutし、-110でOpenSBI前に停止。
+  ユーザー環境でビルド・実機実行され、失敗時停止が機能することを確認した。
+  同じmalloc領域104008640の再利用は前のバッファ解放後であり、それだけで重複障害と扱わない。
+- 次の照合：固定SPL DTのcore 1 fw_boot_entryは0x100800000。
+  以前のユーザーESOS FIT一覧のrcpu1-fw entry/loadは0x100804000。
+  FITの値をELFのentryと同一視せず、実ELFのentryとPT_LOAD配置を確認する。
+
+### KSB-066: RCPU診断entryの書式がSPL tiny printfに非対応
+
+- 登録日：2026-11-21。ユーザー実機の診断ログでcore 0/1ともentry=0xxと表示。
+- 原因・帰属：本リポジトリで追加した%llxに対し、固定ソースlib/tiny-printf.cは
+  長さ修飾子lを一つだけ処理する。設定はCONFIG_SPL_USE_TINY_PRINTF=y。
+  この表示は起動アドレスがゼロである証拠ではない。こちらが追加した診断コードの欠陥。
+- 修正：RV64 K3ではulongが64 bitなので、%lxと(ulong)キャストへ変更する。
+  実際の起動アドレス設定、RCPUのリセット、応答待ち処理は変更しない。
+- 検証：固定ソースの書式処理と設定を確認。git apply --checkで適用確認する。
+  修正後の実機表示・完全ビルドは未確認。表示確認だけのために再起動を要求せず、
+  先にホストでESOS ELFを調べる。

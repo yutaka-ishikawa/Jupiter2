@@ -194,3 +194,38 @@ sudo fastboot -s HW4MPK3321280144 continue
 
 診断版のパッチ適用とホスト梱包試験は開発環境で確認する。対応K3 GCCでの完全ビルド、
 修正後の実機動作、実QEMU統合は未検証であり、今回の再試験で確認する。
+
+## 9. core 0応答・core 1 timeout後のELF照合
+
+診断版の実機結果は、core 0がhandshake acknowledged、core 1がsync=0のままtimeoutし、
+ESOS rcpu1-fw failed: -110で停止した。展開後サイズはcore 0が260096、core 1が284080 bytes。
+これは失敗時停止の確認であり、ESOS/RPMI/UFSの起動成功ではない。
+同じpayloadアドレスは解放済みmalloc領域の再利用で、直ちに異常ではない。
+
+entry=0xxは診断コードの%llxとSPL tiny printfの非互換（KSB-066）。%lxへ修正したが、
+値がゼロだと判断して設定を書き換えない。まずホストで実ELFを確認し、この段階では再転送しない。
+
+固定ソースarch/riscv/dts/k3_spl.dtsはcore 0のfw_boot_entry=0x100200000、
+core 1は0x100800000。一方、以前のESOS一覧のrcpu1-fwはFIT load/entry=0x100804000。
+FIT entryはELF内部のentryと別なので、これだけで根本原因を確定しない。
+
+開発PCのpublicルートで実行する。今回の既知のESOS一覧ではImage 26がrcpu1-fwでLZO圧縮。
+dumpimage一覧が異なる場合はその番号と圧縮方式に合わせる。
+
+```bash
+CHECK="work/jupiter2-ram-boot/records/esos-entry-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$CHECK"
+dumpimage -l work/jupiter2-ram-boot/original/esos.itb > "$CHECK/esos-list.txt"
+cat "$CHECK/esos-list.txt"
+# Image 26がrcpu1-fw、Compressionがlzoであることを確認して次を実行する。
+dumpimage -T flat_dt -p 26 -o "$CHECK/rcpu1-fw.lzo" \
+  work/jupiter2-ram-boot/original/esos.itb
+lzop -d -c "$CHECK/rcpu1-fw.lzo" > "$CHECK/rcpu1-fw.elf"
+readelf -h -lW "$CHECK/rcpu1-fw.elf" | tee "$CHECK/rcpu1-readelf.txt"
+```
+
+Entry point addressと、各LOADのVirtAddr/PhysAddr/FileSiz/MemSiz/Flagsを保存する。
+ELF entryが0x100804000なら、固定SPL DTの0x100800000と不一致である。
+その場合はPT_LOADの実配置と起動条件を照合してから、DTの修正候補を作る。
+一致している場合は、ESOS版との起動・共有メモリーの契約や可視性など別の原因を調べる。
+いずれもtimeoutを無視してOpenSBIへ進めない。
