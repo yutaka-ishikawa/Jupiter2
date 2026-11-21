@@ -1,295 +1,386 @@
-# Milk-V Jupiter 2 / SpacemiT K3 integrated source tree
+# Milk-V Jupiter2 / SpacemiT K3：Keystone開発・導入ガイド
 
-リポジトリ直下の `make JOBS=4` はbuildのみ、`make install` はinstallのみです。
-一括処理は `make build-install JOBS=4`。QEMUを停止してからinstallしてください。
-詳しくは [makeによるビルドとインストール](doc/make-build-install.md) を参照。
+Milk-V Jupiter2でKeystoneを動かすためのQEMU、OpenSBI＋Security Monitor（SM）、
+Linux、SDK、Eyrie、sampleをまとめたソースツリーです。
+実機の情報を取得し、開発PCでビルド・試験した後、実機へ段階的に導入します。
 
-The `main` branch contains `qemu/`, `opensbi/`, `keystone/`, and `linux-k3/`. Original patches are under `patches/`.
+## 目次
 
-アプリ開発用サンプルは、[samples/README.md](samples/README.md)を参照してください。上流examplesのhello、hello-native、attestation、testsをMakefile版へ統合しています。`keystone/examples/`は比較用に保持します。
+1. [目的と全体の作業順序](#overview)
+2. [フェーズ1：実機情報の取得とバックアップ](#phase-info)
+3. [フェーズ2：開発PCでのビルド](#phase-build)
+4. [フェーズ3：実機への配置と起動確認](#phase-deploy)
+5. [個別修正後の再ビルド・再配置](#rebuild)
+6. [既知の制約・不具合・検証状況](#status)
+7. [詳細ドキュメント一覧](#documents)
 
-実機情報と現在のファームウェアの適合性は、[Milk-V Jupiter 2実機調査](doc/jupiter2-hardware-compatibility.md)にまとめています。
+<a id="overview"></a>
+## 1. 目的と全体の作業順序
 
-PCとの配線とシリアル端末の設定は、[Milk-V Jupiter2 UART接続手順](doc/milkv-jupiter2-uart.md)を参照してください。
+| フェーズ | 作業場所 | 完了時にそろうもの |
+| --- | --- | --- |
+| 1. 実機情報の取得 | 実機Linux・UART、保存先は開発PC | CPU/OS/DTB/起動設定/区画情報、元の起動環境のバックアップ |
+| 2. ビルドと試験 | 開発PC、QEMUのLinux guest | 対応するfirmware/kernel/driver/apps、試験記録、転送用イメージ |
+| 3. deployと確認 | 開発PC、UARTのU-Boot、実機Linux | 新Linuxの起動確認、新SMのRAM起動、sampleの動作確認 |
 
-実機への段階的な導入は、[Milk-V Jupiter2ソフトウェアスタック導入手順](doc/milkv-jupiter2-stack-install.md)を参照してください。
+実機への導入順は、**既存ファームウェアで新Linuxを一時起動 → 正常ならLinux起動設定を保存 → 新OpenSBI＋SMをRAM起動 → sample試験 → 必要ならNOR更新**です。
+各段階の成功を確認してから次へ進みます。
 
-RAMへ転送してLinuxを起動する操作は、[Jupiter2 RAM起動ガイド](doc/jupiter2-ram-boot-guide.md)を参照してください。販売元OpenSBIでのLinux起動実績、同梱のPC操作ツール、専用のホスト試験ディレクトリをまとめています。
-ビルド・退避・kernel/driver配置・OpenSBI更新・復旧と、書き込み前の停止条件をまとめています。
-実機区画容量の確認は`scripts/check-jupiter2-install-capacity.py`、
-ビルド済み成果物からFIT・転送用アーカイブを作る場合は`scripts/build-jupiter2-install-image.py`を使います。
-出力の`bundle/`にイメージ・実機用tools・運用docsを集約します。実機へはこのディレクトリ全体を転送します。
-引数と実機での再確認は同手順の第4章を参照してください。
+同じ「install」でも、対象が異なります。
 
-同一LinuxプロセスからKeystone EnclaveとOP-TEE TAを呼ぶための追加機能は、
-[Keystone・OP-TEE同居設計](doc/keystone-optee-coexistence-design.md)を参照してください。
+| 操作 | 対象・役割 |
+| --- | --- |
+| 開発PCの`make install` | ビルド済み成果物を`install/keystone/`へ配置し、QEMU用rootfsを作成・更新 |
+| 実機の`sudo bash tools/install-linux.sh` | bundleから実機のLinux Image・modules・driver・hello二種を追加配置 |
+| UARTでの一時起動 | RAM上の設定で起動確認。起動設定ファイルやNORの更新とは別工程 |
+| 実機でのNOR書き込み | 確認済みの最終ITBをOpenSBI区画へ書き込む工程 |
 
-未移植機能の一覧と実装順序は、[K3 Keystone移植計画](doc/keystone-porting-plan.md)を参照してください。
+ソースは`qemu/`、`opensbi/`、`keystone/`、`linux-k3/`、アプリは`samples/`にあります。
+`patches/`には取込み・移植用パッチを保持しています。
 
-QEMU上の実OpenSBI・Keystone SMを通る統合試験は、[verifications/README.md](verifications/README.md)にまとめています。
+<a id="phase-info"></a>
+## 2. フェーズ1：実機情報の取得とバックアップ
 
-検証の意味と実際のQEMUゲストでのテスト方法は、[検証範囲とQEMU実行手順](doc/keystone-verification-methods.md)を参照してください。
+### 2.1 UART接続と開発PC側の準備
 
-## Host dependencies
+配線、電圧、PCのシリアル端末、通信設定、U-Bootへの入力方法は
+[UART接続手順](doc/milkv-jupiter2-uart.md)を参照してください。
+PCの操作ターミナルとUART端末を分け、電源投入からのUARTログを保存します。
 
-On Ubuntu 24.04 or an equivalent APT-based distribution:
+### 2.2 CPU・メモリー・OS・カーネル情報の取得
+
+実機Linuxで、日時付きの記録ディレクトリを作ります。
 
 ```bash
+INFO_DIR="$HOME/jupiter2-info-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$INFO_DIR"
+uname -a > "$INFO_DIR/uname.txt"
+lscpu > "$INFO_DIR/lscpu.txt"
+cat /proc/cpuinfo > "$INFO_DIR/cpuinfo.txt"
+cat /proc/meminfo > "$INFO_DIR/meminfo.txt"
+cat /sys/devices/system/cpu/online > "$INFO_DIR/cpu-online.txt"
+sudo dmesg > "$INFO_DIR/dmesg.txt"
+```
+
+Jupiter2はX100とA100の混成です。CPUの種類やLinuxのonline数だけでPMPの能力を推定せず、
+ファームウェアのHart別ログも確認します。既知の構成は[実機調査](doc/jupiter2-hardware-compatibility.md)、
+PMPの16/32個混在は[対応計画と結果](doc/jupiter2-heterogeneous-pmp-plan.md)を参照してください。
+
+### 2.3 起動設定・DTB・ストレージ構成の取得
+
+同じ実機Linux端末で実行します。
+
+```bash
+lsblk -f > "$INFO_DIR/lsblk.txt"
+findmnt / > "$INFO_DIR/root-mount.txt"
+findmnt /boot > "$INFO_DIR/boot-mount.txt"
+cat /proc/cmdline > "$INFO_DIR/cmdline.txt"
+cat /proc/mtd > "$INFO_DIR/proc-mtd.txt"
+sudo cp /boot/env_k3.txt "$INFO_DIR/env_k3.txt"
+sudo cp /sys/firmware/fdt "$INFO_DIR/running.dtb"
+```
+
+この例は今回のBianbuの`/boot/env_k3.txt`構成を使います。
+DTB、機器識別子、起動媒体の情報は手元の記録として管理します。
+
+### 2.4 NOR区画容量の確認とファームウェアのバックアップ
+
+[導入手順の第5章](doc/milkv-jupiter2-stack-install.md)で、
+`opensbi-partition-info-日時`と`jupiter2-rollback-日時`に区画情報・元OpenSBI・起動設定を保存します。
+バックアップのハッシュを記録し、対応する復旧方法と販売元FSBL/U-Bootの入手元も確認します。
+
+今回の実測では`mtd5`の`opensbi`が`0x60000`＝393216 bytes（384 KiB）です。
+番号や容量は実機の`/proc/mtd`で再確認してください。
+詳しい読取り調査は[SPI NOR調査](doc/jupiter2-spi-nor-inspection.md)を参照してください。
+
+### 2.5 取得情報・バックアップを開発PCへ保存
+
+**作成後は、記録・バックアップのディレクトリ全体を実機外の作業PCにもコピーしてください。**
+実機が起動しなくなった場合にも取り出せる場所へ保存します。
+ここまでで元の起動構成と復旧に必要な情報をそろえてから、deployへ進みます。
+
+<a id="phase-build"></a>
+## 3. フェーズ2：開発PCでのビルド
+
+### 3.1 cloneと依存ツールのインストール
+
+以下はUbuntu 24.04等のAPT系開発PCで実行します。
+
+```bash
+git clone https://github.com/yutaka-ishikawa/public.git
+cd public
 sudo bash scripts/install-build-deps.sh
+
+# FIT作成・ESOS展開・実機へのRAM転送に使う追加ツール
+sudo apt-get install -y u-boot-tools lzop fastboot
 ```
 
-This installs the QEMU/kernel build dependencies, Clang/LLD/LLVM, RISC-V GCC/G++, cross libc development files, CMake, makeself, e2fsprogs and fakeroot. Run the builds below as your normal user. Older mke2fs versions use directory input under fakeroot; no e2fsprogs upgrade is required.
+コンパイルは通常ユーザーで実行します。既定のcross prefixは`riscv64-linux-gnu-`です。
+初回のQEMU・ゲストツール・rootfs等の準備には、外部ソースの取得が発生する場合があります。
 
-## Separate Bianbu and Keystone installations
-
-Both versions use the **same K3 QEMU machine, Keystone-capable OpenSBI and K3 Linux sources**. The Keystone version adds the matching Linux driver and basic SDK/Eyrie examples to a separate Bianbu-based rootfs. It does not switch to upstream Keystone's QEMU `virt` platform.
-
-| Version | Build script | Default installation | Guest filesystem |
-| --- | --- | --- | --- |
-| Bianbu | `scripts/build-install-k3.sh` | `install/bianbu/` | `rootfs/bianbu-rootfs.img` |
-| Keystone | `scripts/build-install-keystone.sh` | `install/keystone/` | `rootfs/keystone-rootfs.img` |
-
-### Bianbu
-
-The existing image builder remains available:
+### 3.2 make buildが生成するものと出力先
 
 ```bash
-bash scripts/build-install-k3.sh
-# Just create the 8 GiB Bianbu filesystem:
-bash scripts/build-install-k3.sh --only rootfs
-# A local archive or alternative installation directory:
-bash scripts/build-install-k3.sh --prefix /path/to/bianbu --jobs 5 \
-  --rootfs-archive /path/to/bianbu-base-26.04-base-riscv64.tar.gz
+make build JOBS=20
 ```
 
-`--only qemu`, `--only firmware`, and `--only linux` are also available. Build intermediates remain in `.build-k3/`; installed files now go to `install/bianbu/`, rather than the repository root. Previously installed root-level files are left untouched.
+QEMU、OpenSBI＋SM、Linuxとmodules、SDK/Eyrie、Keystone driver、sample群、
+乱数・暗号の各profile、verificationプログラムと検証用modulesをビルドします。
+**このコマンドではQEMU試験、実機への配置、RAM用統合FITの作成、NOR書き込みは行いません。**
 
-`rootfs/bianbu-rootfs.img` is an 8 GiB sparse ext4 filesystem, labeled `bianbu-root`, populated from [Bianbu 26.04 base for RISC-V](https://archive.spacemit.com/bianbu-base/bianbu-base-26.04-base-riscv64.tar.gz). Existing nonempty images are retained. Downloads use HTTPS with certificate verification; `--rootfs-sha256 HASH` checks an independently obtained checksum. No distributor checksum is bundled. Older mke2fs builds use extraction and directory input under fakeroot, retaining numeric owners, permission bits, links and device nodes; extended ACLs and file capabilities are not restored by that fallback.
+| 成果物・用途 | 既定の場所 |
+| --- | --- |
+| QEMU/Linux/通常firmwareの作業領域 | `.build-k3/` |
+| SDK/Eyrie/driverの作業領域 | `.build-keystone/` |
+| 配置前の成果物 | `.build-keystone/stage/` |
+| sampleのELF・runner・配布package | `samples/*/build/` |
+| verificationの成果物 | `verifications/`内の各buildディレクトリ |
+| 開発PCの`make install`による配置先 | `install/keystone/` |
 
-### Keystone
+`JOBS=20`は各ビルド工程内の並列数です。工程の順序はMakefileが管理します。
+変数・個別ターゲット・出力の詳細は[make手順](doc/make-build-install.md)を参照してください。
+
+### 3.3 OpenSBI＋Keystone SMのビルド
+
+SMだけを変更した場合は、全体ビルドの代わりに次を実行します。
 
 ```bash
-bash scripts/build-install-keystone.sh --jobs 5
+make firmware JOBS=20
 ```
 
-This builds the SDK and Eyrie, then all four example packages through `samples/Makefile` using the distro RISC-V toolchain. The original `keystone/examples/` remains unchanged; CMake is used for SDK/Eyrie preparation, and GNU Make compiles the applications. It reuses K3 QEMU/kernel artifacts from `install/bianbu/` when present, builds missing components using the existing K3 scripts, and always rebuilds firmware from the current SM/OpenSBI sources. The OpenSBI link also tracks the external SM object so an SM-only update cannot silently reuse an older firmware ELF. It builds `keystone-driver.ko` against the **same kernel build output** as the installed Image and creates a separate rootfs using `scripts/build-rootfs-keystone.sh`. The Bianbu guest filesystem is not modified.
+通常の起動用BINは次です。SM単体の`sm-combined.o`では起動しません。
 
-Keystone build outputs live in `.build-keystone/`; the shared K3 build output remains `.build-k3/`. The rootfs overlay is populated without loop mounts or sudo and every imported file's content is verified. A pre-existing Keystone image is never overwritten: choose a new `--prefix` for a fresh installation. Generated SDK tool aliases and CMake compatibility flags avoid changing the system toolchain.
+```text
+.build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin
+```
 
-If Bianbu was previously installed at the repository root, reuse it explicitly:
+通常版のcrypto providerは`unavailable`です。QEMU開発鍵を使う`qemu-dev`は別profileで、
+helloの動作からattestation/sealingの利用可否を判断しないでください。
+SMの最適化・生成サイズは[サイズ調査](doc/jupiter2-firmware-size-reduction.md)を参照してください。
+
+### 3.4 Linuxカーネル・モジュール・ドライバーのビルド
+
+個別にビルドする場合の入口です。
 
 ```bash
-bash scripts/build-install-keystone.sh --base-prefix "$PWD" \
-  --k3-build-dir "$PWD/.build-k3" --jobs 5
+make linux JOBS=20
+make keystone JOBS=20
 ```
 
-Other options include `--prefix DIR`, `--build-dir DIR`, `--rootfs-archive FILE`, `--rootfs-sha256 HASH`. The directory passed to `--k3-build-dir` must contain `linux/` with the matching Image and Module.symvers. For SDK/example development without creating a guest image:
+`make keystone`は依存するSM・Linux・SDK/Eyrieも処理し、対応driverとguest-overlayを作ります。
+Imageは`.build-k3/linux/arch/riscv/boot/Image`、driverは`.build-keystone/driver/keystone-driver.ko`です。
+実機へは同じkernel buildに対応するmodulesとdriverを配置します。
+
+### 3.5 SDK・Eyrie・sampleのビルド
 
 ```bash
-bash scripts/build-install-keystone.sh --only sdk
+make samples JOBS=20
 ```
 
-### Host filesystem mounts, guest tools and shutdown
+依存するSDKと二つのEyrie profileも準備します。
 
-New Keystone images contain `/usr/bin/run-keystone-hello`, `/usr/bin/mount-hostshare`, `shutdown`, `poweroff` and `reboot`, plus `insmod`, `rmmod`, `lsmod`, `modprobe`, `depmod`, `modinfo`, `ip`, `ping`, `ping6`, `ifconfig`, `route`, `netstat` and `hostname`. Static BusyBox provides the module-loading, mount and power-control operations without requiring kmod or a running init daemon. From the guest:
+```text
+samples/helloworld/build/hello.ke
+samples/hello-native/build/hello-native.ke
+samples/attestation/build/attestor.ke
+samples/tests/build/tests.ke
+```
+
+`test-loop`等のEnclave用ELFはrunner経由で起動します。Linuxから直接実行するプログラムではありません。
+構成と実行方法は[samples](samples/README.md)、既存examplesとの関係は[統合説明](doc/keystone-examples-integration.md)を参照してください。
+
+### 3.6 QEMUでの動作確認
+
+ビルド完了後、起動中のQEMUを停止し、開発PCの実行用ディレクトリへ配置します。
 
 ```bash
-mkdir -p /proc /sys
-mountpoint -q /proc || mount -t proc proc /proc
-mountpoint -q /sys || mount -t sysfs sysfs /sys
-mount-hostshare                       # mount hostshare at /mnt/host
-mount-hostshare /mnt/project          # alternative guest mount point
-/usr/bin/run-keystone-hello
-shutdown -h now                       # sync, remount root read-only, power off
-# Alternatively: poweroff, reboot, or shutdown -r now
+make install
+bash scripts/run-k3.sh --image keystone --pmp-profile mixed
 ```
 
-With the default `init=/bin/bash`, mount `/proc` and `/sys` after each boot.
-If `lsmod` reports that `/proc/modules` is missing, mount procfs as above;
-see [guest command troubleshooting](doc/keystone-guest-commands.md).
+`make install`は再コンパイルせず、`install/keystone/`とQEMU用rootfsを作成・更新します。
+実機には書き込みません。初回はBianbu baseアーカイブを取得する場合があります。
 
-The shutdown helper supports only immediate shutdown (`now` or `0`), and cancels if the root filesystem cannot be remounted read-only. This behavior is intended for the default diagnostic `init=/bin/bash` boot. QEMU exposes the repository by default; choose another host directory with `bash scripts/run-k3.sh --hostfs /path/to/share`.
+起動確認に加え、sampleのCREATE/RUN、OCALL、RESUME、正常終了、DESTROYまで試験します。
+全Hartの起動だけでは、ホストへの共有メモリー復帰等の不具合は検出できません。
+[QEMU運用手順](doc/jupiter2-qemu-operations.md)、[sample実行](samples/README.md)、
+[verification](verifications/README.md)へ進んでください。
+現在の`samples/run-qemu.py`による通常試験と、混在PMP用の専用試験の範囲は区別します。
 
-If shutdown stops at `sbi_hsm_exit: ERR: The hart is in invalid state [0]`, update the firmware as described in [Keystone system reset fix](doc/keystone-system-reset.md). This fixes the fixed-online HSM/reset mismatch and enables QEMU syscon poweroff/reboot; it does not require rebuilding the guest image.
+### 3.7 RAM起動用イメージの作成
 
+販売元OpenSBIによる基準確認と、開発したSM版の試験を分けます。
+`make firmware`の後に、FSBL/U-BootとESOSを含む統合FITを作ります。
 
-If an existing image lacks the helper files or `insmod`, update it without rebuilding. On the host, from the repository root:
+| 入力・工程 | 手順 |
+| --- | --- |
+| 販売元OpenSBI、ESOS等の入手・抽出と確認 | [RAM起動の準備手順](doc/jupiter2-ram-boot-procedure.md) |
+| 固定ソースからFSBL/U-Bootと販売元版統合FITを生成 | [RAM起動ガイド第2章](doc/jupiter2-ram-boot-guide.md) |
+| ビルドしたSMのBINを使ってKeystone版を生成 | [SM起動・アプリ試験第4章](doc/jupiter2-keystone-app-test.md) |
+
+使用するスクリプトは`scripts/build-jupiter2-reference-ram-boot.py`です。
+成功すると指定出力先の`release/images/`にFSBLと統合FITが生成されます。
+**新しく作ったFSBLと統合FITを対で使います。** `make build`やNOR用bundle作成だけでは、この対は生成されません。
+
+### 3.8 NOR容量確認と実機配布用bundleの作成
+
+通常のfirmware、Linux、driver、appsがそろった後に、開発PCで実行します。
+以下の393216は今回の実測値です。フェーズ1で確認した実機容量と一致させます。
 
 ```bash
-git pull
-bash scripts/build-keystone-guest-tools.sh
+python3 scripts/build-jupiter2-install-image.py \
+  --capacity-bytes 393216 \
+  --output work/jupiter2-release
 ```
 
-In the running guest, bootstrap the share using the existing mount command (the launcher must share the repository):
+成功すると、最終の`fw_dynamic.itb`を作り、容量検査後に次を出力します。
+出力先は未作成のディレクトリを指定します。
+
+```text
+work/jupiter2-release/
+├── bundle/
+│   ├── firmware/
+│   ├── linux/
+│   ├── modules/
+│   ├── apps/
+│   ├── tools/
+│   └── docs/
+├── bundle.tar.gz
+└── bundle.tar.gz.sha256
+```
+
+これはRAM起動用`release/`とは別の配布物です。
+[導入手順第4章](doc/milkv-jupiter2-stack-install.md)に、依存ツール、同梱内容、容量の再確認を記載しています。
+
+<a id="phase-deploy"></a>
+## 4. フェーズ3：実機への配置と起動確認
+
+### 4.1 成果物を実機へ転送する
+
+フェーズ1のバックアップを開発PCにも保存済みであることを確認します。
+Linux配布用bundleはディレクトリ全体を実機へ転送します。
+RAM転送用の`release/`はfastbootを実行するPCで使用します。
+各配布物のmanifest・SHA-256と、使用するソース版を記録します。
+
+### 4.2 Linux・モジュール・sampleを配置する
+
+実機上の、展開したLinux配布用`bundle/`内で実行します。
 
 ```bash
-mkdir -p /mnt/host
-mountpoint -q /mnt/host || mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/host
-bash /mnt/host/scripts/install-keystone-guest-tools.sh
-/usr/bin/run-keystone-hello
-shutdown -h now
+sudo bash tools/install-linux.sh
 ```
 
-The installer copies only guest helper tools. It reports if `hello.ke` is absent: in that case, build/boot a Keystone rootfs containing the examples and matching driver. Installing the helper alone does not add examples to a plain Bianbu image.
+Image、対応modules、Keystone driver、hello二種を追加配置します。
+**この操作だけでは新Linuxを起動しません。initrd生成、起動設定変更、firmware書き込みも別工程です。**
+配置先と事前確認は[導入手順第6章](doc/milkv-jupiter2-stack-install.md)を参照してください。
+途中で失敗した場合、全体の自動rollbackは行わないため、部分配置を確認してから再実行します。
 
-For a fresh image, retain the existing image and build into a new destination:
+### 4.3 initrdを生成し、使用するDTBを準備する
 
-```bash
-bash scripts/build-install-keystone.sh \
-  --base-prefix "$PWD/install/keystone" --prefix "$PWD/install/keystone-v2"
-bash scripts/run-k3.sh --prefix "$PWD/install/keystone-v2"
+インストールしたkernelの実際のreleaseを調べ、そのrelease用のinitrdを生成します。
+今回のreleaseは`6.18.3`で、Imageファイル名の`-keystone`とは区別します。
+[initrd生成手順](doc/milkv-jupiter2-stack-install.md)と
+[Keystone用Linux DTBの準備](doc/jupiter2-keystone-app-test.md)を参照してください。
+既存のImage/initrd/DTBを残して、別名の候補を配置します。
+
+### 4.4 既存ファームウェアで新しいLinuxを一時起動する
+
+**第1段階では`/boot/env_k3.txt`を編集せず、UARTのU-Bootで候補のkernel/initrd/DTBを指定します。**
+`knl_name`、`ramdisk_name`、`dtb_dir`、`fdtfile`を含む値を実際の配置先に合わせ、saveenvを使わず起動します。
+[導入手順第7章](doc/milkv-jupiter2-stack-install.md)のU-Boot手順で、Linux・UFS・ネットワーク等を確認します。
+起動できなければ、元の起動設定で復帰し、次の段階へ進みません。
+
+### 4.5 正常起動後にLinuxの起動設定を保存する
+
+同じkernel/initrd/DTBの組合せで正常起動できた後に、今回のBianbu構成では`/boot/env_k3.txt`へ反映します。
+元ファイルをバックアップしたまま保持し、通常起動でも同じ新kernelが動くことを確認します。
+実際の起動経路と保存する変数は[導入手順](doc/milkv-jupiter2-stack-install.md)に従います。
+
+### 4.6 新しいOpenSBI＋SMをRAM起動して確認する
+
+第1段階が成功した後、開発PCからFDL/fastbootで新しいFSBL・統合FITをRAMへ転送します。
+UARTでOpenSBI/SM初期化を確認し、UFS上の確認済みLinuxを起動します。
+
+操作は[RAM起動ガイド](doc/jupiter2-ram-boot-guide.md)、SM版の選択と判定は
+[SM起動・アプリ試験](doc/jupiter2-keystone-app-test.md)を参照してください。
+この段階ではNORを書き換えません。
+
+### 4.7 Keystone sampleを実行する
+
+実機Linuxでkernel release、全16 CPUのonline、対応driverと`/dev/keystone_enclave`を確認し、
+[アプリ試験第6章](doc/jupiter2-keystone-app-test.md)の直接コマンドでhello二種を一つずつ実行します。
+今回の配置先は次です。
+
+```text
+/opt/keystone/6.18.3/hello.ke
+/opt/keystone/6.18.3/hello-native.ke
 ```
 
-### Eyrie link errors about stack canaries
+アプリの期待出力・終了コード0・DESTROYと、SM/Linuxに例外がないことを確認します。
+失敗した場合はUARTとdmesgを保存し、[不具合台帳](doc/keystone-bug-report.md)と照合します。
+UTM読み取りの終了139については[KSB-073の修正・試験結果](doc/jupiter2-utm-host-access-issue.md)を参照してください。
 
-If an older checkout fails to link Eyrie with undefined `__stack_chk_guard` or `__stack_chk_fail`, update with `git pull` and rerun the same Keystone build command. Eyrie, its freestanding SDK app/edge libraries, and the native enclave example explicitly disable compiler-generated stack protection because they have no libc/canary provider. Host runners retain the toolchain's normal protection settings. The build refreshes generated Eyrie sources and rebuilds affected objects; deleting the existing guest images is unnecessary.
+### 4.8 RAM起動で確認後、必要に応じてNORへ書き込む
 
-### Updating the SM/OpenSBI firmware without rebuilding a guest image
+RAM起動とsample試験の成功後、永続的なfirmware更新が必要な場合に実施します。
+実機の容量・バックアップ・最終ITBのhashを再確認し、
+[導入手順第8章](doc/milkv-jupiter2-stack-install.md)の書き込み・読み戻し・再起動確認へ進みます。
+RAM起動用の統合FITを、そのままNORのOpenSBI区画へ書く手順ではありません。
 
-Stop the guest first, then rebuild into the installation directory you actually boot:
+### 4.9 各段階のrollbackとFDLリカバリー
 
-```bash
-git pull
-bash scripts/build-install-k3.sh --only firmware --prefix "$PWD/install/keystone"
-bash scripts/run-k3.sh --image keystone
-```
+第1段階は元のkernel/initrd/DTB・起動設定へ戻します。
+NOR更新後に失敗した場合は、実機外にも保存した元OpenSBIのバックアップを使って復旧します。
+[導入手順第10章](doc/milkv-jupiter2-stack-install.md)と
+[RAM起動・FDL準備](doc/jupiter2-ram-boot-procedure.md)に、起動できない場合の復旧経路を記載しています。
 
-For another installation (for example `install/keystone-v2`), use that same directory for both the build's and launcher's `--prefix`. No rootfs replacement or kernel rebuild is needed for the SM trap-return/ABI fixes.
+<a id="rebuild"></a>
+## 5. 個別コンポーネントを修正した場合の再ビルド・再配置
 
-With `CONFIG_K3_KEYSTONE_SM`, firmware deliberately uses the machine-timer path required by the current SM. It clears Sstc access and removes `sstc` from both device-tree ISA encodings, so Linux and SBI SET_TIMER agree on that policy. This is a compatibility policy, not full Sstc context virtualization. Firmware builds without Keystone enabled keep their existing timer behavior.
+| 変更したもの | 開発PCでの主なbuild | その後の作業 |
+| --- | --- | --- |
+| SM/OpenSBI | `make firmware JOBS=20` | RAM統合FITを再作成し、同じLinuxで再試験。QEMU用は`make install-opensbi` |
+| kernel/driver | `make keystone JOBS=20` | 対応Image/modules/driverを再配布し、initrd生成と一時起動を再確認 |
+| SDK/Eyrie | `make samples JOBS=20` | 二つのruntime profileとpackageを更新し、OCALL・正常終了まで再試験 |
+| sampleアプリのみ | `make -C samples` | 作成したpackageを更新。SDK/runtime準備済みの場合 |
+| QEMUモデル | `make qemu JOBS=20` | `make install-qemu`後、既存構成と変更対象構成で再試験 |
 
-### RUN reaches the enclave entry but the raw loader fails
+buildとinstallには同じ`K3_BUILD_DIR`、`KEYSTONE_BUILD_DIR`、`PREFIX`を指定します。
+`make install`は古い成果物の鮮度を自動判定しないため、ソース変更後はbuild→installの順に実行します。
+ビルド先の変更、cleanup、既存rootfsの更新は[make手順](doc/make-build-install.md)と
+[QEMU運用手順](doc/jupiter2-qemu-operations.md)を参照してください。
 
-Distro PIE defaults previously caused the raw loader's first `la sp, _estack` to read an absolute address from a GOT. `loader.bin` contains only `.text`, so that GOT was absent; zero-filled EPM padding supplied a zero stack pointer. Relocating that image to `0x10f400000` reproduced a fault at `0x10f40000c` with SP `0xffffffffffffffc8`, before `load_runtime` could run.
+<a id="status"></a>
+## 6. 既知の制約・不具合・検証状況
 
-The loader now uses local PC-relative address loads, disables PIE/PIC and linker relaxation for this freestanding path, includes small data/BSS in the raw image, and enforces a 16-byte-aligned stack. A linker assertion rejects any GOT in the raw loader. The Eyrie build always checks its generated build tree, so source fixes reach packages even after an earlier successful build.
+- 実機では販売元版を含む参照RAM起動経路でU-Boot・UFS・Linux起動を確認しています。
+- KSB-073修正後は、実QEMUのLinux guestで提供hello二種を一律/混在PMP構成とCPU3/8で実行し、計8回の正常終了を確認しました。
+  修正前の同じ位置のload access fault・終了139もQEMUで再現しています。
+- これは全sample・全verification suite、修正版の実機hello、DMA隔離、attestation/sealingの一括合格ではありません。
+- QEMUの実機との差は[PMP・domain・周辺機器の不足一覧](doc/jupiter2-qemu-hardware-test-gaps.md)、
+  バグごとの修正・試験範囲は[不具合台帳](doc/keystone-bug-report.md)を参照してください。
+- LinuxのSstcとSMのM_TIMERは[共存方式](doc/keystone-sstc-coexistence.md)を使います。
+  過去のSstcを抑止する方針と、現在の実装を混同しないでください。
 
-This fix is in the example packages, **not just the firmware**. To update an existing guest, first stop the stuck QEMU instance. On the host:
+<a id="documents"></a>
+## 7. 詳細ドキュメント一覧
 
-```bash
-git pull
-bash scripts/build-install-keystone.sh --only sdk
-bash scripts/run-k3.sh
-```
-
-In the restarted guest, use the repository host share and replace both packages:
-
-```bash
-mount-hostshare
-cp /mnt/host/.build-keystone/examples/hello/hello.ke /usr/share/keystone/examples/hello.ke
-cp /mnt/host/.build-keystone/examples/hello-native/hello-native.ke /usr/share/keystone/examples/hello-native.ke
-chmod +x /usr/share/keystone/examples/*.ke
-run-keystone-hello
-```
-
-For a custom `--build-dir` or `--hostfs`, adjust the shared package paths. A fresh `build-install-keystone.sh` image includes the rebuilt packages automatically. No kernel or rootfs rebuild is needed for this package update. The entry regression tests execute the actual raw loader prefix at a relocated address under QEMU user mode and stop before privileged loader code; they do not replace a full guest enclave test.
-
-### Illegal instruction at the Eyrie virtual entry
-
-原因・GDBの証拠・修正内容・更新手順の詳細は、[Keystone Eyrieの入口でGNU build-idを実行して停止した問題](doc/keystone-eyrie-entry-build-id.md)を参照してください。
-
-An observed `mepc=0xffffffffc0000000`, `mcause=2`, `mtval=4` was accompanied by the words `00000004 00000014 00000003 00554e47` at the entry. These are a GNU build-id note header, not runtime instructions. The loader enters a fixed virtual address; an orphan `.note.gnu.build-id` placed there by the linker made it execute metadata instead of `_start`.
-
-The runtime now explicitly places its dedicated `_start` section first, discards the build-id note, declares the ELF entry, and asserts that `_start` equals the fixed runtime base. Update the SDK and copy both rebuilt example packages into the guest using the commands above. This change does not require rebuilding OpenSBI or replacing the rootfs. The runtime entry tests link with build-id generation enabled and inspect the executable PT_LOAD bytes of both example ELFs; complete enclave execution still requires a guest test.
-
-### Locate a CREATE/RUN hang before changing SM behavior
-
-An RCU stall is Linux's later report that a CPU stopped making progress; it does not identify the timer as the cause of a stuck `run-keystone-hello`. Enable opt-in firmware progress markers to locate the last completed stage:
-
-```bash
-KEYSTONE_SM_TRACE=1 bash scripts/build-install-k3.sh --only firmware \
-  --prefix "$PWD/install/keystone"
-bash scripts/run-k3.sh
-```
-
-Stop the old guest before rebuilding and use the actual installation path for both commands if it differs. At boot, confirm the `[SM-TRACE] ... boot trace enabled; built ...` marker, then run `run-keystone-hello` in the guest. Capture the boot marker and all `[SM-TRACE]` lines through the stall. They distinguish SBI entry, CREATE argument copying, PMP broadcast/ACK, shared-memory cleanup, hashing, and RUN context switching. An entry with `a=2001` is CREATE and `a=2003` is RUN; `sbi.return` records status and `sbi.switch-return` records the selected return PC. These markers contain no memory contents or key material.
-
-No SBI entry after a confirmed trace-enabled boot points to an earlier user/kernel path; a final `CREATE args-copy begin` narrows the issue to the copy/trap path; `CREATE pmp-global begin` narrows it to PMP/IPI handling. A hash-start marker without completion also permits slow M-mode hashing as an explanation, rather than assuming an infinite loop. The trace is disabled unless `KEYSTONE_SM_TRACE=1`; rebuild with `KEYSTONE_SM_TRACE=0` to remove it. It is diagnostic logging, not a timeout increase or a bypass of PMP checks.
-
-## QEMU startup: Keystone is the default
-
-```bash
-bash scripts/run-k3.sh                         # install/keystone/
-bash scripts/run-k3.sh --image keystone
-bash scripts/run-k3.sh --image bianbu           # install/bianbu/
-# A custom version installation directory:
-bash scripts/run-k3.sh --image bianbu --prefix /path/to/bianbu
-# Previously installed root-level Bianbu artifacts:
-bash scripts/run-k3.sh --image bianbu --prefix "$PWD"
-```
-
-`--image` selects the default boot-file set; it does not rebuild anything. Both profiles use `jupiter2`, the K3 CPU configuration, 16 harts and 2 GiB RAM. Each selects its own QEMU, `firmware/k3/fw_dynamic.bin`, `boot/k3/Image`, and rootfs from the version installation directory. Individual files can be overridden:
-
-```bash
-bash scripts/run-k3.sh --image keystone \
-  --qemu /path/to/qemu-system-riscv64 \
-  --bios /path/to/fw_dynamic.bin \
-  --kernel /path/to/Image \
-  --rootfs /path/to/keystone-rootfs.img
-```
-
-`--gdb` pauses at reset on loopback port 1234; `--console` enables the serial/monitor multiplexer; `--monitor` opens a loopback monitor on port 4444. `--smp`, `--memory`, `--hostfs` and `--append` remain available. The default command line uses `init=/bin/bash`, giving a diagnostic guest shell rather than starting the distribution init system.
-
-In the Keystone guest shell:
-
-```bash
-/usr/bin/run-keystone-hello
-# After the driver has been loaded:
-/usr/share/keystone/examples/hello-native.ke
-```
-
-The helper mounts `/proc` and `/sys`, loads the driver matching `uname -r`, then runs `hello.ke`. Since the base rootfs may lack `insmod`, new Keystone images include a statically linked RISC-V BusyBox with module and network applets at `/usr/libexec/keystone/busybox`. The helper uses it when the system command is unavailable. The build downloads BusyBox 1.36.1 from a pinned, SHA-256-verified archive on `codeload.github.com`; sources remain in the guest-tools build directory. Packaging an image or loading a module does not establish that SM enclave creation succeeds. Current K3 code separates basic PMP-only execution from unavailable secure key/entropy services; attestation and sealing must not be inferred to work from a hello test.
-
-## Verification status
-
-Saving patched source trees and the Linux import succeeded. **Successful full QEMU + Keystone SM + OpenSBI + Linux compilation and an actual Linux boot have not been established by this setup.** The firmware build scripts perform a diagnostic SM compile/link and must not be treated as evidence of secure enclave functionality or hardware PMP/IOPMP safety. Inspect build logs and fail closed on build errors before using generated images.
-
-## Clean build intermediates after a failed build
-
-The integration build uses `.build-k3/{qemu,firmware,linux}` by default. To clean all three components:
-
-```bash
-bash scripts/clean-k3.sh
-```
-
-Or clean only the failed component (for example, the OpenSBI/Keystone firmware build):
-
-```bash
-bash scripts/clean-k3.sh --only firmware
-```
-
-Use `--only qemu` or `--only linux` for the other components. Preview deletions with `--dry-run`. If building with `--build-dir /path/to/work`, provide the same option to the clean script. Custom build directories must contain the `.k3-build-root` marker created by `build-install-k3.sh`.
-
-The script **never removes** source trees, patches, rootfs files, or files installed to `bin/`, `firmware/k3/`, `boot/k3/`, or `lib/modules/`. Stop running builds before cleaning. This is not a full uninstall.
-
-Keystoneの大容量EPM（256 MiB）には、修正版ドライバと起動時のCMA予約を使う。
-[設定・ビルド・実ゲスト検証手順](doc/keystone-large-epm.md)を参照。
-
-For module/network commands, updating an existing image and `depmod` usage, see
-[Keystone guest commands](doc/keystone-guest-commands.md).
-
-Eyrie・raw loader・SDK・ドライバ・SMの変更履歴と現在の確認範囲は
-[Keystone側の累積修正記録](doc/keystone-cumulative-changes.md)を参照。
-
-SBI 3001の既存OpenSBI/QEMU機能を使う案は
-[乱数機能の移植計画](doc/keystone-sbi-3001-plan.md)を参照。
-
-SBI 3001は [Zkr・Jupiter2 WTM・counterの3方式設計](doc/keystone-sbi-3001-three-backends.md)を
-採用予定。各方式を実QEMUゲストから検証する構成とする（設計段階）。
-
-SBI 3001の3方式（Zkr/Jupiter2 WTM/counter）のビルドとQEMU検証は
-[実装記録](doc/keystone-sbi-3001-implementation.md) と
-[検証手順](verifications/random/README.md) を参照してください。
-
-SBI 3003（sealing key取得）の調査結果、OpenSBIの再利用判断、実装順とQEMU検証計画は
-[実装計画](doc/keystone-sbi-3003-plan.md) を参照してください。
-
-SBI 3002/3003の同時実装と共通基盤の先行順は
-[共通実装計画](doc/keystone-sbi-3002-3003-joint-plan.md) を参照してください。
-
-既知の不具合、修正状態、今後の登録ルールは
-[Keystone関連不具合報告書](doc/keystone-bug-report.md) にまとめています。
-
-SBI 3002/3003のQEMU開発用実装と試験方法は
-[実装記録](doc/keystone-sbi-3002-3003-implementation.md)、
-[専用verification](verifications/crypto/README.md) を参照してください。
+| 用途 | ドキュメント |
+| --- | --- |
+| ビルド全般・出力・install・変数 | [makeによるビルドと配置](doc/make-build-install.md) |
+| UART接続・PC端末設定 | [UART接続手順](doc/milkv-jupiter2-uart.md) |
+| 実機情報・CPU/メモリーの記録 | [実機調査](doc/jupiter2-hardware-compatibility.md)、[インベントリ](doc/jupiter2-hardware-inventory.json) |
+| バックアップ・Linux配置・NOR更新・復旧 | [実機導入手順](doc/milkv-jupiter2-stack-install.md)、[OpenSBI置換調査](doc/milkv-jupiter2-opensbi-replacement.md) |
+| RAM起動の操作・イメージ作成 | [RAM起動ガイド](doc/jupiter2-ram-boot-guide.md)、[準備・判断手順](doc/jupiter2-ram-boot-procedure.md) |
+| 参照FSBL/ESOS/RPMIの整合 | [開発記録](doc/jupiter2-reference-ram-boot-development.md)、[試験手順](doc/jupiter2-reference-ram-boot-tests.md) |
+| SM用DTB・実機hello試験 | [SM起動・アプリ試験](doc/jupiter2-keystone-app-test.md) |
+| QEMU/Bianbuの操作・共有・ゲストツール | [QEMU運用手順](doc/jupiter2-qemu-operations.md)、[guestコマンド](doc/keystone-guest-commands.md) |
+| samplesと既存examplesの関係 | [samples](samples/README.md)、[統合説明](doc/keystone-examples-integration.md)、[変更レビュー](doc/keystone-samples-change-review.md) |
+| 実guestの検証・検証範囲 | [verification](verifications/README.md)、[検証方法](doc/keystone-verification-methods.md)、[sampleの過去結果](samples/results.md) |
+| 混在PMP・粒度・UTM復帰 | [16/32 PMP](doc/jupiter2-heterogeneous-pmp-plan.md)、[PMP実機調査](doc/jupiter2-pmp-granularity-issue.md)、[KSB-073](doc/jupiter2-utm-host-access-issue.md) |
+| 容量削減・大容量EPM・タイマー・reset | [firmwareサイズ](doc/jupiter2-firmware-size-reduction.md)、[大容量EPM](doc/keystone-large-epm.md)、[Sstc共存](doc/keystone-sstc-coexistence.md)、[system reset](doc/keystone-system-reset.md) |
+| Eyrie/raw loader等の過去の修正 | [累積修正記録](doc/keystone-cumulative-changes.md)、[Eyrie入口問題](doc/keystone-eyrie-entry-build-id.md) |
+| 乱数SBI 3001 | [移植計画](doc/keystone-sbi-3001-plan.md)、[3方式設計](doc/keystone-sbi-3001-three-backends.md)、[実装記録](doc/keystone-sbi-3001-implementation.md)、[試験](verifications/random/README.md) |
+| attestation/sealing SBI 3002/3003 | [共通計画](doc/keystone-sbi-3002-3003-joint-plan.md)、[3003計画](doc/keystone-sbi-3003-plan.md)、[実装記録](doc/keystone-sbi-3002-3003-implementation.md)、[試験](verifications/crypto/README.md) |
+| 未移植機能・OP-TEE同居 | [移植計画](doc/keystone-porting-plan.md)、[Keystone・OP-TEE同居設計](doc/keystone-optee-coexistence-design.md) |
+| バグの追跡 | [不具合台帳](doc/keystone-bug-report.md) |
