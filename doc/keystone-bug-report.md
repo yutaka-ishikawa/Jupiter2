@@ -87,6 +87,7 @@
 | KSB-060 | boot preflightが正規rootのロック付きRCPU保護も拒否 | K3 root PMPと後段admissionの契約 | 修正候補・クロスリンク済・実機未検証 |
 | KSB-061 | 共有bottom PMP slot解放時に他の利用者の予約も外れる | SMのPMP region allocator | 修正候補・SMコンパイル済・実機未検証 |
 | KSB-062 | K3のOS/UTM共用slot切替で後段fallbackがOSメモリーを許可 | K3 PMP fallbackとEnclave切替 | 修正候補・SMコンパイル済・実機未検証 |
+| KSB-063 | RAM起動後のUFS power mode／descriptor通信が失敗 | Jupiter2 RAM起動・U-Boot UFS | 原因未確定・ユーザー実機観測 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -942,3 +943,19 @@ KSB-059〜062の候補実装：[4f976074681bd1377de9af961ea0ab70a3670984](https:
 SMあり／なしのOpenSBIリンク、mtvec整列を確認。実QEMU・実機試験は未実施で、
 ビルド成功を保護成功と扱わない。詳細：[資源計算と候補実装](jupiter2-pmp-granularity-issue.md#8-ksb-059060061062の修正候補とenclave数の制約)。
 
+
+
+### KSB-063: RAM起動後のU-BootでUFS通信が失敗
+
+- 登録日：2026-11-21。条件：開発版RAM起動の検証中、U-Boot UARTでscsi scanを実行。
+- ユーザー実機証拠：UFS power mode変更がtimeoutし、一度gear3／lane2の設定表示後、
+  Error in status:00000004、query descriptor opcode=0x01／idn=2の失敗、
+  Timedout waiting for UTP response、err=-110が反復した。
+- 解釈：公開販売元U-Bootのdrivers/ufs/ufs.hでUIC_ERROR=0x4。
+  リンク／通信エラーが観測され、UFSからbootファイルを読む段階に進めていない。
+- 分類：実機の統合障害として記録するが、媒体故障、PMP起因、OpenSBI／SMの欠陥とは断定しない。
+  使用候補の完全な起動ログ・入力SHAと、販売元OpenSBIを使った同条件比較は未取得。
+- 方針：scsi scanの反復やflashで修復しようとせず、他媒体の列挙と、完全電源断からのA/B比較を行う。
+  FSBL／U-Boot／DTB／ESOSは同じ入力を使い、OpenSBIだけを販売元版へ差し替える。
+  両者で失敗ならRAM起動経路やUFS初期化条件、販売元版だけ成功なら開発版との差分へ絞る。
+- 状態：未修正・原因調査中。詳細：[UFS起動媒体の確認](jupiter2-pmp-granularity-issue.md#9-ram起動後のufs通信失敗ksb-063)。

@@ -504,3 +504,43 @@ SMなしのk3_defconfigもクロスリンク成功。実機のPMP／OS保護／�
 | k3_defconfig（SMなし） | 269600 bytes | 941f32c66ebf89e2fb6a3934ebee8633735a0155022ce960d12eb61c76bd3093 |
 
 ビルドでmultimemコードを含めたことは、実機のPMP予算でmultimemを使用できるという意味ではない。
+
+## 9. RAM起動後のUFS通信失敗（KSB-063）
+
+2026-11-21のユーザー実機ログで、U-Bootのscsi scanが次の経過となった。
+
+```text
+ufs_start: Failed setting power mode, err = -1
+[RX, TX]: gear=[3, 3], lane[2, 2], pwr[FAST MODE, FAST MODE], rate = 2
+Error in status:00000004
+__ufshcd_query_descriptor: opcode 0x01 for idn 2 failed ... err = -1
+Timedout waiting for UTP response
+... err = -110
+```
+
+[販売元UFSドライバー](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/drivers/ufs/ufs.c)と
+[ヘッダー](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/drivers/ufs/ufs.h)では、
+表示したstatusの0x4はUIC_ERRORである。リンク通信の失敗で、UFS descriptor取得も完了していない。
+これだけでPMPに原因を帰属したり、UFS故障と判断したりしない。
+
+まずscsi scanを繰り返さず、UARTへ応答が戻るか確認する。Ctrl+Cで戻れる場合は停止してログ保存する。
+プロンプトが戻ったら、UARTから他媒体を確認する。
+
+```text
+nvme scan
+nvme info
+mmc list
+```
+
+必要なLinuxがNVMe等にある場合は、その媒体のパーティションと起動ファイルを確認する。
+UFS上のファイルが必要な場合は、使用中のRAM起動chainを次の条件で比較する。
+
+1. 同じFSBL／U-Boot／ボードDTB／ESOSから、販売元OpenSBIを含む比較用統合FITを生成する。
+2. 両方とも完全電源断から始め、同じ接続・同じ手順でRAM起動する。単なるwarm resetとの差も記録する。
+3. 販売元版と開発版でそれぞれscsi scanを一度行い、全UARTログと入力・出力のSHA-256を保存する。
+4. 両方失敗ならRAM起動経路・初期化条件・互換性を、販売元版だけ成功なら開発版の差分を調べる。
+
+販売元U-Boot単体をM-modeで起動した試験と、OpenSBI経由の試験は、実行モードやESOS起動等が異なる。
+純正U-Boot単体の成功だけで開発版OpenSBIが原因と断定しない。
+PMP保護を解除する、NORを書き換える、UFSをeraseする方法はこの切り分けでは行わない。
+現在は比較結果未取得で、UFSからのLinux読み出しは未確認である。
