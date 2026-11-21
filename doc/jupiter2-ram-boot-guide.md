@@ -207,28 +207,55 @@ kernel=/Image-6.18.3-keystone、initrd=/initrd.img-6.18.3、
 DTB=/spacemit/6.18.3-generic/k3-pico-itx.dtbを確認した。
 Partition Type: EFIはGPT形式の表示で、GRUBの起動指定ではない。
 別実機ではpart listとファイル一覧に合わせる。
+第7節の今回の例では修正DTBを使うため、準備後は同じディレクトリにk3-pico-itx-keystone.dtbがあることも確認する。
+このU-Bootのlsにはディレクトリを指定する。ファイル単体の読込みは第7節のload成功で確認する。
 これらのファイルを確認したら、第7節のLinux一時起動へ進む。
 
-## 7. Linuxの一時起動コマンドを作る（PC）、実行する（UART）
+## 7. Linuxを一時起動する（UARTでコマンドを直接入力）
 
-PCは引き続き$REL内で実行する。以下のPARTUUIDは今回のrootfs区画の実測値。
-他の実機へコピーせず、part listで得たrootfsのPartition GUIDを指定する。
+以下は**UART端末のU-Bootプロンプト（=>）**へ直接入力する、今回の実機の例。
+PCでコマンド生成スクリプトを実行する必要はない。
+ここではSM向けに準備・別名配置したk3-pico-itx-keystone.dtbを使用する。
+準備方法は[Keystoneアプリ試験手順の第2〜3節](jupiter2-keystone-app-test.md#2-別名の試験用linux-dtbを作る開発pc)を参照する。
+この修正DTBで販売元OpenSBIのLinux起動を確認し、SM版でも同じDTBを使用する。
 
-```bash
-python3 tools/ram-boot.py --phase linux \
-  --kernel /Image-6.18.3-keystone \
-  --initrd /initrd.img-6.18.3 \
-  --dtb /spacemit/6.18.3-generic/k3-pico-itx.dtb \
-  --root-partuuid 73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 \
-  --boot-partition 2 --output tools/boot-linux.cmd
-cat tools/boot-linux.cmd
+bootfsはscsi 0:2、rootfsのPARTUUIDは73708e51-d3a9-4b6f-ab55-894cd1d8b4a0。
+他の実機ではpart listとファイル一覧から得た値へ変更する。
+**各loadの成功を確認してから次へ進み、失敗した場合はbootiを実行しない。**
+
+```text
+scsi scan
+scsi info
+
+setenv kernel_addr_r 0x140000000
+setenv ramdisk_addr 0x130000000
+setenv fdt_addr_r 0x138000000
+
+setenv knl_name Image-6.18.3-keystone
+setenv ramdisk_name initrd.img-6.18.3
+setenv dtb_dir spacemit/6.18.3-generic
+setenv fdtfile k3-pico-itx-keystone.dtb
+
+load scsi 0:2 ${kernel_addr_r} /${knl_name}
+
+load scsi 0:2 ${ramdisk_addr} /${ramdisk_name}
+setenv initrd_size ${filesize}
+
+load scsi 0:2 ${fdt_addr_r} /${dtb_dir}/${fdtfile}
+
+printenv kernel_addr_r ramdisk_addr initrd_size fdt_addr_r
+printenv knl_name ramdisk_name dtb_dir fdtfile
+
+setenv bootargs console=ttyS0,115200 earlycon=sbi root=PARTUUID=73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 rootwait rw loglevel=8
+
+booti ${kernel_addr_r} ${ramdisk_addr}:${initrd_size} ${fdt_addr_r}
 ```
 
-**このPC操作はコマンドファイルを生成するだけ。確認した全文をUARTのU-Bootへ貼り付ける。**
-生成テキストは、fdtfileを明示し、kernel→initrd→DTBの順にloadする。
-initrdのload直後にfilesizeをinitrd_sizeへ保存する。filesizeは後続loadで変わるためである。
-すべてのloadが成功した場合だけ、UART consoleとroot=PARTUUIDを指定してbootiを実行する。
-読み込んだenv_k3.txtのcommonargsにroot=がなくても、この生成テキストは引数を明示する。
+initrdのload直後にfilesizeをinitrd_sizeへ保存する。filesizeはDTBのloadでも更新されるためである。
+fdtfileを明示設定するので、未定義のままディレクトリだけをloadする誤りを避けられる。
+今回の値はsetenvで直接指定するため、env_k3.txtのload/importは不要。
+**カーネル読込み後に0x140000000へenv_k3.txtをloadすると、カーネル先頭を上書きする。**
+env_k3.txtの編集やsaveenvは行わない。
 
 使用するロード先はkernel=0x140000000、initrd=0x130000000、DTB=0x138000000。
 固定参照ソースのU-Bootは先頭32 MiBを除外したRAM baseとImageのtext_offsetからカーネル移動先を決める。
@@ -241,9 +268,10 @@ uname -r
 cat /proc/cmdline
 ```
 
-今回Linux起動成功はユーザー報告済み。実際のuname出力は未収集。
+Linux起動成功はユーザー報告済み。実際のuname出力は未収集。
 Image名が-keystoneでも、kernel releaseはビルド設定で決まる（今回の導入例は6.18.3）。
-今回の販売元OpenSBIでの起動は、Keystone SM/Enclaveの成功を意味しない。
+販売元OpenSBIでの起動と、SM/Enclaveの成功は分ける。
+SM版でLinuxが起動した後のdriverとhello試験は[Keystoneアプリ試験手順](jupiter2-keystone-app-test.md#6-ドライバーとhello二種を試験する実機linux)を参照する。
 
 ## 8. 操作補助スクリプトの紹介（任意）
 
@@ -267,6 +295,23 @@ python3 tools/ram-boot.py --phase fit --serial HW4MPK3321280144 --sudo
 ```
 
 --dry-runは画像を検査して予定コマンドを表示するだけで、USB操作は実行しない。
+
+### UART用Linux起動コマンドの生成（任意）
+
+第7節のコマンドは直接入力できる。必要なら開発PCのrelease内で次を実行し、
+同等のload失敗時の停止分岐付きテキストを生成できる。このPC操作だけではLinuxは起動しない。
+
+```bash
+python3 tools/ram-boot.py --phase linux \
+  --kernel /Image-6.18.3-keystone \
+  --initrd /initrd.img-6.18.3 \
+  --dtb /spacemit/6.18.3-generic/k3-pico-itx-keystone.dtb \
+  --root-partuuid 73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 \
+  --boot-partition 2 --output tools/boot-linux.cmd
+cat tools/boot-linux.cmd
+```
+
+生成した全文を確認し、UARTのU-Bootへ貼り付ける。PCのBashで実行しない。
 
 ### 既存releaseをそのまま使う場合
 

@@ -137,8 +137,48 @@ python3 scripts/run-jupiter2-ram-boot.py --release "$REL" \
 variant=keystoneではimages/ram-boot-keystone.itbを選ぶ。
 UARTでSM/PMP初期化、OpenSBIからU-Bootへの移行が成功したことを確認する。
 PMP設定・readback・SM初期化のエラーがあればLinuxへ進まない。
-UFSを確認し、第3節と同じ新DTBのUARTテキストでLinuxを起動する。
-Linux起動後もまだhelloは実行せず、unameとdriverの対応を確認する。
+### U-Boot起動後に直接入力するコマンド（今回の実機）
+
+以下は**UART端末のU-Bootプロンプト（=>）**へ入力する。PCのBashでは実行しない。
+第3節で別名配置したk3-pico-itx-keystone.dtbを使用する。
+bootfsはscsi 0:2、rootfsのPARTUUIDは今回の実機の実測値。
+**各loadが成功したことを確認し、失敗した場合は後続のコマンドを実行しない。**
+
+```text
+scsi scan
+scsi info
+
+setenv kernel_addr_r 0x140000000
+setenv ramdisk_addr 0x130000000
+setenv fdt_addr_r 0x138000000
+
+setenv knl_name Image-6.18.3-keystone
+setenv ramdisk_name initrd.img-6.18.3
+setenv dtb_dir spacemit/6.18.3-generic
+setenv fdtfile k3-pico-itx-keystone.dtb
+
+load scsi 0:2 ${kernel_addr_r} /${knl_name}
+
+load scsi 0:2 ${ramdisk_addr} /${ramdisk_name}
+setenv initrd_size ${filesize}
+
+load scsi 0:2 ${fdt_addr_r} /${dtb_dir}/${fdtfile}
+
+printenv kernel_addr_r ramdisk_addr initrd_size fdt_addr_r
+printenv knl_name ramdisk_name dtb_dir fdtfile
+
+setenv bootargs console=ttyS0,115200 earlycon=sbi root=PARTUUID=73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 rootwait rw loglevel=8
+
+booti ${kernel_addr_r} ${ramdisk_addr}:${initrd_size} ${fdt_addr_r}
+```
+
+initrd_sizeはinitrdのload直後、DTBのload前に保存する。filesizeは後続loadで更新される。
+fdtfileも明示しているので、未定義の変数や以前のUART環境に依存しない。
+今回は必要な値をsetenvで直接指定するため、env_k3.txtのload/importは不要。
+カーネル読込み後に0x140000000へenv_k3.txtをloadすると、カーネル先頭を上書きしてしまう。
+saveenvやenv_k3.txtの編集は行わない。
+
+Linuxが起動したら、第6節でunameとdriverの対応を確認してからhello二種を実行する。
 
 ## 6. ドライバーとhello二種を試験する（実機Linux）
 
