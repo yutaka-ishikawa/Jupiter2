@@ -6,6 +6,8 @@ IMAGE=keystone
 QEMU=""
 BIOS=""
 KERNEL=""
+DTB=""
+OPTEE_ELF=""
 ROOTFS=""
 HOSTFS="$ROOT"
 GDB=0
@@ -32,6 +34,8 @@ Usage: bash scripts/run-k3.sh [options]
   --prefix DIR             Version installation directory (default: install/PROFILE)
   --qemu FILE              Override QEMU executable
   --kernel FILE            Override Linux Image
+  --dtb FILE               Supply the boot DTB to QEMU
+  --optee-elf FILE         Load OP-TEE ELF segments (requires --dtb)
   --bios FILE              Override firmware
   --rootfs FILE            Raw guest rootfs image (default: selected profile image)
   --crypto unavailable|qemu-dev  Choose normal or explicit development crypto firmware
@@ -59,13 +63,14 @@ EOF
 }
 while (($#)); do
  case "$1" in
-  --pmp-profile|--sstc|--crypto|--rng|--zkr|--wtm-rng|--wtm-rng-fault|--rootfs-format|--image|--prefix|--qemu|--kernel|--bios|--rootfs|--hostfs|--gdb-port|--monitor-port|--smp|--memory|--append)
+  --pmp-profile|--sstc|--crypto|--rng|--zkr|--wtm-rng|--wtm-rng-fault|--rootfs-format|--image|--prefix|--qemu|--kernel|--dtb|--optee-elf|--bios|--rootfs|--hostfs|--gdb-port|--monitor-port|--smp|--memory|--append)
    (($#>=2)) || { echo "Missing value for $1" >&2; exit 2; }
    case "$1" in
     --pmp-profile) PMP_PROFILE=$2;;
     --sstc) SSTC=$2;; --crypto) CRYPTO=$2;; --rng) RNG=$2;; --zkr) ZKR=$2;; --wtm-rng) WTM=$2;;
     --wtm-rng-fault) WTM_FAULT=$2;; --rootfs-format) ROOTFS_FORMAT=$2;;
     --image) IMAGE=$2;; --qemu) QEMU=$2;; --kernel) KERNEL=$2;; --bios) BIOS=$2;;
+    --dtb) DTB=$2;; --optee-elf) OPTEE_ELF=$2;;
     --prefix) PREFIX=$2;; --rootfs) ROOTFS=$2;; --hostfs) HOSTFS=$2;;
     --gdb-port) GDB=1; GDB_PORT=$2;; --monitor-port) MONITOR=1; MONITOR_PORT=$2;;
     --smp) SMP=$2;; --memory) MEM=$2;; --append) CMDLINE=$2; APPEND_SET=1;;
@@ -78,6 +83,20 @@ while (($#)); do
   *) echo "Unknown argument: $1" >&2; usage >&2; exit 2;;
  esac
 done
+if [[ -n $OPTEE_ELF && -z $DTB ]]; then
+ echo '--optee-elf requires --dtb' >&2
+ exit 2
+fi
+for boot_file in "$DTB" "$OPTEE_ELF"; do
+ if [[ -n $boot_file && (! -f $boot_file || ! -s $boot_file) ]]; then
+  echo "Missing boot file: $boot_file" >&2
+  exit 3
+ fi
+done
+if [[ -n $OPTEE_ELF && $(od -An -tx1 -N6 -- "$OPTEE_ELF" | tr -d '[:space:]') != 7f454c460201 ]]; then
+ echo '--optee-elf requires a little-endian ELF64 file' >&2
+ exit 3
+fi
 case "$IMAGE" in
  keystone|bianbu) :;;
  *) echo "Unknown --image: $IMAGE (use keystone or bianbu)" >&2; exit 2;;
@@ -138,6 +157,14 @@ test -d "$HOSTFS" || { echo "Host shared directory missing: $HOSTFS" >&2; exit 3
 ROOTFS="$(realpath -e "$ROOTFS")"
 HOSTFS="$(realpath -e "$HOSTFS")"
 args=(-accel tcg -smp "$SMP" -m "$MEM" -bios "$BIOS" -kernel "$KERNEL")
+if [[ -n $DTB ]]; then
+ args+=(-dtb "$DTB")
+fi
+if [[ -n $OPTEE_ELF ]]; then
+ # QEMU uses doubled commas to escape commas in device property values.
+ # Omit cpu-num so the loader leaves the reset PC under firmware control.
+ args+=(-device "loader,file=${OPTEE_ELF//,/,,}")
+fi
 machine=jupiter2
 case "$PMP_PROFILE" in
  uniform16) :;;

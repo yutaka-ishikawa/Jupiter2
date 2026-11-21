@@ -33,9 +33,14 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   ビルドした。[同居検証プログラムと検証用TA](../verifications/optee-coexistence/README.md)
   を追加し、RV64向けのホスト実行ファイルと署名済みTAを生成した。
   ホストのリンクにはoptee_client `9f4414f62dfc5692fd39f760515ce2d344d07b6d` を使用。
-- 残作業は、共通PMPポリシー、hart間同期とドメイン切替、OP-TEEのQEMUロード・DT引継ぎ、
-  ゲストでの通信と逐次・並行試験。現行のK3 Keystone構成ではドメイン切替を抑止している。
-  OP-TEE同居、保護領域の隔離、ゲスト内でのテストプログラム実行は未確認。
+- `scripts/run-k3.sh` に `--dtb FILE --optee-elf FILE` を追加した。
+  QEMUのgeneric loaderはELFの物理アドレスにロードし、CPUの開始PCはファームウェアに委ねる。
+  16 hart・2 GiBのK3 QEMUで、予約領域を追加したDTBと `tee.elf` を渡し、
+  QMPで物理アドレス `0x171000000` のELFロード部分を読み出して元ファイルと照合した。
+  この試行ではCPUを停止したままロード内容を検査した。
+- 残作業は、DTBのOP-TEEドメインとMPXYチャネル・Linux側ノードの定義、共通PMP
+  ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
+  現行のK3 Keystone構成ではドメイン切替を抑止している。
 
 ## 実装順序と完了条件
 
