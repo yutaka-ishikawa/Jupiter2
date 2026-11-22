@@ -1,0 +1,16 @@
+diff --git a/core/arch/riscv/plat-k3/main.c b/core/arch/riscv/plat-k3/main.c
+index 0cbc275..e875540 100644
+--- a/core/arch/riscv/plat-k3/main.c
++++ b/core/arch/riscv/plat-k3/main.c
+@@ -28,7 +28,10 @@
+ register_phys_mem(MEM_AREA_IO_SEC, APB2CLOCK_BASE, APB2CLOCK_SIZE);
+ register_phys_mem(MEM_AREA_IO_NSEC, APBCLOCK_BASE, APBCLOCK_SIZE);
+ register_phys_mem(MEM_AREA_IO_SEC, SEC_CIU_BASE, SEC_CIU_SIZE);
+-#if defined(CFG_TE200_CRYPTO_DRIVER) && defined(CFG_TE200_PLATFORM_ENABLE_CLOCKS)
++/* eFuse reads also enable the shared TE200 clocks. */
++#if defined(CFG_K3_EFUSE) || \
++	(defined(CFG_TE200_CRYPTO_DRIVER) && \
++	 defined(CFG_TE200_PLATFORM_ENABLE_CLOCKS))
+ register_phys_mem(MEM_AREA_IO_SEC, PMUMAIN_BASE, PMUMAIN_SIZE);
+ register_phys_mem(MEM_AREA_IO_SEC, PMUAP_BASE, PMUAP_SIZE);
+ #endif

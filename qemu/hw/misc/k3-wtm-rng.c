@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* CPU-access subset of the K3 WTM RNG; no DMA/TE200 security claim. */
+/* CPU-access subset of the K3 WTM RNG and blank GEU eFuse. */
 #include "qemu/osdep.h"
 #include "qemu/module.h"
 #include "qemu/guest-random.h"
@@ -12,17 +12,28 @@
 #define TYPE_K3_WTM_RNG "k3-wtm-rng"
 OBJECT_DECLARE_SIMPLE_TYPE(K3WtmRng, K3_WTM_RNG)
 
+#define K3_GEU_BASE 0xf0702800
+#define K3_GEU_SIZE 0x400
+#define GEU_CONFIG 0x004
+#define GEU_STATUS 0x184
+#define GEU_READY (1U << 1)
+#define GEU_RELOAD_REQ 0x0c424000
+#define GEU_RELOAD_GO 0x0c024000
+
 struct K3WtmRng {
     SysBusDevice parent_obj;
     MemoryRegion regs;
     MemoryRegion main;
     MemoryRegion ap;
+    MemoryRegion geu;
     uint32_t main_clock;
     uint32_t ap_clock;
     uint32_t ctrl;
     uint32_t trng;
     uint32_t data;
     bool valid;
+    bool geu_reload_pending;
+    bool geu_ready;
     unsigned int fault;
 };
 
@@ -135,6 +146,50 @@ static void ap_write(void *opaque, hwaddr offset, uint64_t value, unsigned size)
     }
 }
 
+/*
+ * Model the K3 read flow for a blank device. The reload pair changes status,
+ * while every fuse word reads as zero. Fuse programming is unsupported.
+ */
+static MemTxResult geu_read(void *opaque, hwaddr offset, uint64_t *value,
+			    unsigned size, MemTxAttrs attrs)
+{
+    K3WtmRng *s = opaque;
+
+    if (!clock_enabled(s)) {
+	return MEMTX_ACCESS_ERROR;
+    }
+    *value = offset == GEU_STATUS && s->geu_ready ? GEU_READY : 0;
+    return MEMTX_OK;
+}
+
+static MemTxResult geu_write(void *opaque, hwaddr offset, uint64_t value,
+			     unsigned size, MemTxAttrs attrs)
+{
+    K3WtmRng *s = opaque;
+
+    if (!clock_enabled(s) || offset != GEU_CONFIG) {
+	return MEMTX_ACCESS_ERROR;
+    }
+    if (value == GEU_RELOAD_REQ) {
+	s->geu_reload_pending = true;
+	s->geu_ready = false;
+    } else if (value == GEU_RELOAD_GO && s->geu_reload_pending) {
+	s->geu_reload_pending = false;
+	s->geu_ready = true;
+    } else {
+	return MEMTX_ACCESS_ERROR;
+    }
+    return MEMTX_OK;
+}
+
+static const MemoryRegionOps geu_ops = {
+    .read_with_attrs = geu_read,
+    .write_with_attrs = geu_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
+};
+
 #define RNG_OPS(read_fn, write_fn)                                             \
     {.read = read_fn,                                                          \
      .write = write_fn,                                                        \
@@ -152,6 +207,8 @@ static void rng_reset(DeviceState *device)
     s = K3_WTM_RNG(device);
     s->main_clock = s->ap_clock = s->ctrl = s->trng = s->data = 0;
     s->valid = false;
+    s->geu_reload_pending = false;
+    s->geu_ready = false;
 }
 
 static void rng_init(Object *obj)
@@ -165,9 +222,12 @@ static void rng_init(Object *obj)
 			  K3_RNG_MAIN_SIZE);
     memory_region_init_io(&s->ap, obj, &ap_ops, s, "k3-rng-ap-clock",
 			  K3_RNG_AP_SIZE);
+    memory_region_init_io(&s->geu, obj, &geu_ops, s, "k3-geu-efuse",
+			  K3_GEU_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->regs);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->main);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->ap);
+    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->geu);
 }
 
 static const VMStateDescription rng_vmstate = {
@@ -200,7 +260,7 @@ static void rng_register_types(void)
 
 type_init(rng_register_types)
 
-    void k3_wtm_rng_create(MachineState *machine, const char *fault)
+void k3_wtm_rng_create(MachineState *machine, const char *fault)
 {
     DeviceState *dev;
     K3WtmRng *s;
@@ -217,6 +277,7 @@ type_init(rng_register_types)
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, K3_RNG_MAP_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 1, K3_RNG_MAIN_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 2, K3_RNG_AP_BASE);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 3, K3_GEU_BASE);
     node = "/soc/rng@f0703000";
     qemu_fdt_add_subnode(machine->fdt, node);
     qemu_fdt_setprop_string(machine->fdt, node, "compatible",

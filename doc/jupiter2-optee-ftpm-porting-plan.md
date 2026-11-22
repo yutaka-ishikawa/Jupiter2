@@ -115,6 +115,19 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   TAへの入力41に対して42と所定のマーカーが返ったことをUARTで確認した。
   この試験の合格範囲はOP-TEE単独のMPXY・TA往復。Keystone同居、
   16 hartでのOP-TEE動作、fTPM、ハードウェア保護は未検証。
+- **QEMU eFuse読出し試験**。K3 QEMUの `wtm-rng=on` に、既存のPMU
+  クロックモデルと連動する未書込みGEU eFuse（物理アドレス
+  `0xf0702800`、サイズ `0x400`）を追加した。GEUのreload要求と開始を
+  受け取り、readyを返す。ヒューズバンクはゼロを返し、書込みによる
+  プログラミングは扱わない。OP-TEE Coreは
+  [PMUマッピング修正](../patches/optee/k3-map-efuse-clock-registers.patch)を
+  上記固定コミットへ適用し、`CFG_K3_EFUSE=y` で再ビルドした。
+  試験用DTBでGEU、PMUMAIN（`0xd4050000`、PMP範囲16 KiB）、
+  PMUAP（`0xd4282000`、4 KiB）へのアクセスをOP-TEE側だけに許可した。
+  同じDTB・OP-TEE ELFでモデルを無効にするとPMUMAIN読出しでdata-abortし、
+  有効にすると未書込みバンクを検出して開発用HUKへ進み、Linuxからの
+  検証用TA往復が成功した。1 hart有効の単独試験で、他のハードウェア依存設定は
+  前項と同じ。実機固有のHUK、ヒューズの書込み、IOPMP、TE200、RTCの動作は未検証。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。

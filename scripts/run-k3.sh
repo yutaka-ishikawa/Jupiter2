@@ -43,7 +43,7 @@ Usage: bash scripts/run-k3.sh [options]
   --pmp-profile uniform16|mixed  PMP regression profile (default: uniform16)
   --sstc on|off            Select host Sstc support (default: CPU model)
   --zkr on|off             Override Zkr CPU extension for negative tests
-  --wtm-rng on|off         Override WTM MMIO peripheral
+  --wtm-rng on|off         Enable WTM and blank GEU eFuse MMIO
   --wtm-rng-fault none|not-ready|zero  WTM fault injection (QEMU only)
   --rootfs-format raw|qcow2 Rootfs disk format (default raw)
   --hostfs DIR             Host shared directory (default: repository root)
