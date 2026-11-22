@@ -107,6 +107,7 @@
 | KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
 | KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | K3 QEMUでLinuxのRFENCEを処理し、TAとEnclaveの完了を確認 |
 | KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時の一時的なゲート競合で副hartを停止 | 取得を再試行するよう修正し、K3 QEMUで強制競合と反復起動を確認 |
+| KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | 原因未確定。TAロード後に発生 | `/dev/tpmrm0` 経由の応答を確認済み。反復時の安定性は未確認 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1387,3 +1388,18 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   同じ確認項目がすべて通った。修正後に100 msを超えるゲート競合は観測していない。
   修正前の100秒はQEMU試験全体のタイムアウトであり、ゲートの保持時間は測定していない。
   100 msを超える競合の強制試験と実機試験は実施していない。
+
+### KSB-084: QEMUのfTPMモジュール登録中に間欠的にタイムアウト
+
+- 対象はKSB-083修正入りOpenSBI、Linuxの `tpm_ftpm_tee`、SpacemiT OP-TEE、
+  REEからロードするfTPM TAを組み合わせたK3 QEMUの16 hart構成。
+  `tee-supplicant` 起動後に `microsoft,ftpm` のDT経路でモジュールを登録する。
+- 初回はLinuxの16 CPU起動とfTPM TAのロード後、`/dev/tpmrm0` の合格出力に
+  到達せず、ホスト側の180秒制限でQEMUが終了した。別のQMP監視付き試行でも、
+  fTPMのストレージ呼出し中にUART出力の進行が断続的に止まった。
+- 診断コードなし・CPU固定なしの再試験は、モジュール登録後の
+  `/dev/tpmrm0` 経由の `TPM2_GetRandom(16)` に成功し、QEMUは正常終了した。
+  診断用initを使った試行でも、CPU割当てを変えない構成と、試験プロセスおよび
+  supplicantをCPU 0に固定した構成で同じ応答と電源断を確認した。
+- 停止箇所の関数、CPU割当てとの因果、実機での再現性は未確定。
+  手順は [fTPM TAのビルドとQEMU試験](jupiter2-ftpm-ta-test.md) を参照。

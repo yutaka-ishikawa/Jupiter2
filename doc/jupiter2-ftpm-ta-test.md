@@ -115,6 +115,49 @@ PID 1として動くテストコードはdevtmpfsをマウントし、試験出�
 `/dev/kmsg`経由でUARTに送る。tee-supplicantの起動後にTAを呼び、電源断する。
 試験結果はUARTのPASS行で判定する。
 
+## LinuxのTPMリソースマネージャー経由の試験
+
+Jupiter2の既定Linuxビルド（`scripts/build-linux-k3.sh` の
+`k3_bianbu_defconfig`）は `CONFIG_TCG_TPM=y` と
+`CONFIG_TCG_FTPM_TEE=m` を使う。試験では同じカーネルビルドの
+`Image` と `drivers/char/tpm/tpm_ftpm_tee.ko` を使用する。
+
+この手順のTAはREEのファイルからロードする。使用したOP-TEE Coreは
+REE配置のTAをTEEバスに列挙しないため、QEMU試験用DTBに
+`microsoft,ftpm` のplatformデバイスを明示する。試験用ノードは
+TPMコマンドの転送を検証するためのもので、Measured Bootのイベントログは
+構成していない。最小ゲストでは `tee-supplicant` の起動後に
+`/init` がモジュールをロードする。
+
+上記と同じ変数を使い、元のDTBとinitramfsを残したまま、試験用のコピーを作る。
+
+```sh
+cp "$BOOT_DTB" "$OUT/ftpm-boot.dtb"
+fdtput -c "$OUT/ftpm-boot.dtb" /tpm
+fdtput -t s "$OUT/ftpm-boot.dtb" /tpm compatible microsoft,ftpm
+
+cp "$OUT/init.list" "$OUT/tpm-init.list"
+printf 'file /tpm_ftpm_tee.ko %s 0644 0 0\n' \
+    "$LINUX_OUT/drivers/char/tpm/tpm_ftpm_tee.ko" >> "$OUT/tpm-init.list"
+"$LINUX_OUT/usr/gen_init_cpio" "$OUT/tpm-init.list" > "$OUT/tpm-init.cpio"
+```
+
+上記QEMUコマンドの `-dtb` と `-initrd` をそれぞれ
+`"$OUT/ftpm-boot.dtb"` と `"$OUT/tpm-init.cpio"` に変更し、`-append` の
+末尾に ` -- /dev/tpmrm0` を追加する。実測時は `timeout 180` を使用した。
+出力先を `"$OUT/qemu-tpm.log"` とし、
+次の行で合格を判定する。
+
+```sh
+grep -F 'fTPM PASS: TPM2_GetRandom returned 16 bytes via /dev/tpmrm0' \
+    "$OUT/qemu-tpm.log"
+```
+
+稼働中のLinuxで、TAの配置、DTB、`tee-supplicant` の起動を済ませ、
+`modprobe tpm_ftpm_tee` で登録した後は、該当するデバイスを指定して
+`./ftpm-smoke /dev/tpmrm0` を実行できる。複数のTPMがある場合はfTPMに
+割り当てられた番号を指定する。
+
 ## 実測結果
 
 RV64 ELFと署名済みTA（331,376バイト）を生成した。K3 QEMUのUARTでLinuxの
@@ -127,5 +170,11 @@ fTPM PASS: TPM2_GetRandom returned 16 bytes
 reboot: Power down
 ```
 
-Linuxの `tpm_ftpm_tee` と `/dev/tpmrmN` 経由の試験、再起動をまたぐNV保持、
-Keystone EnclaveとfTPMの同時実行、実機での動作は未検証。
+`tpm_ftpm_tee.ko` を組み合わせた16 hartのQEMU試験では、
+`/dev/tpmrm0` が登録され、`TPM2_GetRandom(16)` が成功した。UARTで
+`fTPM PASS: TPM2_GetRandom returned 16 bytes via /dev/tpmrm0` と電源断を確認した。
+初回試験ではTAロード後に180秒でタイムアウトしたため、反復時の安定性は
+[障害記録](keystone-bug-report.md#ksb-084-qemuのftpmモジュール登録中に間欠的にタイムアウト)
+で追跡する。
+
+再起動をまたぐNV保持、Keystone EnclaveとfTPMの同時実行、実機での動作は未検証。

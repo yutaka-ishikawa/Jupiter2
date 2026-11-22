@@ -287,7 +287,10 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   生成した。K3 QEMUの16 hart同居構成でREEからTAをロードし、libteec経由の
   `TPM2_GetRandom(16)` が成功した。ビルドと再現手順は
   [fTPM TAのビルドとQEMU試験](jupiter2-ftpm-ta-test.md)を参照。
-  Linux TPMデバイス経由の確認と実機試験は今後の作業。
+  `k3_bianbu_defconfig` で `tpm_ftpm_tee` を既定モジュールにし、QEMUで
+  `microsoft,ftpm` のDTノードから登録した `/dev/tpmrm0` 経由でも
+  `TPM2_GetRandom(16)` の応答を確認した。間欠的な起動後タイムアウトの原因と
+  実機での動作は未確認。
 - UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896` とコマンドID・共有バッファ
   の仕様を [Linux側ヘッダー](../linux-k3/drivers/char/tpm/tpm_ftpm_tee.h) と
   照合する。初期評価は署名済みREE-FS TAとrootfs起動後のドライバー読み込みを
