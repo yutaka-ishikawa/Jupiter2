@@ -185,10 +185,12 @@ static inline void context_switch_to_host(struct sbi_trap_regs *regs,
 	csr_clear(mip, MIP_MSIP);
 	csr_set(mip, MIP_SSIP);
     }
+#ifndef KEYSTONE_K3_PMP_N_REG
     if (pending & MIP_MEIP) {
 	csr_clear(mip, MIP_MEIP);
 	csr_set(mip, MIP_SEIP);
     }
+#endif
     platform_switch_from_enclave(&enclaves[eid]);
 #ifdef KEYSTONE_K3_PMP_N_REG
     k3_keystone_timer_exit();

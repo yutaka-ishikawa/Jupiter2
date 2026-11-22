@@ -122,6 +122,8 @@ void sbi_trap_handler_keystone_enclave(struct sbi_trap_regs *regs)
 	case IRQ_M_TIMER:
 	case IRQ_M_SOFT:
 #ifdef KEYSTONE_K3_PMP_N_REG
+	case IRQ_M_EXT:
+	    /* Leave the interrupt pending for OpenSBI's host trap vector. */
 	    if (mcause == IRQ_M_TIMER) {
 		k3_keystone_timer_fired();
 	    }
