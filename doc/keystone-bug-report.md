@@ -100,6 +100,7 @@
 | KSB-073 | 全16 CPU起動後、hello二種のhost runnerがload access faultで停止 | K3の独立UTM割当てとホストPMP復帰の不整合 | SM修正・実QEMUで旧版の障害再現、修正版hello二種8回PASS、実機再試験待ち |
 | KSB-074 | OPTEEDの呼出元・メッセージ長・切替結果の検査不足 | OpenSBI取込コードとK3 Keystone切替ガードの接続 | 修正済み（`4b0f75220`）、実ゲストのMPXYは未検証 |
 | KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 試験的な変更を取り消し、同居時の影響は未確認 |
+| KSB-076 | OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止 | K3移植のPMP検査と配置が起動時のLinux所属を前提とする | K3 QEMUで再現、修正前 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1201,3 +1202,14 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   外した。停止の原因は未特定。
 - 同居構成で保存・復元が必要という実行結果が得られていないため、K3 Keystone構成からも
   変更を外し、従来のタイマー処理に戻した。
+
+### KSB-076: OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止
+
+- 16 hartのK3 QEMUで同居試験用DTBのCPU `opensbi-domain` だけを、動作済みの
+  単独構成と同じ `optee-domain` に全hart分揃えた。既存のOpenSBI処理はhart 0を
+  OP-TEEの起動hartに設定した。
+- `sbi_hart_keystone_check_optee_pmp()` は現在のドメインがLinuxと一致しないため
+  `-3` を返した。続く初期PMP設定も現在のOP-TEEドメインからLinux向けの配置を
+  組み立てようとし、`regular=6 broad=0` で `-2` を返した。OP-TEE Coreに入る前に停止した。
+- 対処候補は、Linuxドメインから固定枠の配置を決め、起動時の所属に合わせて権限を設定・検証すること。
+  既存のOP-TEE起動経路とタイマー処理を使い、Linuxへの引き渡しでLinux用権限に復帰する。
