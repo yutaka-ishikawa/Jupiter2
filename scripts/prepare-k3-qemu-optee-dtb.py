@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reserve the default K3 OP-TEE Core and static shared memory in a QEMU DTB."""
+"""Add K3 OP-TEE memory reservations and MPXY wiring to a QEMU DTB."""
 import argparse
 import importlib.util
 import os
@@ -11,6 +11,7 @@ import tempfile
 
 sys.dont_write_bytecode = True
 
+DEFAULT_DOMAIN = "optee-domain"
 REGIONS = (("optee", 0x171000000, 0x1000000),
            ("optee-shm", 0x172000000, 0x1000000))
 
@@ -35,6 +36,8 @@ def ranges(node):
 def add_mpxy(root, edit, domain_name):
     chosen = root.children["chosen"]
     domains = chosen.children["opensbi-domains"]
+    if domain_name not in domains.children:
+        raise ValueError(f"missing OpenSBI domain: /chosen/opensbi-domains/{domain_name}")
     domain = domains.children[domain_name]
     if (domain_name == "untrusted-domain" or
             b"opensbi,domain,instance" not in
@@ -102,7 +105,7 @@ def add_mpxy(root, edit, domain_name):
            for cell in (f"{mailbox_handle:x}", f"{channel:x}", "2")))
 
 
-def prepare(source, output, domain_name=None):
+def prepare(source, output, domain_name=DEFAULT_DOMAIN):
     data = source.read_bytes()
     root, occupied = read_tree(data)
     cells = struct.pack(">I", 2)
@@ -147,8 +150,7 @@ def prepare(source, output, domain_name=None):
             edit(["-t", "x"], path, "reg", f"{start >> 32:x}",
                  f"{start & 0xffffffff:x}", "0", f"{size:x}")
             edit([], path, "no-map")
-        if domain_name is not None:
-            add_mpxy(root, edit, domain_name)
+        add_mpxy(root, edit, domain_name)
         os.link(staged, output)
 
 
@@ -156,8 +158,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--mpxy-domain", metavar="NAME",
-                        help="attach MPXY nodes to an existing trusted OpenSBI domain")
+    parser.add_argument("--mpxy-domain", metavar="NAME", default=DEFAULT_DOMAIN,
+                        help=f"trusted OpenSBI domain name (default: {DEFAULT_DOMAIN})")
     args = parser.parse_args()
     try:
         prepare(args.input, args.output, args.mpxy_domain)

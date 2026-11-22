@@ -8,6 +8,7 @@
 移植のベースは、**Jupiter2リポジトリの現行Keystone構成一式**とする。
 改造OpenSBI＋Keystone SM、FSBL/U-Bootからの既存RAM起動・統合FIT生成手順、
 `linux-k3/` とDTB、K3 QEMU、rootfs、Keystoneの検証環境にOP-TEEとfTPM TAを追加する。
+同居構成の既定起動ではKeystoneとOP-TEEの両方を利用できるようにする。
 最初の実機到達点は、同一ファームウェア・Linuxの起動中にKeystone Enclaveと
 fTPM TAが動作し、LinuxからTPM 2.0コマンドを実行でき、試験用NVデータが
 再起動・電源再投入後にも残ること。Measured Boot・IMAと製品向けの鍵管理は後続とする。
@@ -46,16 +47,16 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
 - [QEMU用DTB生成スクリプト](../scripts/prepare-k3-qemu-optee-dtb.py)で、
   K3既定のCore領域（`0x171000000`）と静的共有領域（`0x172000000`）を
   それぞれ16 MiB、`reserved-memory` に `no-map` 付きで追加できる。
-  QEMUの `dumpdtb` で得たDTBを入力に
+  QEMUの `dumpdtb` で得たDTBに下記のドメイン定義を加えたファイルを入力に
   `python3 scripts/prepare-k3-qemu-optee-dtb.py base.dtb boot.dtb` を実行し、
   出力を起動スクリプトの `--dtb` に指定する。開発ホストでは `fdtput` が必要。
   16 hart・2 GiBで生成したDTBとOP-TEE ELFを渡してOpenSBIの起動ログを確認した。
   既存予約との重複と、1 GiBで対象範囲がRAM外になる場合は生成を拒否した。
   この予約はLinux向けのメモリー配置情報であり、PMPによる隔離は別途実装する。
-- DTB生成の `--mpxy-domain NAME` で、既存のtrusted OpenSBI domainへの
-  OPTEED参照とLinux側のmailbox・OP-TEEノードを追加できる。入力には
-  `/chosen/opensbi-domains` 配下のtrusted domain（`phandle` 必須）と
-  `untrusted-domain` が必要。既存K3のチャネル `0x1000`〜`0x100f` を
+- DTB生成ではOPTEED参照とLinux側のmailbox・OP-TEEノードを毎回追加する。
+  入力には `/chosen/opensbi-domains` 配下の `optee-domain`（`phandle` 必須）と
+  `untrusted-domain` が必要。既存DTBに別のtrusted domain名を使う場合は
+  `--mpxy-domain NAME` で指定する。既存K3のチャネル `0x1000`〜`0x100f` を
   hart順で生成し、Linux側ではTEEプロトコルID 2と組み合わせる。
   生成結果はQEMU由来のDTBに試験用domainノードを加え、`fdtget` で照合した。
   この検査にドメインの起動やPMP切替は含まれない。
