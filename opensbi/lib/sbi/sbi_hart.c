@@ -660,18 +660,14 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     return 0;
 }
 
-static int k3_pmp_write_checked(unsigned int index,
-				const struct sbi_domain_memregion *reg,
-				unsigned long permissions,
-				unsigned int full_range_order)
+static int k3_pmp_check_entry(unsigned int index,
+			      const struct sbi_domain_memregion *reg,
+			      unsigned long permissions,
+			      unsigned int full_range_order)
 {
     unsigned long prot, base, order;
     int rc;
 
-    rc = pmp_set(index, permissions, reg->base, reg->order);
-    if (rc) {
-	return rc;
-    }
     rc = pmp_get(index, &prot, &base, &order);
     if (rc) {
 	return rc;
@@ -684,56 +680,117 @@ static int k3_pmp_write_checked(unsigned int index,
     return 0;
 }
 
-/* Exercise the local CSR transaction with lower privilege modes stopped. */
+static int k3_pmp_write_checked(unsigned int index,
+				const struct sbi_domain_memregion *reg,
+				unsigned long permissions,
+				unsigned int full_range_order)
+{
+    int rc;
+
+    rc = pmp_set(index, permissions, reg->base, reg->order);
+    if (rc) {
+	return rc;
+    }
+    return k3_pmp_check_entry(index, reg, permissions, full_range_order);
+}
+
+/* Keep fallback closed while updating earlier slots. This function is used
+ * for both applying a policy and restoring the verified source policy.
+ */
+static int k3_optee_pmp_apply(const struct k3_root_pmp_layout *layout,
+			     unsigned int available,
+			     const unsigned long permissions[K3_BOOT_PMP_COUNT],
+			     unsigned int full_range_order)
+{
+    unsigned int i, fallback = layout->slots.fallback_index;
+    int rc;
+
+    rc = k3_pmp_write_checked(fallback, layout->fallback, 0, full_range_order);
+    if (rc) {
+	return rc;
+    }
+    for (i = 0; i < layout->regular; i++) {
+	if (!(available & (1U << i))) {
+	    continue;
+	}
+	rc = k3_pmp_write_checked(i, layout->region[i], permissions[i],
+				   full_range_order);
+	if (rc) {
+	    return rc;
+	}
+    }
+    if (permissions[fallback]) {
+	rc = k3_pmp_write_checked(fallback, layout->fallback,
+				   permissions[fallback], full_range_order);
+    }
+    return rc;
+}
+
+static int k3_optee_pmp_transition(
+	struct sbi_scratch *scratch, const struct k3_root_pmp_layout *layout,
+	unsigned int available, const unsigned long source[K3_BOOT_PMP_COUNT],
+	const unsigned long target[K3_BOOT_PMP_COUNT])
+{
+    const struct sbi_domain_memregion *reg;
+    unsigned int fallback = layout->slots.fallback_index;
+    unsigned int i, full_range_order;
+    int rc;
+
+    if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV)) {
+	return SBI_EDENIED;
+    }
+    full_range_order = sbi_hart_pmp_addrbits(scratch) + PMP_SHIFT;
+    for (i = 0; i <= fallback; i++) {
+	if (i == fallback) {
+	    reg = layout->fallback;
+	} else if (available & (1U << i)) {
+	    reg = layout->region[i];
+	} else {
+	    continue;
+	}
+	rc = k3_pmp_check_entry(i, reg, source[i], full_range_order);
+	if (rc) {
+	    return rc;
+	}
+    }
+
+    rc = k3_optee_pmp_apply(layout, available, target, full_range_order);
+    if (rc && k3_optee_pmp_apply(layout, available, source, full_range_order)) {
+	sbi_printf("K3 OP-TEE PMP: unable to restore source permissions\n");
+	sbi_hart_hang();
+    }
+    __asm__ __volatile__("sfence.vma" ::: "memory");
+    return rc;
+}
+
+/* Exercise both directions with lower privilege modes stopped. */
 static int k3_optee_pmp_boot_check(struct sbi_scratch *scratch,
 				   const struct k3_root_pmp_layout *layout)
 {
-    unsigned long permissions[K3_BOOT_PMP_COUNT] = {0};
-    unsigned int i, available, full_range_order, fallback;
-    unsigned int changed = 0;
-    int rc, restore_rc;
+    unsigned long host[K3_BOOT_PMP_COUNT] = {0};
+    unsigned long tee[K3_BOOT_PMP_COUNT] = {0};
+    unsigned int i, available;
+    int rc;
 
     if (!k3_optee_tee || k3_optee_host != sbi_domain_thishart_ptr()) {
 	return 0;
     }
-    if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV)) {
-	return SBI_EDENIED;
-    }
-    rc = k3_optee_pmp_plan(layout, k3_optee_tee, permissions, &available);
+    rc = k3_optee_pmp_plan(layout, k3_optee_tee, tee, &available);
     if (rc) {
 	return rc;
     }
-
-    full_range_order = sbi_hart_pmp_addrbits(scratch) + PMP_SHIFT;
-    fallback = layout->slots.fallback_index;
-    rc = k3_pmp_write_checked(fallback, layout->fallback, 0,
-			       full_range_order);
-    for (i = 0; !rc && i < layout->regular; i++) {
-	if (!(available & (1U << i))) {
-	    continue;
-	}
-	changed |= 1U << i;
-	rc = k3_pmp_write_checked(i, layout->region[i], permissions[i],
-				   full_range_order);
-    }
-
     for (i = 0; i < layout->regular; i++) {
-	if (!(changed & (1U << i))) {
-	    continue;
-	}
-	restore_rc = k3_pmp_write_checked(i, layout->region[i],
-					  k3_root_pmp_permissions(layout->region[i]),
-					  full_range_order);
-	if (restore_rc) {
-	    return restore_rc;
+	if (available & (1U << i)) {
+	    host[i] = k3_root_pmp_permissions(layout->region[i]);
 	}
     }
-    restore_rc = k3_pmp_write_checked(fallback, layout->fallback,
-				      k3_root_pmp_permissions(layout->fallback),
-				      full_range_order);
-    if (restore_rc) {
-	return restore_rc;
+    host[layout->slots.fallback_index] = k3_root_pmp_permissions(layout->fallback);
+
+    rc = k3_optee_pmp_transition(scratch, layout, available, host, tee);
+    if (rc) {
+	return rc;
     }
+    rc = k3_optee_pmp_transition(scratch, layout, available, tee, host);
     if (!rc) {
 	K3_PMP_TRACE("OP-TEE fixed-slot round trip PASS hart=%lu\n",
 		     csr_read(CSR_MHARTID));
