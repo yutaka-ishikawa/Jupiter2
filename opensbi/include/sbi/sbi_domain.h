@@ -171,7 +171,11 @@ struct sbi_domain {
 	u32 index;
 	/** HARTs assigned to this domain */
 	struct sbi_hartmask assigned_harts;
-	/** Spinlock for accessing assigned_harts */
+#ifdef CONFIG_K3_KEYSTONE_SM
+	/** Linux harts temporarily executing a synchronous OP-TEE call */
+	struct sbi_hartmask optee_caller_harts;
+#endif
+	/** Spinlock for accessing the hart assignment masks above */
 	spinlock_t assigned_harts_lock;
 	/** Name of this domain */
 	char name[64];

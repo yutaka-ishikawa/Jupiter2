@@ -900,6 +900,11 @@ int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target)
     return k3_optee_pmp_switch_with_os_slot(scratch, &layout, enter);
 }
 
+const struct sbi_domain *sbi_hart_keystone_optee_host(void)
+{
+    return k3_optee_host;
+}
+
 /* Keystone admits the Linux layout before installing the S-mode policy. */
 int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch)
 {

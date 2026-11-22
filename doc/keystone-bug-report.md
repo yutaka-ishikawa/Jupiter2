@@ -107,7 +107,7 @@
 | KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
 | KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | K3 QEMUでLinuxのRFENCEを処理し、TAとEnclaveの完了を確認 |
 | KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時の一時的なゲート競合で副hartを停止 | 取得を再試行するよう修正し、K3 QEMUで強制競合と反復起動を確認 |
-| KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | LinuxがOP-TEEストレージRPCの完了を待機。完了が遅延する原因は未確定 | TPMデバイス登録時と電源断時に待機スタックを採取 |
+| KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | OP-TEE実行中のhartがLinux向けSBIソフトウェアIPIの宛先から外れる | Linux宛てIPIを保持するよう修正。16 hart QEMUでfTPMと同居試験が成功 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1417,3 +1417,22 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 過去の180秒・300秒タイムアウトのTAシステムコール列は、それぞれ成功時の先頭
   3,147件・1,685件と一致した。途切れた地点が異なるため、最終UART行だけで
   失敗したTA関数を断定できない。今回確認できた停止箇所はLinux側のRPC完了待ち。
+- Keystone入りOpenSBIの診断ビルドで、LinuxからOP-TEE実行中のhart 1に向けた
+  SBIソフトウェアIPIを観測した。電源断時の送信元はhart 15だった。
+  同じ起動で `TPM2_Shutdown` のRPC待ちを採取し、145秒でタイムアウトした。
+  元のコードは現在のドメインの `assigned_harts` でIPIの宛先を絞り、
+  同期OP-TEE呼出し中のhartはLinux側のマスクから一時的に外れる。
+  このため、Linuxのタスク起床などに使うIPIを、当該hartへ送れない窓があった。
+- 修正はLinux側の通常割当てと、一時的にOP-TEEを実行する呼出元hartのマスクを
+  同じロック下で更新する。LinuxのSBIソフトウェアIPIには専用のイベントを
+  使用し、宛先hartがOP-TEEを実行中なら保存済みLinuxコンテキストのSSIPに記録する。
+  Linuxへ戻るときは既存のCSR復元でSSIPが反映される。HSMによる宛先の稼働状態確認は
+  引き続き適用する。RFENCEとHALTは従来の宛先選定を使う。
+- 16 hart K3 QEMUで、修正ファームウェアを使ったfTPMの4回の反復が
+  モジュール登録、`/dev/tpmrm0` 経由の `TPM2_GetRandom(16)`、電源断まで成功した。
+  診断出力を加えた別の試行では、hart 13でLinux宛てSSIPの保持を観測し、
+  同じ試行でTPM応答と電源断に成功した。診断なしの最終ファームウェアと
+  標準の試験用initramfsでも、TPM応答と電源断を確認した。
+  既存の同居回帰試験では、別hartで実行中のKeystone EnclaveとOP-TEEの
+  検証用TAが両方完了し、電源断した。過去のすべてのタイムアウトが
+  同じIPIによるものかは未確認。実機試験は実施していない。

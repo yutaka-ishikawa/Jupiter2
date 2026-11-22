@@ -173,7 +173,9 @@ reboot: Power down
 `tpm_ftpm_tee.ko` を組み合わせた16 hartのQEMU試験では、
 `/dev/tpmrm0` が登録され、`TPM2_GetRandom(16)` が成功した。UARTで
 `fTPM PASS: TPM2_GetRandom returned 16 bytes via /dev/tpmrm0` と電源断を確認した。
-初回試験ではTAロード後に180秒でタイムアウトしたため、反復時の安定性は
+初回はTAロード後に180秒でタイムアウトした。KSB-084のLinux向けIPIの
+修正後は16 hart QEMUでモジュール登録から電源断まで反復試験に成功した。
+調査と修正の詳細は
 [障害記録](keystone-bug-report.md#ksb-084-qemuのftpmモジュール登録中に間欠的にタイムアウト)
 で追跡する。
 

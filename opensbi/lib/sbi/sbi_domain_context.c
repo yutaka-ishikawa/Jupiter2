@@ -132,12 +132,21 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
 
 	/* Assign current hart to target domain */
 	spin_lock(&current_dom->assigned_harts_lock);
+#ifdef CONFIG_K3_KEYSTONE_SM
+	if (set_caller && dom_ctx->initialized &&
+	    current_dom == sbi_hart_keystone_optee_host()) {
+		sbi_hartmask_set_hartindex(hartindex, &current_dom->optee_caller_harts);
+	}
+#endif
 	sbi_hartmask_clear_hartindex(hartindex, &current_dom->assigned_harts);
 	spin_unlock(&current_dom->assigned_harts_lock);
 
 	sbi_update_hartindex_to_domain(hartindex, target_dom);
 
 	spin_lock(&target_dom->assigned_harts_lock);
+#ifdef CONFIG_K3_KEYSTONE_SM
+	sbi_hartmask_clear_hartindex(hartindex, &target_dom->optee_caller_harts);
+#endif
 	sbi_hartmask_set_hartindex(hartindex, &target_dom->assigned_harts);
 	spin_unlock(&target_dom->assigned_harts_lock);
 
@@ -279,6 +288,26 @@ int sbi_domain_context_exit(void)
 
     return switch_to_next_domain_context(ctx, dom_ctx, false);
 }
+
+#ifdef CONFIG_K3_KEYSTONE_SM
+void sbi_domain_context_raise_host_ssip(const struct sbi_domain *host)
+{
+	struct hart_context *ctx;
+
+	if (sbi_domain_thishart_ptr() == host) {
+		csr_set(CSR_MIP, MIP_SSIP);
+		return;
+	}
+
+	/* The target hart owns this context. The M-mode interrupt handler
+	 * and the domain switch cannot run concurrently on this hart.
+	 */
+	ctx = hart_context_thishart_get();
+	if (ctx && ctx->prev_ctx && ctx->prev_ctx->dom == host) {
+		ctx->prev_ctx->sip |= MIP_SSIP;
+	}
+}
+#endif
 
 int sbi_domain_context_init(void)
 {

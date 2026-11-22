@@ -183,17 +183,31 @@ static void hsm_start_ticket_release(struct sbi_hsm_data *hdata)
  * Get the mask of harts which are valid IPI targets
  * @param dom the domain to be used for output HART mask
  * @param mask the output hartmask to fill
+ * @param include_optee_callers include Linux harts in an OP-TEE call
  * @return 0 on success and SBI_Exxx (< 0) on failure
  */
 int sbi_hsm_hart_interruptible_mask(const struct sbi_domain *dom,
-				    struct sbi_hartmask *mask)
+				    struct sbi_hartmask *mask,
+				    bool include_optee_callers)
 {
 	int hstate, ret;
 	u32 i;
 
-	ret = sbi_domain_get_assigned_hartmask(dom, mask);
-	if (ret)
-		return ret;
+#ifdef CONFIG_K3_KEYSTONE_SM
+	if (include_optee_callers && dom) {
+		struct sbi_domain *host = (struct sbi_domain *)dom;
+
+		spin_lock(&host->assigned_harts_lock);
+		sbi_hartmask_or(mask, &host->assigned_harts, &host->optee_caller_harts);
+		spin_unlock(&host->assigned_harts_lock);
+	} else
+#endif
+	{
+		ret = sbi_domain_get_assigned_hartmask(dom, mask);
+		if (ret) {
+			return ret;
+		}
+	}
 
 	sbi_hartmask_for_each_hartindex(i, mask) {
 		hstate = __sbi_hsm_hart_get_state(i);

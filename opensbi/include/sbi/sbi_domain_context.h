@@ -45,6 +45,10 @@ int sbi_domain_context_exit(void);
  */
 int sbi_domain_context_init(void);
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+void sbi_domain_context_raise_host_ssip(const struct sbi_domain *host);
+#endif
+
 /* Deinitialize domain context support */
 void sbi_domain_context_deinit(void);
 

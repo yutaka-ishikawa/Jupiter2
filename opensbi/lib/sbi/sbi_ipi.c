@@ -13,6 +13,7 @@
 #include <sbi/riscv_barrier.h>
 #include <sbi/sbi_bitops.h>
 #include <sbi/sbi_domain.h>
+#include <sbi/sbi_domain_context.h>
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_hart.h>
 #include <sbi/sbi_hsm.h>
@@ -35,6 +36,10 @@ _Static_assert(
 static unsigned long ipi_data_off;
 static const struct sbi_ipi_device *ipi_dev = NULL;
 static const struct sbi_ipi_event_ops *ipi_ops_array[SBI_IPI_EVENT_MAX];
+
+#ifdef CONFIG_K3_KEYSTONE_SM
+static u32 ipi_host_smode_event = SBI_IPI_EVENT_MAX;
+#endif
 
 static int sbi_ipi_send(struct sbi_scratch *scratch, u32 remote_hartindex,
 			u32 event, void *data)
@@ -111,13 +116,18 @@ int sbi_ipi_send_many(ulong hmask, ulong hbase, u32 event, void *data)
 {
 	int rc = 0;
 	bool retry_needed;
+	bool include_optee_callers = false;
 	ulong i;
 	struct sbi_hartmask target_mask;
 	struct sbi_domain *dom = sbi_domain_thishart_ptr();
 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+	include_optee_callers = event == ipi_host_smode_event;
+#endif
 	/* Find the target harts */
-	rc = sbi_hsm_hart_interruptible_mask(dom, &target_mask);
+	rc = sbi_hsm_hart_interruptible_mask(dom, &target_mask,
+					    include_optee_callers);
 	if (rc)
 		return rc;
 
@@ -192,8 +202,28 @@ static struct sbi_ipi_event_ops ipi_smode_ops = {
 
 static u32 ipi_smode_event = SBI_IPI_EVENT_MAX;
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+static void sbi_ipi_process_host_smode(struct sbi_scratch *scratch)
+{
+	sbi_domain_context_raise_host_ssip(sbi_hart_keystone_optee_host());
+}
+
+/* Keep the Linux recipient attached to the event even if the target hart
+ * enters OP-TEE before it handles the machine interrupt.
+ */
+static const struct sbi_ipi_event_ops ipi_host_smode_ops = {
+	.name = "IPI_HOST_SMODE",
+	.process = sbi_ipi_process_host_smode,
+};
+#endif
+
 int sbi_ipi_send_smode(ulong hmask, ulong hbase)
 {
+#ifdef CONFIG_K3_KEYSTONE_SM
+	if (sbi_domain_thishart_ptr() == sbi_hart_keystone_optee_host()) {
+		return sbi_ipi_send_many(hmask, hbase, ipi_host_smode_event, NULL);
+	}
+#endif
 	return sbi_ipi_send_many(hmask, hbase, ipi_smode_event, NULL);
 }
 
@@ -317,6 +347,13 @@ int sbi_ipi_init(struct sbi_scratch *scratch, bool cold_boot)
 		if (ret < 0)
 			return ret;
 		ipi_smode_event = ret;
+#ifdef CONFIG_K3_KEYSTONE_SM
+		ret = sbi_ipi_event_create(&ipi_host_smode_ops);
+		if (ret < 0) {
+			return ret;
+		}
+		ipi_host_smode_event = ret;
+#endif
 		ret = sbi_ipi_event_create(&ipi_halt_ops);
 		if (ret < 0)
 			return ret;
