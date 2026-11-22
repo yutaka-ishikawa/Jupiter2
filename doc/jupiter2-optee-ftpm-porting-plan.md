@@ -156,6 +156,16 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   16 hartのK3 QEMUで同居用DTBと `linux-k3` を起動し、Keystoneの
   `hello`、`hello-native`、電源断が成功した。保護領域を指定する拒否試験、
   両ドメインが読み書きできるTEE共有領域の専用予約、PMP切替と同居は未確認。
+- **固定PMPスロットの起動時割当て**。2 GiBのK3 QEMU用DTBにGEU、
+  PMUAP、PMUMAINと起動DTBのポリシーを追加した。起動DTBはRAM末尾の
+  2 MiB（`0x181e00000`〜`0x181ffffff`）を `no-map` で予約する。
+  16 hartの実QEMUで、OpenSBIが `opensbi-mask=0x83ff` と
+  `keystone-mask=0x7c00` を設定し、全hartでPMPの読戻しが成功した。
+  この構成での実スロット順は、0〜2がGEU・PMUAP・PMUMAIN、3〜5が
+  M-mode用APLIC・タイマー・IMSIC、6がファームウェア、7が起動DTB、
+  8・9がCoreと共有RAM、10〜14がKeystoneの動的枠、15がフォールバック。
+  Linuxの `hello` と `hello-native` は成功し、電源断も完了した。
+  実行時の権限切替、OP-TEE同居、動的枠の枯渇試験は未実施。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。

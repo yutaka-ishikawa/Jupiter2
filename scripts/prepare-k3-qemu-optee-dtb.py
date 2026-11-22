@@ -17,6 +17,17 @@ REGIONS = (("optee", 0x171000000, 0x1000000),
            ("optee-shm", 0x172000000, 0x1000000))
 
 
+# The K3 QEMU 2 GiB profile places the boot FDT in the final 2 MiB.
+BOOT_FDT_BASE = 0x181e00000
+BOOT_FDT_ORDER = 21
+FIXED_REGIONS = (
+    ("geu", 0xf0702800, 10, True),
+    ("pmu-main", 0xd4050000, 14, True),
+    ("pmu-ap", 0xd4282000, 12, True),
+    ("boot-fdt", BOOT_FDT_BASE, BOOT_FDT_ORDER, False),
+)
+
+
 def read_tree(data):
     path = Path(__file__).with_name("prepare-jupiter2-keystone-linux-dtb.py")
     spec = importlib.util.spec_from_file_location("jupiter2_linux_dtb", path)
@@ -65,6 +76,38 @@ def validate_domain_memory(domains, domain, untrusted):
             if any(size < length and start < base + size and base < start + length
                    for base, size, _, _ in entries):
                 raise ValueError(f"nested domain region overrides {name}")
+
+
+def add_fixed_regions(domains, domain_name, edit, first_handle):
+    root_path = "/chosen/opensbi-domains"
+    for offset, (name, base, order, mmio) in enumerate(FIXED_REGIONS):
+        for node in domains.children.values():
+            if b"opensbi,domain,memregion" not in node.props.get("compatible", b"").split(b"\0"):
+                continue
+            old_base, = struct.unpack(">Q", node.props["base"])
+            old_order, = struct.unpack(">I", node.props["order"])
+            old_size = 1 << old_order
+            if (old_order <= order and old_base < base + (1 << order)
+                    and base < old_base + old_size):
+                raise ValueError(f"existing domain region conflicts with {name}")
+        node_name = f"optee-fixed-{name}"
+        if node_name in domains.children:
+            raise ValueError(f"existing domain node conflicts with {node_name}")
+        path = f"{root_path}/{node_name}"
+        edit(["-c"], path)
+        edit(["-t", "s"], path, "compatible", "opensbi,domain,memregion")
+        edit(["-t", "x"], path, "phandle", f"{first_handle + offset:x}")
+        edit(["-t", "x"], path, "base", f"{base >> 32:x}", f"{base & 0xffffffff:x}")
+        edit(["-t", "x"], path, "order", f"{order:x}")
+        if mmio:
+            edit([], path, "mmio")
+    for name in (domain_name, "untrusted-domain"):
+        entries = list(struct.iter_unpack(">II", domains.children[name].props["regions"]))
+        for offset, (_, _, _, mmio) in enumerate(FIXED_REGIONS):
+            access = 0 if name == "untrusted-domain" and mmio else 0x18
+            entries.append((first_handle + offset, access))
+        edit(["-t", "x"], f"{root_path}/{name}", "regions",
+             *(f"{cell:x}" for entry in entries for cell in entry))
 
 
 def add_mpxy(root, edit, domain_name):
@@ -130,12 +173,14 @@ def add_mpxy(root, edit, domain_name):
     scan(root)
     trusted_handle = struct.unpack(">I", domain.props["phandle"])[0]
     mailbox_handle = max(handles) + 1
-    if not trusted_handle or mailbox_handle >= 0xffffffff:
+    if not trusted_handle or mailbox_handle + len(FIXED_REGIONS) >= 0xffffffff:
         raise ValueError("invalid domain phandle or exhausted phandle space")
 
     def new_node(path, compatible):
         edit(["-c"], path)
         edit(["-t", "s"], path, "compatible", compatible)
+
+    add_fixed_regions(domains, domain_name, edit, mailbox_handle + 1)
 
     for _, name, _ in cpu_nodes:
         edit(["-t", "x"], f"/cpus/{name}", "opensbi-domain",
@@ -205,7 +250,10 @@ def prepare(source, output, domain_name=DEFAULT_DOMAIN):
     ram = [region for node in root.children.values()
            if node.props.get("device_type") == b"memory\0"
            for region in ranges(node)]
-    for _, start, size in REGIONS:
+    if ram != [(0x102000000, 0x80000000)]:
+        raise ValueError("fixed OP-TEE boot FDT window requires the K3 QEMU 2 GiB RAM layout")
+    reservations = (*REGIONS, ("optee-boot-fdt", BOOT_FDT_BASE, 1 << BOOT_FDT_ORDER))
+    for _, start, size in reservations:
         if not any(base <= start and start + size <= base + length
                    for base, length in ram):
             raise ValueError(f"OP-TEE range at {start:#x} is outside RAM")
@@ -225,7 +273,7 @@ def prepare(source, output, domain_name=DEFAULT_DOMAIN):
             for prop in ("#address-cells", "#size-cells"):
                 edit(["-t", "x"], "/reserved-memory", prop, "2")
             edit([], "/reserved-memory", "ranges")
-        for name, start, size in REGIONS:
+        for name, start, size in reservations:
             path = f"/reserved-memory/{name}@{start:x}"
             edit(["-c"], path)
             edit(["-t", "x"], path, "reg", f"{start >> 32:x}",
