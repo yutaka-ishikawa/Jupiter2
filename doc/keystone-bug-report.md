@@ -105,7 +105,7 @@
 | KSB-079 | OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる | 排他の試作と既存のDESTROYING隔離処理の組合せ | K3 QEMUで `-EAGAIN`、明示再試行とclose後の破棄、TA応答を確認 |
 | KSB-080 | OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト | OpenSBIの実行時切替で毎回PMP配置の全領域をUARTへ出力 | 実行時の詳細出力を抑制し、K3 QEMUで並行TA応答を確認 |
 | KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
-| KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | KeystoneのEnclave用M-modeトラップに外部割り込みの処理がない | 16 hart K3 QEMUで再現、割り込み発生元は未特定 |
+| KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | 16 hart K3 QEMUの診断ビルドでIPI ID 1を確認 |
 | KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | K3 QEMUのOP-TEE先行起動、原因未特定 | 起動hart 0固定でも1回タイムアウト |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
@@ -1315,6 +1315,12 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   受けてEnclaveを中断する。M-mode外部割り込みは既定のエラー経路に入る。
   どのデバイスが割り込みを送ったかと、同居構成固有の条件かは未特定。
 - CPU 8のEnclaveとCPU 15のTAで試した回は双方が完了し、Enclaveの破棄に成功した。
+- 診断ビルドの実QEMUで再現した3回ともhart 2で `irq=11 mtopei=0x10001 mip=0x800`
+  を確認した。`mtopei` の割り込みIDは1で、OpenSBIのIMSICドライバーがIPIに
+  割り当てるIDと一致する。IPIの個別イベント種別は未特定。
+- 通常のOpenSBIトラップはM-mode外部割り込みをIRQチップに渡し、IMSICはID 1を
+  `sbi_ipi_process()` へ渡す。KeystoneのEnclave用トラップもこの配送を扱い、必要な
+  Enclave中断とLinux復帰を既存の保護条件で扱う必要がある。
 
 ### KSB-083: 同居ゲストがOP-TEEの副hart初期化で停止
 
@@ -1323,3 +1329,7 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   記録したが、hart 9のOP-TEE初期化完了とLinuxへの引き渡しは記録されなかった。
 - 起動hartはDTBで0に固定していた。100秒でタイムアウト（終了コード124）し、
   TA・Enclave同時実行の試験には到達していない。停止箇所の特定と再現条件の調査が残る。
+- 候補は `k3_keystone_hsm_start_finish()` の共有HSM/PMPゲート取得。別hartと競合すると
+  即時エラーを返し、呼び出し側が診断を出さずにhartを停止する経路がある。
+  診断ビルドを9回実行し、いずれもLinuxの16 CPU起動まで進んだ。起動停止は再現せず、
+  このコード経路が該当のhart 9で発生したことは未確認。
