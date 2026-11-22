@@ -276,6 +276,18 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   初期候補の `optee_ftpm` には `-D_ARM_` があるため、適用箇所を調べ、
   RV64での整数幅、アラインメント、時刻、乱数、NVアクセスへの影響を評価する。
   Measured BootとPPIは初回試験では無効とする。
+- ビルド試行では K3 OP-TEE `2fbd6ae54d89` のRV64 dev kit、`optee_ftpm`
+  `f09f4cdad210` および指定のMicrosoft参照実装 `98b60a44aba7` を使用した。
+  参照実装がRV64の `RADIX_BITS` を自動判定できず、試験用に64を明示すると
+  コンパイルはTAヘッダーまで進んだ。現行dev kitには候補版が要求する
+  `TA_FLAG_INSTANCE_KEEP_CRASHED` がなく、この候補版のビルドは停止した。
+  対応候補は、フラグ導入前の互換fTPM版を固定する方法と、対応するOP-TEE Coreの
+  動作をK3版へ移植する方法。定義だけを追加してもクラッシュ後のセッション動作は揃わない。
+- QEMUの初期試験ではフラグ導入直前の `6f99e783eb9b` を使用し、署名済みRV64 TAを
+  生成した。K3 QEMUの16 hart同居構成でREEからTAをロードし、libteec経由の
+  `TPM2_GetRandom(16)` が成功した。ビルドと再現手順は
+  [fTPM TAのビルドとQEMU試験](jupiter2-ftpm-ta-test.md)を参照。
+  Linux TPMデバイス経由の確認と実機試験は今後の作業。
 - UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896` とコマンドID・共有バッファ
   の仕様を [Linux側ヘッダー](../linux-k3/drivers/char/tpm/tpm_ftpm_tee.h) と
   照合する。初期評価は署名済みREE-FS TAとrootfs起動後のドライバー読み込みを
