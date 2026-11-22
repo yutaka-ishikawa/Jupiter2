@@ -38,6 +38,10 @@ struct hart_context {
 	unsigned long stval;
 	/** Supervisor interrupt pending register */
 	unsigned long sip;
+#ifdef CONFIG_K3_KEYSTONE_SM
+	/** Sstc timer deadline, valid after the context has been saved */
+	u64 stimecmp;
+#endif
 	/** Supervisor address translation and protection register */
 	unsigned long satp;
 	/** Counter-enable register */
@@ -84,6 +88,24 @@ static void hart_context_set(struct sbi_domain *dom, u32 hartindex,
 #define hart_context_thishart_get()					\
 	hart_context_get(sbi_domain_thishart_ptr(),			\
 			 current_hartindex())
+
+#ifdef CONFIG_K3_KEYSTONE_SM
+static void switch_stimecmp(struct hart_context *ctx,
+			    const struct hart_context *target)
+{
+    u64 deadline = target->initialized ? target->stimecmp : ~(u64)0;
+
+#if __riscv_xlen == 32
+    ctx->stimecmp = (u64)csr_read(CSR_STIMECMPH) << 32;
+    ctx->stimecmp |= csr_read(CSR_STIMECMP);
+    csr_write(CSR_STIMECMPH, ~(u32)0);
+    csr_write(CSR_STIMECMP, (u32)deadline);
+    csr_write(CSR_STIMECMPH, deadline >> 32);
+#else
+    ctx->stimecmp = csr_swap(CSR_STIMECMP, deadline);
+#endif
+}
+#endif
 
 /**
  * Switches the HART context from the current domain to the target domain.
@@ -160,6 +182,9 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
 	ctx->sip	= csr_swap(CSR_SIP, dom_ctx->sip);
 	ctx->satp	= csr_swap(CSR_SATP, dom_ctx->satp);
 #ifdef CONFIG_K3_KEYSTONE_SM
+    if (sbi_hart_has_extension(scratch, SBI_HART_EXT_SSTC)) {
+	switch_stimecmp(ctx, dom_ctx);
+    }
     __asm__ __volatile__("sfence.vma" ::: "memory");
 #endif
 	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_10)
