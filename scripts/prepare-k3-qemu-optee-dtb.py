@@ -33,6 +33,39 @@ def ranges(node):
     return list(struct.iter_unpack(">QQ", reg))
 
 
+def validate_domain_memory(domains, domain, untrusted):
+    region_nodes = {}
+    for node in domains.children.values():
+        if b"opensbi,domain,memregion" in node.props.get("compatible", b"").split(b"\0"):
+            handle, = struct.unpack(">I", node.props["phandle"])
+            base, = struct.unpack(">Q", node.props["base"])
+            order, = struct.unpack(">I", node.props["order"])
+            if not 3 <= order <= 64 or base % (1 << order):
+                raise ValueError("invalid OpenSBI memregion base or order")
+            region_nodes[handle] = (base, 1 << order, "mmio" in node.props)
+
+    core_base = REGIONS[0][1]
+    if domain.props.get("next-addr") != struct.pack(">Q", core_base):
+        raise ValueError(f"OP-TEE entry must be {core_base:#x}")
+    if domain.props.get("next-mode", b"\0\0\0\1") != struct.pack(">I", 1):
+        raise ValueError("OP-TEE domain must enter S-mode")
+
+    for instance, expected in ((domain, (0x38, 0x18)), (untrusted, (0, 0x18))):
+        entries = []
+        for handle, access in struct.iter_unpack(">II", instance.props.get("regions", b"")):
+            base, size, mmio = region_nodes[handle]
+            entries.append((base, size, mmio, access))
+        for (name, start, length), access in zip(REGIONS, expected):
+            exact = [(mmio, flags) for base, size, mmio, flags in entries
+                     if (base, size) == (start, length)]
+            if (len(exact) != 1 or exact[0][0] or exact[0][1] & 0x78 != access
+                    or (access == 0 and exact[0][1] & 7)):
+                raise ValueError(f"missing or invalid domain permissions for {name}")
+            if any(size < length and start < base + size and base < start + length
+                   for base, size, _, _ in entries):
+                raise ValueError(f"nested domain region overrides {name}")
+
+
 def add_mpxy(root, edit, domain_name):
     chosen = root.children["chosen"]
     domains = chosen.children["opensbi-domains"]
@@ -47,6 +80,7 @@ def add_mpxy(root, edit, domain_name):
     if (b"opensbi,domain,instance" not in
             untrusted.props.get("compatible", b"").split(b"\0")):
         raise ValueError("expected an untrusted-domain instance")
+    validate_domain_memory(domains, domain, untrusted)
     cpus = root.children["cpus"]
     hart_ids = sorted(struct.unpack(">I", node.props["reg"])[0]
                       for node in cpus.children.values()
