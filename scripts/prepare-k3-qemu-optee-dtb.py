@@ -69,6 +69,8 @@ def validate_domain_memory(domains, domain, untrusted):
 def add_mpxy(root, edit, domain_name):
     chosen = root.children["chosen"]
     domains = chosen.children["opensbi-domains"]
+    if b"opensbi,domain,config" not in domains.props.get("compatible", b"").split(b"\0"):
+        raise ValueError("/chosen/opensbi-domains requires opensbi,domain,config")
     if domain_name not in domains.children:
         raise ValueError(f"missing OpenSBI domain: /chosen/opensbi-domains/{domain_name}")
     domain = domains.children[domain_name]

@@ -66,6 +66,13 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   各領域へのより小さいポリシーの重複も拒否する。
   試験用DTBで意図した設定を受理し、Linux側にCoreの読み出し権限を付けると
   DTB生成を拒否することを確認した。
+- OpenSBIがドメイン設定を認識するため、`/chosen/opensbi-domains` の
+  `compatible = "opensbi,domain,config"` をDTB生成時に必須とした。
+  **ホスト側検査**ではこの属性が欠けた入力を拒否することを確認した。
+  **QEMUファームウェア試験**では、16 hart・2 GiBのK3 QEMUに試験用DTBと
+  OP-TEE ELFを渡し、OpenSBIのUARTログで両ドメインの登録、Core・共有領域の
+  権限、OP-TEEのS-mode開始アドレスを確認した。hartはrootに置いたままで、
+  Linuxを起動せず、OP-TEEへの制御移行も行っていない。
 - 残作業は、実起動用DTBのhart割当てと残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。
