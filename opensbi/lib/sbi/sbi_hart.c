@@ -528,11 +528,11 @@ static bool k3_root_firmware_pair(const struct sbi_scratch *scratch,
 }
 
 static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
+				    const struct sbi_domain *dom,
 				    unsigned int count, unsigned int gran,
 				    unsigned long addr_max,
 				    struct k3_root_pmp_layout *layout)
 {
-    struct sbi_domain *dom = sbi_domain_thishart_ptr();
     struct sbi_domain_memregion *reg;
     unsigned int broad = 0;
 
@@ -662,7 +662,8 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     if (!bits || bits >= __riscv_xlen) {
 	return SBI_ENOTSUPP;
     }
-    rc = k3_root_pmp_layout_build(scratch, sbi_hart_pmp_count(scratch),
+    rc = k3_root_pmp_layout_build(scratch, sbi_domain_thishart_ptr(),
+				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
 				  (1UL << bits) - 1, &layout);
     if (rc) {
@@ -783,34 +784,96 @@ static int k3_optee_pmp_transition(
     return rc;
 }
 
-/* Exercise both directions with lower privilege modes stopped. */
-static int k3_optee_pmp_boot_check(struct sbi_scratch *scratch,
-				   const struct k3_root_pmp_layout *layout)
+static int k3_optee_pmp_switch_policy(struct sbi_scratch *scratch,
+				      const struct k3_root_pmp_layout *layout,
+				      bool enter)
 {
     unsigned long host[K3_BOOT_PMP_COUNT] = {0};
     unsigned long tee[K3_BOOT_PMP_COUNT] = {0};
+    unsigned long prot, addr, order;
     unsigned int i, available;
     int rc;
 
-    if (!k3_optee_tee || k3_optee_host != sbi_domain_thishart_ptr()) {
-	return 0;
-    }
     rc = k3_optee_pmp_plan(layout, k3_optee_tee, tee, &available);
     if (rc) {
 	return rc;
     }
     for (i = 0; i < layout->regular; i++) {
-	if (available & (1U << i)) {
-	    host[i] = k3_root_pmp_permissions(layout->region[i]);
+	host[i] = k3_root_pmp_permissions(layout->region[i]);
+	if (!(available & (1U << i)) && (host[i] & (PMP_R | PMP_W | PMP_X))) {
+	    return SBI_EDENIED;
+	}
+    }
+    for (i = 0; i < K3_BOOT_PMP_COUNT; i++) {
+	if (!(layout->slots.keystone_mask & (1U << i))) {
+	    continue;
+	}
+	rc = pmp_get(i, &prot, &addr, &order);
+	if (rc || ((prot & PMP_A) && (prot & (PMP_R | PMP_W | PMP_X)))) {
+	    return SBI_EDENIED;
 	}
     }
     host[layout->slots.fallback_index] = k3_root_pmp_permissions(layout->fallback);
 
-    rc = k3_optee_pmp_transition(scratch, layout, available, host, tee);
+    return k3_optee_pmp_transition(scratch, layout, available,
+				   enter ? host : tee, enter ? tee : host);
+}
+
+/* Only the trusted domain-context path may call this. Domain assignment
+ * and CPU state still belong to the caller until the CSR update succeeds.
+ */
+int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target)
+{
+    extern int cpu_is_enclave_context(void);
+    const struct sbi_domain *source = sbi_domain_thishart_ptr();
+    struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+    struct k3_root_pmp_layout layout;
+    unsigned int bits;
+    bool enter;
+    int rc;
+
+    if (!k3_optee_host || !k3_optee_tee) {
+	return SBI_ENOTSUPP;
+    }
+    enter = source == k3_optee_host && target == k3_optee_tee;
+    if ((!enter && !(source == k3_optee_tee && target == k3_optee_host)) ||
+	!sbi_hartmask_test_hartindex(current_hartindex(), target->possible_harts) ||
+	cpu_is_enclave_context()) {
+	return SBI_EDENIED;
+    }
+    bits = sbi_hart_pmp_addrbits(scratch);
+    if (!bits || bits >= __riscv_xlen) {
+	return SBI_ENOTSUPP;
+    }
+    /* Resolve the Linux allocation even when returning from OP-TEE. */
+    rc = k3_root_pmp_layout_build(scratch, k3_optee_host,
+				  sbi_hart_pmp_count(scratch),
+				  sbi_hart_pmp_log2gran(scratch),
+				  (1UL << bits) - 1, &layout);
     if (rc) {
 	return rc;
     }
-    rc = k3_optee_pmp_transition(scratch, layout, available, tee, host);
+    rc = sbi_hart_keystone_verify_extra_pmp(scratch);
+    if (rc) {
+	return rc;
+    }
+    return k3_optee_pmp_switch_policy(scratch, &layout, enter);
+}
+
+/* Exercise both directions with lower privilege modes stopped. */
+static int k3_optee_pmp_boot_check(struct sbi_scratch *scratch,
+				   const struct k3_root_pmp_layout *layout)
+{
+    int rc;
+
+    if (!k3_optee_tee || k3_optee_host != sbi_domain_thishart_ptr()) {
+	return 0;
+    }
+    rc = k3_optee_pmp_switch_policy(scratch, layout, true);
+    if (rc) {
+	return rc;
+    }
+    rc = k3_optee_pmp_switch_policy(scratch, layout, false);
     if (!rc) {
 	K3_PMP_TRACE("OP-TEE fixed-slot round trip PASS hart=%lu\n",
 		     csr_read(CSR_MHARTID));
@@ -901,7 +964,8 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
 	return SBI_ENOTSUPP;
     }
     addr_max = (1UL << bits) - 1;
-    rc = k3_root_pmp_layout_build(scratch, sbi_hart_pmp_count(scratch),
+    rc = k3_root_pmp_layout_build(scratch, sbi_domain_thishart_ptr(),
+				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch), addr_max,
 				  &layout);
     if (rc) {
@@ -920,7 +984,8 @@ static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
     unsigned long prot, addr, len;
     int rc;
 
-    rc = k3_root_pmp_layout_build(scratch, count, gran, addr_max, &layout);
+    rc = k3_root_pmp_layout_build(scratch, sbi_domain_thishart_ptr(),
+				  count, gran, addr_max, &layout);
     if (rc) {
 	return rc;
     }
