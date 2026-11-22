@@ -65,3 +65,28 @@ qemu-system-riscv64 -M jupiter2 \
 `SM initialized`、`K3: S-mode handoff reached` を確認する。
 ペイロードは出力後に待機する。QEMUを終了してログを保存する。
 試験範囲はファームウェアからの初回引き渡しまで。
+
+## K3 QEMUでのLinux引き渡し試験
+
+カーネルからユーザー空間までの到達を確認するには、上記QEMUコマンドの
+`-kernel entry.bin` を `-kernel Image` に変更し、
+`-initrd initramfs.cpio -append 'console=ttyS0,115200 earlycon=sbi rdinit=/init'`
+を加える。initramfsは以下のように作成できる。`gen_init_cpio` は
+Linuxビルドディレクトリの `usr/gen_init_cpio` を使う。
+
+```sh
+riscv64-linux-gnu-gcc -static -O2 -Wall -Wextra -o linux-boot-init \
+    verifications/optee-coexistence/linux-boot-init.c
+cat > initramfs.list <<EOF_LIST
+dir /dev 0755 0 0
+nod /dev/console 0600 0 0 c 5 1
+dir /proc 0555 0 0
+dir /sys 0555 0 0
+file /init ./linux-boot-init 0755 0 0
+EOF_LIST
+gen_init_cpio initramfs.list > initramfs.cpio
+```
+
+UARTの `K3 Linux userspace reached` とオンラインCPU数を記録する。
+LinuxとKeystone SMの起動確認を対象とする。Enclaveの実行やOP-TEEへの
+通信は同居ゲスト試験で確認する。

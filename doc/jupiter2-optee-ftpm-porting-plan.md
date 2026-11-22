@@ -83,6 +83,12 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   16 hart・2 GiBで、boot hartの `untrusted-domain` 所属、Keystone SMの
   初期化完了、`0x102200000` のペイロードからのSBIコンソール出力を確認した。
   OP-TEE ELFもロードしたが、OP-TEEへの制御移行は行っていない。
+- **QEMUのLinux起動試験**では、Debianの
+  `6.12.107+deb13-riscv64` と[最小initramfs](../verifications/optee-coexistence/README.md)を
+  使い、同居用DTB、Keystone SM入りOpenSBI、OP-TEE ELFを渡した。
+  UARTでLinuxの `/init` 実行と16 CPUオンラインを確認した。
+  比較用のDebianカーネルでの結果で、Jupiter2の `linux-k3` では未確認。
+  OP-TEEはELFのロードまでで、Enclave実行とTA呼び出しも未実施。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。
