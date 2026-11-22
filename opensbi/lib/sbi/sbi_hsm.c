@@ -225,8 +225,13 @@ void __noreturn sbi_hsm_hart_start_finish(struct sbi_scratch *scratch,
 		k3_e2_boot_finished=1;
 	} else {
 		extern int k3_keystone_hsm_start_finish(unsigned int);
-		if (k3_keystone_hsm_start_finish(sbi_hartid_to_hartindex(hartid)))
+		int rc = k3_keystone_hsm_start_finish(sbi_hartid_to_hartindex(hartid));
+
+		if (rc) {
+		    sbi_printf("K3 HSM: start finish failed on hart %u (%d)\n",
+			       hartid, rc);
 			sbi_hart_hang();
+		}
 	}
 #else
 	if (!__sbi_hsm_hart_change_state(hdata, SBI_HSM_STATE_START_PENDING,

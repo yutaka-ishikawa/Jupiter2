@@ -13,6 +13,7 @@
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_barrier.h>
 #include <sbi/sbi_hsm.h>
+#include <sbi/sbi_timer.h>
 #include <sbi/sbi_ecall_interface.h>
 #include <sbi/sbi_error.h>
 #include "k3_pmp_ipi_transport.h"
@@ -248,13 +249,29 @@ int k3_keystone_hsm_boot_stop_begin(void)
     return 0;
 }
 
+#define K3_HSM_FINISH_TIMEOUT_MS 100
+
+static bool k3_hsm_try_gate(void *gate)
+{
+    return !k3_hsm_gate_acquire(gate);
+}
+
 /* Hart-specific finish/cancel: only a matching outstanding reservation is released. */
 static int k3_keystone_hsm_release_reservation(unsigned int hartindex,
                                                int completed)
 {
   int rc;
   if (hartindex >= 16U) return SBI_EINVAL;
-  if (k3_hsm_gate_acquire(&k3_global_hsm_gate)) return SBI_EINVALID_STATE;
+  if (k3_hsm_gate_acquire(&k3_global_hsm_gate)) {
+    if (!completed || !sbi_timer_get_device()) {
+	return SBI_EINVALID_STATE;
+    }
+    /* Retry only before touching the ledger or publishing STARTED. */
+    if (!sbi_timer_waitms_until(k3_hsm_try_gate, &k3_global_hsm_gate,
+			       K3_HSM_FINISH_TIMEOUT_MS)) {
+	return SBI_ETIMEDOUT;
+    }
+  }
   if (k3_policy_lock(&k3_start_policy)) {
     __atomic_store_n(&k3_sync_poisoned, 1, __ATOMIC_RELEASE);
     k3_hsm_gate_release(&k3_global_hsm_gate);
