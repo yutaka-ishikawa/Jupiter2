@@ -60,6 +60,11 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   hart順で生成し、Linux側ではTEEプロトコルID 2と組み合わせる。
   生成結果はQEMU由来のDTBに試験用domainノードを加え、`fdtget` で照合した。
   この検査にドメインの起動やPMP切替は含まれない。
+- 同居のOP-TEE先行起動試験では `--optee-first` を指定する。入力の
+  `untrusted-domain` にhart 0のCPU phandleを指す `boot-hart` と、Linuxの
+  `next-addr`（このQEMUプロファイルでは `0x102200000`）を設定する。
+  全16 hartを起動時にOP-TEEへ割り当て、DTBの物理範囲 `0x181e00000` から
+  2 MiBとGEU・PMUMAIN・PMU APの定義を固定PMP計画に含める。
 - DTB生成時に、OP-TEEのS-mode開始アドレス（`0x171000000`）と
   Core・共有領域のOpenSBIドメイン権限を検査する。CoreはOP-TEE側でRWX、
   Linux側でアクセス不可とし、共有領域は両側でRWとする。

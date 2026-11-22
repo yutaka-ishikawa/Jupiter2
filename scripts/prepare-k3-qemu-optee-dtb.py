@@ -110,7 +110,7 @@ def add_fixed_regions(domains, domain_name, edit, first_handle):
              *(f"{cell:x}" for entry in entries for cell in entry))
 
 
-def add_mpxy(root, edit, domain_name):
+def add_mpxy(root, edit, domain_name, optee_first):
     chosen = root.children["chosen"]
     domains = chosen.children["opensbi-domains"]
     if b"opensbi,domain,config" not in domains.props.get("compatible", b"").split(b"\0"):
@@ -138,8 +138,11 @@ def add_mpxy(root, edit, domain_name):
     untrusted_handle, = struct.unpack(">I", untrusted.props["phandle"])
     if not untrusted_handle:
         raise ValueError("invalid untrusted-domain phandle")
-    assignment = struct.pack(">I", untrusted_handle)
-    if any(node.props.get("opensbi-domain", assignment) != assignment
+    trusted_handle, = struct.unpack(">I", domain.props["phandle"])
+    assignment = trusted_handle if optee_first else untrusted_handle
+    encoded_assignment = struct.pack(">I", assignment)
+    accepted = {struct.pack(">I", untrusted_handle), encoded_assignment}
+    if any(node.props.get("opensbi-domain", encoded_assignment) not in accepted
            for _, _, node in cpu_nodes):
         raise ValueError("conflicting OpenSBI hart assignment")
     if "boot-hart" in domain.props:
@@ -148,6 +151,12 @@ def add_mpxy(root, edit, domain_name):
                    for _, _, node in cpu_nodes]
     if not all(cpu_handles):
         raise ValueError("invalid CPU phandle")
+    if optee_first:
+        if untrusted.props.get("boot-hart") != struct.pack(">I", cpu_handles[0]):
+            raise ValueError("OP-TEE-first layout requires Linux boot-hart to reference hart 0")
+        next_addr, = struct.unpack(">Q", untrusted.props.get("next-addr", bytes(8)))
+        if not next_addr or next_addr % 2:
+            raise ValueError("OP-TEE-first layout requires a valid Linux next-addr")
 
     handles = set()
     channel_ids = tuple(range(0x1000, 0x1010))
@@ -171,7 +180,6 @@ def add_mpxy(root, edit, domain_name):
             scan(child)
 
     scan(root)
-    trusted_handle = struct.unpack(">I", domain.props["phandle"])[0]
     mailbox_handle = max(handles) + 1
     if not trusted_handle or mailbox_handle + len(FIXED_REGIONS) >= 0xffffffff:
         raise ValueError("invalid domain phandle or exhausted phandle space")
@@ -184,7 +192,7 @@ def add_mpxy(root, edit, domain_name):
 
     for _, name, _ in cpu_nodes:
         edit(["-t", "x"], f"/cpus/{name}", "opensbi-domain",
-             f"{untrusted_handle:x}")
+             f"{assignment:x}")
     for name in (domain_name, "untrusted-domain"):
         edit(["-t", "x"], f"/chosen/opensbi-domains/{name}", "possible-harts",
              *(f"{handle:x}" for handle in cpu_handles))
@@ -231,7 +239,7 @@ def ensure_firmware_heap(root, edit):
     edit(["-t", "x"], path, "heap-size", f"{MIN_FIRMWARE_HEAP:x}")
 
 
-def prepare(source, output, domain_name=DEFAULT_DOMAIN):
+def prepare(source, output, domain_name=DEFAULT_DOMAIN, optee_first=False):
     data = source.read_bytes()
     root, occupied = read_tree(data)
     cells = struct.pack(">I", 2)
@@ -279,7 +287,7 @@ def prepare(source, output, domain_name=DEFAULT_DOMAIN):
             edit(["-t", "x"], path, "reg", f"{start >> 32:x}",
                  f"{start & 0xffffffff:x}", "0", f"{size:x}")
             edit([], path, "no-map")
-        add_mpxy(root, edit, domain_name)
+        add_mpxy(root, edit, domain_name, optee_first)
         ensure_firmware_heap(root, edit)
         os.link(staged, output)
 
@@ -290,9 +298,11 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--mpxy-domain", metavar="NAME", default=DEFAULT_DOMAIN,
                         help=f"trusted OpenSBI domain name (default: {DEFAULT_DOMAIN})")
+    parser.add_argument("--optee-first", action="store_true",
+                        help="assign harts to OP-TEE before the Linux handoff")
     args = parser.parse_args()
     try:
-        prepare(args.input, args.output, args.mpxy_domain)
+        prepare(args.input, args.output, args.mpxy_domain, args.optee_first)
     except (OSError, ValueError, KeyError, struct.error,
             subprocess.CalledProcessError) as error:
         parser.exit(1, f"{parser.prog}: {error}\n")
