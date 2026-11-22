@@ -5,6 +5,7 @@
 #include "keystone.h"
 #include "keystone-sbi.h"
 #include "keystone_user.h"
+#include "sm_err.h"
 #include <asm/sbi.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
@@ -114,6 +115,14 @@ int keystone_finalize_enclave(unsigned long arg)
 
     if (ret.error == SBI_ERR_INVALID_STATE) {
 	return -EAGAIN;
+    }
+
+    if (ret.error == SBI_ERR_SM_ENCLAVE_CREATE_QUARANTINED) {
+	/* Keep the EID so DESTROY and close consult the SM before freeing. */
+	enclave->eid = ret.value;
+	enclave->is_init = false;
+	keystone_err("CREATE PMP state uncertain; retaining enclave pages\n");
+	return -EIO;
     }
 
     if (ret.error) {

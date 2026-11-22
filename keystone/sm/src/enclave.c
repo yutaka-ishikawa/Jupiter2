@@ -529,6 +529,9 @@ create_enclave_internal(unsigned long *eidptr,
     pmp_rc = pmp_set_global(region, PMP_NO_PERM);
     SM_TRACE_RESULT("CREATE pmp-global end", pmp_rc);
     if (pmp_rc) {
+	if (!k3_pmp_sync_healthy()) {
+	    goto quarantine;
+	}
 	goto free_shared_region;
     }
 
@@ -592,7 +595,9 @@ unlock:
     // free_platform:
     platform_destroy_enclave(&enclaves[eid]);
 unset_region:
-    pmp_unset_global(region);
+    if (pmp_unset_global(region)) {
+	goto quarantine;
+    }
 free_shared_region:
     pmp_region_free_atomic(shared_region);
 free_region:
@@ -605,6 +610,16 @@ free_encl_idx:
     encl_free_eid(eid);
 error:
     return ret;
+
+quarantine:
+    /* A late IPI may still use this PMP descriptor. Preserve the
+     * allocations and give the driver an EID that cannot be destroyed.
+     */
+    spin_lock(&encl_lock);
+    enclaves[eid].state = DESTROYING;
+    spin_unlock(&encl_lock);
+    *eidptr = eid;
+    return SBI_ERR_SM_ENCLAVE_CREATE_QUARANTINED;
 }
 
 /*
