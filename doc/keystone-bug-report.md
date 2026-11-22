@@ -107,7 +107,7 @@
 | KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
 | KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | K3 QEMUでLinuxのRFENCEを処理し、TAとEnclaveの完了を確認 |
 | KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時の一時的なゲート競合で副hartを停止 | 取得を再試行するよう修正し、K3 QEMUで強制競合と反復起動を確認 |
-| KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | 原因未確定。TAロード後に発生 | `/dev/tpmrm0` 経由の応答を確認済み。反復時の安定性は未確認 |
+| KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | LinuxがOP-TEEストレージRPCの完了を待機。完了が遅延する原因は未確定 | TPMデバイス登録時と電源断時に待機スタックを採取 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1403,3 +1403,17 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   supplicantをCPU 0に固定した構成で同じ応答と電源断を確認した。
 - 停止箇所の関数、CPU割当てとの因果、実機での再現性は未確定。
   手順は [fTPM TAのビルドとQEMU試験](jupiter2-ftpm-ta-test.md) を参照。
+- 診断用initで16 hart QEMUを5回起動し、3回はTPM応答と電源断に成功した。
+  1回はTPM応答後の電源断で、もう1回はモジュール登録中に105秒のホスト側制限に
+  達した。登録中のPID 1は `finit_module → ftpm_tee_probe → tpm_chip_register
+  → tpm2_auto_startup → tpm2_get_cc_attrs_tbl → tpm2_get_tpm_pt` の
+  TPMプロパティ取得から、OP-TEEの `handle_rpc_supp_cmd → optee_supp_thrd_req`
+  に入り、RPC応答を待っていた。電源断時も `tpm2_shutdown` から同じRPC待機に入った。
+- 待機前のUARTにはTAの `syscall_storage_obj_open` が出ていた。登録中の別試行では
+  `optee_open_session` からも同じRPC待機を確認した。登録中・電源断時とも
+  `tee-supplicant` は生存し、採取したスタックには `optee_supp_recv` で
+  次の要求を待つスレッドがあった。これらのスタックだけでは、対象要求が
+  受信前、処理中、応答後の呼出元起床待ちのどこにあったかは確定できない。
+- 過去の180秒・300秒タイムアウトのTAシステムコール列は、それぞれ成功時の先頭
+  3,147件・1,685件と一致した。途切れた地点が異なるため、最終UART行だけで
+  失敗したTA関数を断定できない。今回確認できた停止箇所はLinux側のRPC完了待ち。
