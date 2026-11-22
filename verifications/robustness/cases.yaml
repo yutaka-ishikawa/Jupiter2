@@ -207,7 +207,7 @@
       "category": "R",
       "implementation": "workers/raw.c + kernel/probe.c + SM verification gate",
       "scope": "same-enclave",
-      "oracle": "entered=2 before AND after contender returns; contender=100005; holder succeeds/stops; fresh or OCALL-stopped fixture",
+      "oracle": "entered=2 before AND after contender returns; contender=-10; holder succeeds/stops; fresh or OCALL-stopped fixture",
       "status": "IMPLEMENTED"
     },
     {

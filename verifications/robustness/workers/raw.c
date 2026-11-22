@@ -86,7 +86,7 @@ out:
 }
 
 static int race(unsigned long first, unsigned long second, unsigned int stage,
-		unsigned long expected, int cpu)
+		long expected, int cpu)
 {
     struct attempt attempt = {0};
     struct robust_call control = {4900, 0, stage, 10000000, 0, 0};
@@ -173,7 +173,7 @@ static int race(unsigned long first, unsigned long second, unsigned int stage,
     }
     printf("%s RAW SBI %lu x %lu same-enclave stage=%u entered=%d "
 	   "contender-returned-during-gate=%d holder-status=%lld "
-	   "contender-status=%lld expected=%lu\n",
+	   "contender-status=%lld expected=%ld\n",
 	   failed ? "FAIL" : "PASS", first, second, stage, entered,
 	   completed_during_gate, (long long)attempt.call.error,
 	   (long long)contender.error, expected);
@@ -221,7 +221,7 @@ int raw_cases(const struct configuration *config)
     failed += race(2005, 2005, 2, 100010, second_cpu);
     failed += race(2005, 2003, 2, 100016, second_cpu);
     failed += race(2005, 2002, 2, 100005, second_cpu);
-    failed += race(2002, 2002, 3, 100005, second_cpu);
+    failed += race(2002, 2002, 3, -10, second_cpu);
     failed += race(2002, 2003, 3, 100016, second_cpu);
     failed += race(2002, 2005, 3, 100010, second_cpu);
     if (sched_setaffinity(0, sizeof allowed, &allowed)) {

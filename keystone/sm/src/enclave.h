@@ -28,6 +28,7 @@ typedef enum {
   FRESH,
   STOPPED,
   RUNNING,
+  EXITED,
 } enclave_state;
 
 /* For now, eid's are a simple unsigned int */

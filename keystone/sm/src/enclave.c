@@ -623,7 +623,8 @@ unsigned long destroy_enclave(enclave_id eid)
 
     spin_lock(&encl_lock);
     destroyable = (ENCLAVE_EXISTS(eid) && (enclaves[eid].state == FRESH ||
-					   enclaves[eid].state == STOPPED));
+					   enclaves[eid].state == STOPPED ||
+					   enclaves[eid].state == EXITED));
     /* update the enclave state first so that
      * no SM can run the enclave any longer */
     if (destroyable) {
@@ -742,23 +743,27 @@ unsigned long run_enclave(struct sbi_trap_regs *regs, enclave_id eid)
 
 unsigned long exit_enclave(struct sbi_trap_regs *regs, enclave_id eid)
 {
-  int exitable;
+    int exitable;
 
-  spin_lock(&encl_lock);
-  exitable = enclaves[eid].state == RUNNING;
-  if (exitable) {
+    spin_lock(&encl_lock);
+    exitable = ENCLAVE_EXISTS(eid) && enclaves[eid].state == RUNNING &&
+		enclaves[eid].n_thread > 0;
+    spin_unlock(&encl_lock);
+    if (!exitable) {
+	return SBI_ERR_SM_ENCLAVE_NOT_RUNNING;
+    }
+
+    /* Keep the enclave alive until its context and PMP state are saved. */
+    context_switch_to_host(regs, eid, 0);
+
+    spin_lock(&encl_lock);
     enclaves[eid].n_thread--;
-    if(enclaves[eid].n_thread == 0)
-      enclaves[eid].state = STOPPED;
-  }
-  spin_unlock(&encl_lock);
+    if (enclaves[eid].n_thread == 0) {
+	enclaves[eid].state = EXITED;
+    }
+    spin_unlock(&encl_lock);
 
-  if(!exitable)
-    return SBI_ERR_SM_ENCLAVE_NOT_RUNNING;
-
-  context_switch_to_host(regs, eid, 0);
-
-  return SBI_ERR_SM_ENCLAVE_SUCCESS;
+    return SBI_ERR_SM_ENCLAVE_SUCCESS;
 }
 
 unsigned long stop_enclave(struct sbi_trap_regs *regs, uint64_t request,

@@ -9,6 +9,8 @@
 #include <linux/uaccess.h>
 #include <linux/string.h>
 #include <linux/module.h>
+#include <linux/delay.h>
+#include <linux/jiffies.h>
 
 int __keystone_destroy_enclave(unsigned int ueid);
 
@@ -47,6 +49,8 @@ int keystone_finalize_enclave(unsigned long arg)
     struct enclave *enclave;
     struct utm *utm;
     struct keystone_sbi_create_t create_args;
+    struct keystone_sbi_create_v2 extended = {0};
+    unsigned long deadline;
 
     struct keystone_ioctl_create_enclave *enclp =
 	(struct keystone_ioctl_create_enclave *)arg;
@@ -82,18 +86,34 @@ int keystone_finalize_enclave(unsigned long arg)
     create_args.free_requested = enclp->free_requested;
 
     if (enclave->backing) {
-	struct keystone_sbi_create_v2 extended = {0};
-
 	extended.version = KEYSTONE_CREATE_V2_VERSION;
 	extended.bytes = sizeof extended;
 	extended.base = create_args;
 	extended.backing.paddr = enclave->backing->pa;
 	extended.backing.size = enclave->backing->size;
-	ret = sbi_ecall(SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE,
-			SBI_SM_CREATE_ENCLAVE_V2, (unsigned long)&extended, 0,
-			0, 0, 0, 0);
-    } else {
-	ret = sbi_sm_create_enclave(&create_args);
+    }
+
+    /* OpenSBI returns INVALID_STATE before starting CREATE when its
+     * update reservation is busy. The same request can be retried.
+     */
+    deadline = jiffies + msecs_to_jiffies(1000);
+    do {
+	if (enclave->backing) {
+	    ret = sbi_ecall(SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE,
+			    SBI_SM_CREATE_ENCLAVE_V2,
+			    (unsigned long)&extended, 0, 0, 0, 0, 0);
+	} else {
+	    ret = sbi_sm_create_enclave(&create_args);
+	}
+
+	if (ret.error != SBI_ERR_INVALID_STATE) {
+	    break;
+	}
+	usleep_range(500, 1000);
+    } while (time_before(jiffies, deadline));
+
+    if (ret.error == SBI_ERR_INVALID_STATE) {
+	return -EAGAIN;
     }
 
     if (ret.error) {

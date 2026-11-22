@@ -66,7 +66,7 @@
 | KSB-038 | fib-benchのrdcycleがillegal instruction | hostのcounter許可に依存 | samplesをrdtimeへ適合・実QEMU PASS |
 | KSB-039 | 新共通runnerがLinux syscall OCALLを配送しない | 本作業の草稿 | 修正済・実QEMU PASS |
 | KSB-040 | attestor自身の2048-byte転送・status未検査 | 上流examples/attestation | samples側修正済・実QEMU PASS（元版保持） |
-| KSB-042 | EXIT後のRESUMEが再進入を許す | SM状態遷移・由来未確定 | 実QEMUで再現・未修正 |
+| KSB-042 | EXIT後のRESUMEが再進入を許す | EXITが再開可能なSTOPPEDへ遷移 | EXITEDを追加し、16 hart QEMUで再開拒否とDESTROYを確認 |
 | KSB-043 | 並行PMP更新の一時競合でDESTROYが回収不能になる | K3移植のHSM/PMP admission | 実QEMUで再現・未修正 |
 | KSB-044 | CREATE失敗時のPMP rollback結果を検査しない | SM CREATE cleanup・由来未確定 | ソース確認・障害注入による実証前 |
 | KSB-045 | MPXY共有メモリーの丸め値がbytesではなくpage数になる | OpenSBI取込コード・上流修正照合済み | 修正済み（`d32afa86c`）・実ゲスト未検証 |
@@ -691,12 +691,16 @@ STOPPEDかつ `n_thread < MAX_ENCL_THREADS` を受理するため、EXIT済みco
 ならず、実QEMUで `[runtime] page fault ... scause: 0xd` に到達した。
 これは新C clientがSMを模擬した結果ではなく、production driver→実SM/Eyrieでの再現。
 原版との差分照合前なので上流由来とは断定しない。通常のEXIT→DESTROYだけの
-既存試験では検出されなかった。未修正。再開禁止と破棄可能状態を区別する必要がある。
+既存試験では検出されなかった。
 再現手順・採用成果物hashは [robustness](../verifications/robustness/README.md) と
 同ディレクトリのevidenceに記録する。新試験はこの挙動をFAILのまま扱う。
 
 - KSB-084修正後の16 hart同居QEMUでも `robustness --lifecycle-only` の
   `A-2005-02/after-exit` が失敗し、RESUMEでEyrieのpage faultを再確認した。
+- ホストのコンテキストとPMPポリシーの復元後に、終了したEnclaveをEXITEDにする。
+  DESTROYはEXITEDも回収対象とする。16 hart同居QEMUで
+  `A-2005-02/after-exit`、ライフサイクル・リソース寿命、STOP/RESUME、
+  edgecall 2 MiB・256 MiBが成功した。
 
 ## KSB-043: 並行CREATE/DESTROYのPMP admission競合で回収不能
 
@@ -1489,3 +1493,20 @@ SBIエラー検査、STOP/RESUME、乱数、crypto未対応構成、edgecall 2 M
 - DESTROY競合とclose遅延解放の既存fixtureは、最初のDESTROYが成功して
   `-EAGAIN` の判定に到達しなかった。今回の通常ファームウェアでの実測では
   競合経路の成功を確認できなかった。
+
+#### 不合格項目の再試験
+
+- CREATEとCREATE_V2は、SMが更新処理に入る前に返すSBI `-10` だけをLinux側で
+  最大1秒再試行する。期限に達したときは `-EAGAIN` を返す。
+  診断用ドライバーでは、同居構成で16回再試行したCREATEの成功を観測した。
+  元の2 worker試験は、同居構成で `-10` に代わりPMP枯渇 `100003` が出た。
+  Keystone単独構成での並行試験もPMP全hart更新の失敗で完走に至らなかった。
+  backingなしの診断試験ではCREATEの再試行後の成功を2件観測した。
+  一方のworkerは明示DESTROY後に失敗し、cleanupのDESTROYが
+  `-EAGAIN` を返した。試験全体は終了値1。
+- 同一Enclaveを対象にした直接SBI試験は、DESTROY同士の一時競合に
+  `-10` を期待するよう更新した。検証用SMを使った16 hart QEMUで
+  RUN／RESUME／DESTROYの9組すべてに合格した。
+- Linuxサンプル試験のUARTに `/dev/kmsg` の合格行を出すため
+  `printk.devkmsg=on` を追加した。一律PMPと混在PMPの両方で
+  CPU 3・8上の `hello` と `hello-native` が終了値0と明示DESTROYを返した。

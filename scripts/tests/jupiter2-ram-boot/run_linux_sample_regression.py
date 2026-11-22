@@ -50,7 +50,8 @@ def main():
                        "rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16,sstc=on",
                        "-bios", str(firmware.resolve()), "-kernel", str(args.kernel.resolve()),
                        "-initrd", str(args.initrd.resolve()), "-append",
-                       "console=ttyS0,115200 earlycon=sbi rdinit=/init loglevel=7 panic=-1",
+                       "console=ttyS0,115200 earlycon=sbi printk.devkmsg=on "
+                       "rdinit=/init loglevel=7 panic=-1",
                        "-display", "none", "-serial", "stdio", "-monitor", "none", "-no-reboot"]
             record = {"firmware": name, "profile": profile, "command": command,
                       "log": logpath.name, "pass": False}

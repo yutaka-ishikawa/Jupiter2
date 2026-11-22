@@ -37,6 +37,18 @@ bash /mnt/host/verifications/sbi-4000/run-guest.sh
 旧rootfs内のdriverでは新IOCTLが利用できないため、更新後にゲストを再起動する。
 モジュールは未ロード時に実行スクリプトがロードする。
 
+## PMP容量とQEMU構成
+
+16 hartのKeystone・OP-TEE同居構成では、Keystoneに割り当てられるPMPは
+5枠。1 EnclaveでEPMとUTMに最低2枠を使い、backing付きなら最低3枠。
+TORで表現する範囲にはさらに枠を使う。このため同居時は、全範囲を
+1枠ずつで表現できる場合でも、backing付きEnclaveを同時に2つは保持できない。
+
+2つのbacking付きEnclaveを使う本試験の正常経路は、OP-TEEを組み込まない
+Keystone単独のQEMU構成で実行する。16 hart・2 GiB・Keystone用9枠で、
+同じLinux Imageと再ビルドしたdriverを使った `run-guest.sh` が終了値0だった。
+同居構成のPMP枠不足は、追加登録を拒否する条件として扱う。
+
 ## plugin無効profile
 
 既定のK3ビルドはmultimem有効。無効profileは明示的に別出力へ作る：
