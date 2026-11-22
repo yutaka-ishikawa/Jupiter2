@@ -73,7 +73,12 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   OP-TEE ELFを渡し、OpenSBIのUARTログで両ドメインの登録、Core・共有領域の
   権限、OP-TEEのS-mode開始アドレスを確認した。hartはrootに置いたままで、
   Linuxを起動せず、OP-TEEへの制御移行も行っていない。
-- 残作業は、実起動用DTBのhart割当てと残りのメモリー・MMIOポリシーの確定、共通PMP
+- DTB生成は16 hartを初期状態で `untrusted-domain` に割り当て、
+  両ドメインの `possible-harts` に登録する。両ドメインに `phandle` が必要。
+  **QEMUファームウェア試験**では、この割当てで起動し、boot hartの
+  `untrusted-domain` 所属と、Core領域のS/Uアクセス禁止・共有領域RWに対応する
+  PMP設定のOpenSBI読戻し成功をUARTで確認した。LinuxとOP-TEEは未起動。
+- 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。
 

@@ -84,11 +84,26 @@ def add_mpxy(root, edit, domain_name):
         raise ValueError("expected an untrusted-domain instance")
     validate_domain_memory(domains, domain, untrusted)
     cpus = root.children["cpus"]
-    hart_ids = sorted(struct.unpack(">I", node.props["reg"])[0]
-                      for node in cpus.children.values()
-                      if node.props.get("device_type") == b"cpu\0")
-    if hart_ids != list(range(16)):
-        raise ValueError("MPXY layout requires harts 0 through 15")
+    cpu_nodes = sorted((struct.unpack(">I", node.props["reg"])[0], name, node)
+                       for name, node in cpus.children.items()
+                       if node.props.get("device_type") == b"cpu\0")
+    if ([hart for hart, _, _ in cpu_nodes] != list(range(16)) or
+            any(node.props.get("status", b"okay\0") not in (b"okay\0", b"ok\0")
+                for _, _, node in cpu_nodes)):
+        raise ValueError("MPXY layout requires enabled harts 0 through 15")
+    untrusted_handle, = struct.unpack(">I", untrusted.props["phandle"])
+    if not untrusted_handle:
+        raise ValueError("invalid untrusted-domain phandle")
+    assignment = struct.pack(">I", untrusted_handle)
+    if any(node.props.get("opensbi-domain", assignment) != assignment
+           for _, _, node in cpu_nodes):
+        raise ValueError("conflicting OpenSBI hart assignment")
+    if "boot-hart" in domain.props:
+        raise ValueError("OP-TEE domain must not boot a hart independently")
+    cpu_handles = [struct.unpack(">I", node.props["phandle"])[0]
+                   for _, _, node in cpu_nodes]
+    if not all(cpu_handles):
+        raise ValueError("invalid CPU phandle")
 
     handles = set()
     channel_ids = tuple(range(0x1000, 0x1010))
@@ -120,6 +135,13 @@ def add_mpxy(root, edit, domain_name):
     def new_node(path, compatible):
         edit(["-c"], path)
         edit(["-t", "s"], path, "compatible", compatible)
+
+    for _, name, _ in cpu_nodes:
+        edit(["-t", "x"], f"/cpus/{name}", "opensbi-domain",
+             f"{untrusted_handle:x}")
+    for name in (domain_name, "untrusted-domain"):
+        edit(["-t", "x"], f"/chosen/opensbi-domains/{name}", "possible-harts",
+             *(f"{handle:x}" for handle in cpu_handles))
 
     opteed = "/chosen/sbi-mpxy-opteed"
     new_node(opteed, "riscv,sbi-mpxy-opteed")
