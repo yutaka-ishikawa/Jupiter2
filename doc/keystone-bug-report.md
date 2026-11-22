@@ -99,7 +99,7 @@
 | KSB-072 | QEMU回帰試験が実機の混在PMP・粒度・domain条件を含まない | Jupiter2部分モデルと試験範囲の制約 | 混在PMP/4 KiBオプション実装、実機相当domain等は未実装 |
 | KSB-073 | 全16 CPU起動後、hello二種のhost runnerがload access faultで停止 | K3の独立UTM割当てとホストPMP復帰の不整合 | SM修正・実QEMUで旧版の障害再現、修正版hello二種8回PASS、実機再試験待ち |
 | KSB-074 | OPTEEDの呼出元・メッセージ長・切替結果の検査不足 | OpenSBI取込コードとK3 Keystone切替ガードの接続 | 修正済み（`4b0f75220`）、実ゲストのMPXYは未検証 |
-| KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 保存・復元を実装、期限を指定した試験は未実施 |
+| KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 試験的な変更を取り消し、同居時の影響は未確認 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
 「取込コード」は本リポジトリで修正前のコードを確認できるという意味。
@@ -1195,11 +1195,9 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - 対象は取込済みのOpenSBI `sbi_domain_context.c`。Sstcを備えたhartでの切替時に
   `stimecmp` が保存・復元の対象外だった。ソース上、切替元の期限が切替先にも
   適用され、切替先が期限を上書きすると切替元へ復帰した後もその値が残る。
-- K3 Keystone構成の切替経路で、hart・ドメインごとに `stimecmp` を保存して復元し、
-  初回切替では最大値を設定する。Sstcを持たないhartのタイマー経路は別途対応する。
+- `5008b3157` ではK3 Keystone構成の切替経路に `stimecmp` の保存・復元を追加した。
 - 通常のOP-TEE構成にも適用した試行では、K3 QEMUのLinuxがOP-TEEの非同期通知設定を
   読んだ後にドライバ初期化を完了せず、試験がタイムアウトした。通常構成から適用を
-  外した。停止の原因は未特定で、同居経路の有効化前に切り分ける。
-- 最終差分で両構成をビルドし、16 hartのK3 QEMUでKeystone単独の `hello` と
-  `hello-native`、OP-TEE単独の16 CPU並行TA呼出しを確認した。タイマーの期限を
-  指定した切替試験、Keystone・OP-TEE同居、実機は未検証。
+  外した。停止の原因は未特定。
+- 同居構成で保存・復元が必要という実行結果が得られていないため、K3 Keystone構成からも
+  変更を外し、従来のタイマー処理に戻した。
