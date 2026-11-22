@@ -43,6 +43,15 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   未対応のため、dispatcherで共有メモリーやcontextを更新する前に要求を拒否する。
   通常K3構成とK3 Keystone構成をビルドし、後者のファームウェア起動ログを
   16 hartのK3 QEMUで確認した。
+- [QEMU用DTB生成スクリプト](../scripts/prepare-k3-qemu-optee-dtb.py)で、
+  K3既定のCore領域（`0x171000000`）と静的共有領域（`0x172000000`）を
+  それぞれ16 MiB、`reserved-memory` に `no-map` 付きで追加できる。
+  QEMUの `dumpdtb` で得たDTBを入力に
+  `python3 scripts/prepare-k3-qemu-optee-dtb.py base.dtb boot.dtb` を実行し、
+  出力を起動スクリプトの `--dtb` に指定する。開発ホストでは `fdtput` が必要。
+  16 hart・2 GiBで生成したDTBとOP-TEE ELFを渡してOpenSBIの起動ログを確認した。
+  既存予約との重複と、1 GiBで対象範囲がRAM外になる場合は生成を拒否した。
+  この予約はLinux向けのメモリー配置情報であり、PMPによる隔離は別途実装する。
 - 残作業は、DTBのOP-TEEドメインとMPXYチャネル・Linux側ノードの定義、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。
