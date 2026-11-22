@@ -695,6 +695,9 @@ STOPPEDかつ `n_thread < MAX_ENCL_THREADS` を受理するため、EXIT済みco
 再現手順・採用成果物hashは [robustness](../verifications/robustness/README.md) と
 同ディレクトリのevidenceに記録する。新試験はこの挙動をFAILのまま扱う。
 
+- KSB-084修正後の16 hart同居QEMUでも `robustness --lifecycle-only` の
+  `A-2005-02/after-exit` が失敗し、RESUMEでEyrieのpage faultを再確認した。
+
 ## KSB-043: 並行CREATE/DESTROYのPMP admission競合で回収不能
 
 別file・別CPUのC workerによるCREATE→RUN→OCALL/RESUME→EXIT→DESTROYを
@@ -1465,3 +1468,24 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 
 この実行環境にはJupiter2のUSB・UARTデバイスが見えておらず、接続先も
 確認できなかった。KSB-084修正版による実機起動とfTPMは未検証。
+
+#### KSB-084修正後のKeystone回帰試験
+
+16 hart同居QEMUでQEMU用OP-TEEとKSB-084修正版OpenSBIを使用した。
+SBIエラー検査、STOP/RESUME、乱数、crypto未対応構成、edgecall 2 MiBと
+256 MiB、およびrobustnessのlifetimeは成功した。
+
+- FID 4000/2006では不正引数検査とドライバーの所有権・失敗時cleanupが
+  成功した。正常経路は同居構成のKeystone用PMP枠が5個の状態で、複数の
+  enclaveを作る途中に `No available PMP register` とCREATEエラー
+  `100003` が出て失敗した。この条件で総合ゲスト試験は終了値1だった。
+- robustnessの2 worker・4 cycle試験では並行CREATEの一方がSBI `-10` を
+  返した。複数回観測したが、KSB-043で記録したDESTROY失敗との同一性は
+  確定していない。
+- 現行ソースから `KEYSTONE_VERIFICATION=1` を再ビルドすると、PMP IPI
+  transportが従来の2引数のHSM関数を呼ぶ箇所でコンパイルが停止した。
+  従来の関数を復元し、Linux向けソフトウェアIPIの追加宛先を扱う経路に
+  拡張関数を分けた。検証用SMの30 translation unitとOpenSBIのリンクまで成功した。
+- DESTROY競合とclose遅延解放の既存fixtureは、最初のDESTROYが成功して
+  `-EAGAIN` の判定に到達しなかった。今回の通常ファームウェアでの実測では
+  競合経路の成功を確認できなかった。

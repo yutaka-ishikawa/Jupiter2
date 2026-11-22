@@ -126,7 +126,7 @@ int sbi_ipi_send_many(ulong hmask, ulong hbase, u32 event, void *data)
 	include_optee_callers = event == ipi_host_smode_event;
 #endif
 	/* Find the target harts */
-	rc = sbi_hsm_hart_interruptible_mask(dom, &target_mask,
+	rc = sbi_hsm_hart_interruptible_mask_for_ipi(dom, &target_mask,
 					    include_optee_callers);
 	if (rc)
 		return rc;

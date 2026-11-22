@@ -84,6 +84,8 @@ bool sbi_hsm_hart_change_state(struct sbi_scratch *scratch, long oldstate,
 int __sbi_hsm_hart_get_state(u32 hartindex);
 int sbi_hsm_hart_get_state(const struct sbi_domain *dom, u32 hartid);
 int sbi_hsm_hart_interruptible_mask(const struct sbi_domain *dom,
+				    struct sbi_hartmask *mask);
+int sbi_hsm_hart_interruptible_mask_for_ipi(const struct sbi_domain *dom,
 				    struct sbi_hartmask *mask,
 				    bool include_optee_callers);
 void __sbi_hsm_suspend_non_ret_save(struct sbi_scratch *scratch);

@@ -186,7 +186,7 @@ static void hsm_start_ticket_release(struct sbi_hsm_data *hdata)
  * @param include_optee_callers include Linux harts in an OP-TEE call
  * @return 0 on success and SBI_Exxx (< 0) on failure
  */
-int sbi_hsm_hart_interruptible_mask(const struct sbi_domain *dom,
+int sbi_hsm_hart_interruptible_mask_for_ipi(const struct sbi_domain *dom,
 				    struct sbi_hartmask *mask,
 				    bool include_optee_callers)
 {
@@ -218,6 +218,12 @@ int sbi_hsm_hart_interruptible_mask(const struct sbi_domain *dom,
 	}
 
 	return 0;
+}
+
+int sbi_hsm_hart_interruptible_mask(const struct sbi_domain *dom,
+				    struct sbi_hartmask *mask)
+{
+	return sbi_hsm_hart_interruptible_mask_for_ipi(dom, mask, false);
 }
 
 void __noreturn sbi_hsm_hart_start_finish(struct sbi_scratch *scratch,
