@@ -590,6 +590,26 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
 static const struct sbi_domain *k3_optee_host;
 static const struct sbi_domain *k3_optee_tee;
 
+bool sbi_hart_keystone_optee_overlaps(unsigned long base, unsigned long size)
+{
+    const struct sbi_domain_memregion *reg;
+
+    if (!k3_optee_tee || !size) {
+	return false;
+    }
+    sbi_domain_for_each_memregion(k3_optee_tee, reg) {
+	if (!(reg->flags & SBI_DOMAIN_MEMREGION_SU_ACCESS_MASK)) {
+	    continue;
+	}
+	if (reg->order >= __riscv_xlen ||
+	    (base <= reg->base ? reg->base - base < size :
+	     base - reg->base < (1UL << reg->order))) {
+	    return true;
+	}
+    }
+    return false;
+}
+
 static int k3_optee_pmp_plan(const struct k3_root_pmp_layout *layout,
 			    const struct sbi_domain *tee,
 			    unsigned long permissions[K3_BOOT_PMP_COUNT],

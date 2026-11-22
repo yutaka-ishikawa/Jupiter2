@@ -139,6 +139,9 @@ unsigned int sbi_hart_mhpm_bits(struct sbi_scratch *scratch);
  * Must succeed before local updates and remote ACK; never clears firmware state.
  */
 int sbi_hart_keystone_verify_extra_pmp(struct sbi_scratch *scratch);
+/* Treat every OP-TEE-accessible range as reserved for enclave allocation. */
+bool sbi_hart_keystone_optee_overlaps(unsigned long base, unsigned long size);
+
 #ifdef CONFIG_K3_KEYSTONE_SM
 /* Read-only local PMP inventory. Called only from trusted M-mode code.
  * A successful snapshot is local evidence, NOT cross-Hart authorization. */

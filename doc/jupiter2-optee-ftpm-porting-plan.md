@@ -189,6 +189,14 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   16 hartのK3 QEMUで、この処理による起動時の往復と、
   復元後のKeystone `hello`、`hello-native`、電源断を確認した。
   CSR書込みの故障注入や、実行中のドメイン切替は未試験。
+- **OP-TEE専用範囲とKeystone割当ての分離**。検証済みのOP-TEEドメインが
+  S/U-modeでアクセスできる範囲は、Keystone CREATEのEPM・UTM・backingから
+  除外する。Linuxも読み書きできるTEE共有RAMと起動DTB領域も対象とする。
+  16 hart K3 QEMUのLinuxゲストで試験用カーネルモジュールを実行し、
+  共有RAMと起動DTBを別々にUTMとして指定するとCREATEが
+  `SBI_ERR_SM_ENCLAVE_REGION_OVERLAPS`（100006）を返すことを確認した。
+  同じゲストでKeystoneの `hello`、`hello-native` と電源断も成功した。
+  OP-TEEへの実行中の切替はこの試験に含めていない。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。

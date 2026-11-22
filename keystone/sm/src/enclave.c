@@ -457,6 +457,11 @@ create_enclave_internal(unsigned long *eidptr,
     }
 
 #ifdef KEYSTONE_K3_PMP_N_REG
+    if (sbi_hart_keystone_optee_overlaps(base, size) ||
+	sbi_hart_keystone_optee_overlaps(utbase, utsize) ||
+	sbi_hart_keystone_optee_overlaps(backing.paddr, backing.size)) {
+	return SBI_ERR_SM_ENCLAVE_REGION_OVERLAPS;
+    }
     /* OpenSBI's host-domain policy can reserve memory for OP-TEE.
      * Check the full ranges before allocating an EID or PMP entries.
      */
