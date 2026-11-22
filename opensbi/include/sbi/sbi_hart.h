@@ -160,6 +160,10 @@ int sbi_hart_keystone_a1_read_pmp_snapshot(struct sbi_scratch *scratch,
  */
 int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
                                       unsigned short *locked_mask);
+struct sbi_domain;
+int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
+				    const struct sbi_domain *host,
+				    const struct sbi_domain *tee);
 void sbi_hart_keystone_pmp_block_opensbi(void);
 bool sbi_hart_keystone_pmp_opensbi_blocked(void);
 #endif

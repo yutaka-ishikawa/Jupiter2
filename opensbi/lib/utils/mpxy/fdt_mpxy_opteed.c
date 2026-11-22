@@ -6,6 +6,7 @@
 
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_heap.h>
+#include <sbi/sbi_hart.h>
 #include <sbi/sbi_mpxy.h>
 #include <libfdt.h>
 #include <sbi_utils/fdt/fdt_helper.h>
@@ -195,6 +196,23 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	u32 channel_id;
 	int rc, len, i;
 
+	/* Setup domain for OP-TEE dispatcher */
+	rc = opteed_domain_setup(fdt, nodeoff, match);
+	if (rc)
+		return rc;
+
+	tdomain = __get_tdomain();
+	udomain = __get_udomain();
+
+#ifdef CONFIG_K3_KEYSTONE_SM
+    rc = sbi_hart_keystone_check_optee_pmp(sbi_scratch_thishart_ptr(),
+					  udomain, tdomain);
+    if (rc) {
+	sbi_printf("K3 OP-TEE PMP: fixed slot plan rejected (%d)\n", rc);
+	return rc;
+    }
+#endif
+
 	val = fdt_getprop(fdt, nodeoff, "riscv,sbi-mpxy-channel-id", &len);
 	len = len / sizeof(u32);
 	if (val && len) {
@@ -220,14 +238,6 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	} else {
 		sbi_panic("Failed to get riscv,sbi-mpxy-channel-id");
 	}
-
-	/* Setup domain for OP-TEE dispatcher */
-	rc = opteed_domain_setup(fdt, nodeoff, match);
-	if (rc)
-		return rc;
-
-	tdomain = __get_tdomain();
-	udomain = __get_udomain();
 
 	return SBI_SUCCESS;
 }

@@ -587,6 +587,64 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
     return 0;
 }
 
+/*
+ * The trusted domain can use only ranges already owned by OpenSBI.
+ * Match the address, size and type against the canonical boot layout:
+ * the sorted slot numbers need not be the same for every DT layout.
+ */
+int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
+				    const struct sbi_domain *host,
+				    const struct sbi_domain *tee)
+{
+    struct k3_root_pmp_layout layout;
+    const struct sbi_domain_memregion *reg, *slot;
+    unsigned int bits, i;
+    unsigned int available = 0;
+    int rc;
+
+    if (!host || !tee || host == tee || host != sbi_domain_thishart_ptr()) {
+	return SBI_EINVAL;
+    }
+    bits = sbi_hart_pmp_addrbits(scratch);
+    if (!bits || bits >= __riscv_xlen) {
+	return SBI_ENOTSUPP;
+    }
+    rc = k3_root_pmp_layout_build(scratch, sbi_hart_pmp_count(scratch),
+				  sbi_hart_pmp_log2gran(scratch),
+				  (1UL << bits) - 1, &layout);
+    if (rc) {
+	return rc;
+    }
+
+    sbi_domain_for_each_memregion(tee, reg) {
+	if (!(reg->flags & SBI_DOMAIN_MEMREGION_SU_ACCESS_MASK)) {
+	    continue;
+	}
+	if (reg->flags & SBI_DOMAIN_MEMREGION_ENF_PERMISSIONS) {
+	    return SBI_EDENIED;
+	}
+	for (i = 0; i < layout.regular; i++) {
+	    slot = layout.region[i];
+	    if (slot->base == reg->base && slot->order == reg->order &&
+		!((slot->flags ^ reg->flags) & SBI_DOMAIN_MEMREGION_MMIO)) {
+		break;
+	    }
+	}
+	if (i == layout.regular || slot == layout.carrier ||
+	    (slot->flags & (SBI_DOMAIN_MEMREGION_M_ACCESS_MASK |
+			    SBI_DOMAIN_MEMREGION_ENF_PERMISSIONS))) {
+	    return SBI_EDENIED;
+	}
+	available |= 1U << i;
+    }
+    if (!available) {
+	return SBI_EINVAL;
+    }
+    sbi_printf("K3 OP-TEE PMP: fixed=0x%x Keystone=0x%x fallback=%u\n",
+	       available, layout.slots.keystone_mask, layout.slots.fallback_index);
+    return 0;
+}
+
 static int k3_root_pmp_layout_verify(struct sbi_scratch *scratch,
 				     const struct k3_root_pmp_layout *layout,
 				     unsigned short *locked_mask)
