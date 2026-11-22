@@ -111,13 +111,20 @@ int keystone_mmap(struct file *file, struct vm_area_struct *vma)
     return rc;
 }
 
+struct workqueue_struct *keystone_destroy_wq;
+
 static int __init keystone_dev_init(void)
 {
     int ret;
 
+    keystone_destroy_wq = alloc_workqueue("keystone-destroy", WQ_MEM_RECLAIM, 0);
+    if (!keystone_destroy_wq) {
+	return -ENOMEM;
+    }
     ret = misc_register(&keystone_dev);
     if (ret < 0) {
 	pr_err("keystone_enclave: misc_register() failed\n");
+	destroy_workqueue(keystone_destroy_wq);
 	return ret;
     }
     /* K3 RAM starts above 4 GiB. EPM is not a 32-bit DMA device. */
@@ -125,6 +132,7 @@ static int __init keystone_dev_init(void)
 				       DMA_BIT_MASK(64));
     if (ret) {
 	misc_deregister(&keystone_dev);
+	destroy_workqueue(keystone_destroy_wq);
 	return ret;
     }
     pr_info("keystone_enclave: " DRV_DESCRIPTION " v" DRV_VERSION "\n");
@@ -135,6 +143,7 @@ static void __exit keystone_dev_exit(void)
 {
   pr_info("keystone_enclave: keystone_dev_exit()\n");
   misc_deregister(&keystone_dev);
+  destroy_workqueue(keystone_destroy_wq);
   return;
 }
 

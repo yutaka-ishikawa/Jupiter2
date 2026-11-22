@@ -102,6 +102,8 @@
 | KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 試験的な変更を取り消し、同居時の影響は未確認 |
 | KSB-076 | OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止 | K3移植のPMP検査と配置が起動時のLinux所属を前提とする | K3 QEMUでOP-TEEの16 hart初期化と主hartのLinux引き渡しを確認 |
 | KSB-078 | OP-TEE先行起動後にLinuxが副hartを開始できない | 既存のドメイン終了が内部HSM停止を必要とし、K3は全停止を拒否 | 初回引き渡しの内部停止を実装し、K3 QEMUでLinuxの16 CPU起動を確認 |
+| KSB-079 | OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる | 排他の試作と既存のDESTROYING隔離処理の組合せ | 状態変更前の排他とclose後の再試行を実装、競合のQEMU再現は未実施 |
+| KSB-080 | OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト | OpenSBIの実行時切替で毎回PMP配置の全領域をUARTへ出力 | 実行時の詳細出力を抑制し、K3 QEMUで並行TA応答を確認 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1250,3 +1252,30 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   Linuxからの再始動では保持したOpenSBIのPMP設定を読み戻し、Keystoneの許可枠を再設定する。
 - K3 QEMUの単一スレッドとマルチスレッドTCGで、Linuxによる全16 CPUの起動を確認した。
   LinuxからのTA要求は既存のMPXYガードで拒否され、同居ゲストの電源断も完了していない。
+
+### KSB-079: OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる
+
+- OP-TEE実行中に個々のKeystone全hart PMP更新を拒否する試作では、
+  `destroy_enclave()` が先に状態を `DESTROYING` に変える。後続の `pmp_unset_global()` が
+  競合を返すと、現行の異常処理は領域を隔離したままにし、通常のDESTROY再試行を受付けない。
+- 競合は状態変更前に判定する必要がある。明示DESTROYとファイルを閉じたときの後処理では
+  再試行の責任が異なる。検証はソースの確認までで、競合のQEMU再現は未実施。
+- CREATEとDESTROYのSBI入口でEnclave操作を予約する。競合時のDESTROYはLinuxへ
+  `-EAGAIN` を返す。closeで競合した場合、ドライバーはEnclaveの管理情報を保持し、
+  遅延ワークで再試行する。PMP更新そのものが失敗した場合は既存の隔離を維持する。
+- OpenSBI、SM、Linuxモジュールをクロスビルドした。K3 QEMUではKeystone単独の
+  初回試行でPMP同期が失敗し、トレース有効の再試験と通常ビルドの再試験で `hello` と
+  `hello-native` が成功した。同居構成ではOP-TEEドライバーの初期化と16 CPUの
+  `TEEC_InitializeContext` 成功を確認した。この時点の並行TA試験はタイムアウトした
+  （KSB-080）。closeの競合処理は未確認。
+
+### KSB-080: OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト
+
+- K3 QEMU（16 hart、マルチスレッドTCG、起動hart 0固定）で、同じDTB、Linux、
+  initramfs、OP-TEE ELF、100秒の制限を使って比較した。旧ビルドではLinuxの
+  OP-TEEドライバー初期化と `TEEC_InitializeContext` の後もPMP領域の詳細ログが
+  出続け、TA応答の確認前にタイムアウトした。
+- 実行時のLinux・OP-TEE切替では、通常のPMP領域一覧の出力を抑制した。起動時の
+  一覧、配置の検査、拒否時の診断、CSRの読み戻しは維持した。
+- 修正後は同じK3 QEMU試験で `PASS: parallel OP-TEE TA calls on all 16 CPUs` を
+  確認した。このinitramfsの試験対象はTA呼び出しで、Enclaveとの同時実行は未検証。

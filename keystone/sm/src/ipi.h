@@ -6,6 +6,9 @@
 #define SBI_PMP_IPI_TYPE_UNSET 1
 /* Return 0 only after every required hart has completed the PMP update. */
 int k3_pmp_sync_initialize(void);
+int k3_keystone_enclave_update_begin(void);
+void k3_keystone_enclave_update_end(void);
+bool k3_keystone_optee_active(unsigned int hartindex);
 int k3_pmp_sync_healthy(void);
 int k3_keystone_allow_initial_hsm_starts(void);
 int k3_keystone_pmp_assert_active(void);

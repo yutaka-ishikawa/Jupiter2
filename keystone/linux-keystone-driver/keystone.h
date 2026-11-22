@@ -20,12 +20,14 @@
 #include <linux/file.h>
 #include <linux/mutex.h>
 #include <linux/atomic.h>
+#include <linux/workqueue.h>
 
 extern atomic_long_t keystone_backing_bytes;
 
 struct keystone_file {
     struct mutex lock;
     unsigned long ueid;
+    struct delayed_work destroy_work;
 };
 
 /* IMPORTANT: This code assumes Sv39 */
@@ -37,6 +39,7 @@ typedef uintptr_t vaddr_t;
 typedef uintptr_t paddr_t;
 
 extern struct miscdevice keystone_dev;
+extern struct workqueue_struct *keystone_destroy_wq;
 
 long keystone_ioctl(struct file* filep, unsigned int cmd, unsigned long arg);
 int keystone_release(struct inode *inode, struct file *file);

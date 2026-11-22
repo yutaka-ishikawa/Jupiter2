@@ -8,6 +8,7 @@
 #include <asm/sbi.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
+#include <linux/module.h>
 
 int __keystone_destroy_enclave(unsigned int ueid);
 
@@ -210,6 +211,9 @@ int __keystone_destroy_enclave(unsigned int ueid)
 
     if (enclave->eid != (unsigned long)-1) {
 	ret = sbi_sm_destroy_enclave(enclave->eid);
+	if (ret.error == SBI_ERR_INVALID_STATE) {
+	    return -EAGAIN;
+	}
 	if (ret.error) {
 	    keystone_err("fatal: cannot destroy enclave: SBI failed with error "
 			 "code %ld\n",
@@ -376,6 +380,20 @@ long keystone_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     return rc;
 }
 
+static void keystone_destroy_retry(struct work_struct *work)
+{
+    struct keystone_file *ctx =
+	container_of(to_delayed_work(work), struct keystone_file, destroy_work);
+    int rc = __keystone_destroy_enclave(ctx->ueid);
+
+    if (rc == -EAGAIN) {
+	queue_delayed_work(keystone_destroy_wq, &ctx->destroy_work, 1);
+	return;
+    }
+    kfree(ctx);
+    module_put(THIS_MODULE);
+}
+
 int keystone_release(struct inode *inode, struct file *file)
 {
     struct keystone_file *ctx;
@@ -385,6 +403,13 @@ int keystone_release(struct inode *inode, struct file *file)
     rc = 0;
     if (ctx->ueid) {
 	rc = __keystone_destroy_enclave(ctx->ueid);
+	if (rc == -EAGAIN) {
+	    __module_get(THIS_MODULE);
+	    INIT_DELAYED_WORK(&ctx->destroy_work, keystone_destroy_retry);
+	    file->private_data = NULL;
+	    queue_delayed_work(keystone_destroy_wq, &ctx->destroy_work, 1);
+	    return 0;
+	}
     }
     /* On failed SM teardown IDR retains the allocation: never reuse pages. */
     kfree(ctx);

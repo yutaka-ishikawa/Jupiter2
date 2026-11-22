@@ -531,7 +531,8 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
 				    const struct sbi_domain *dom,
 				    unsigned int count, unsigned int gran,
 				    unsigned long addr_max,
-				    struct k3_root_pmp_layout *layout)
+				    struct k3_root_pmp_layout *layout,
+				    bool trace_regions)
 {
     struct sbi_domain_memregion *reg;
     unsigned int broad = 0;
@@ -546,9 +547,11 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
     }
 
     sbi_domain_for_each_memregion(dom, reg) {
-	K3_PMP_TRACE("region base=0x%lx order=%lu flags=0x%lx pmp=0x%lx\n",
-		     reg->base, reg->order, reg->flags,
-		     k3_root_pmp_permissions(reg));
+	if (trace_regions) {
+	    K3_PMP_TRACE("region base=0x%lx order=%lu flags=0x%lx pmp=0x%lx\n",
+			 reg->base, reg->order, reg->flags,
+			 k3_root_pmp_permissions(reg));
+	}
 	/* Even a folded record must be representable. This optimization
 	 * must not hide malformed or below-grain domain metadata.
 	 */
@@ -567,9 +570,11 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
 	if (!layout->folded && k3_root_firmware_pair(scratch, reg)) {
 	    layout->folded = reg;
 	    layout->carrier = reg + 1;
-	    K3_PMP_TRACE(
-		"share firmware deny base=0x%lx order=%lu via order=%lu\n",
-		reg->base, reg->order, layout->carrier->order);
+	    if (trace_regions) {
+		K3_PMP_TRACE(
+		    "share firmware deny base=0x%lx order=%lu via order=%lu\n",
+		    reg->base, reg->order, layout->carrier->order);
+	    }
 	    continue;
 	}
 	if (layout->regular >= K3_BOOT_FALLBACK) {
@@ -665,7 +670,7 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     rc = k3_root_pmp_layout_build(scratch, host,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
-				  (1UL << bits) - 1, &layout);
+				  (1UL << bits) - 1, &layout, true);
     if (rc) {
 	return rc;
     }
@@ -884,7 +889,7 @@ int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target)
     rc = k3_root_pmp_layout_build(scratch, k3_optee_host,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
-				  (1UL << bits) - 1, &layout);
+				  (1UL << bits) - 1, &layout, false);
     if (rc) {
 	return rc;
     }
@@ -912,7 +917,7 @@ int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch)
     rc = k3_root_pmp_layout_build(scratch, k3_optee_host,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
-				  (1UL << bits) - 1, &layout);
+				  (1UL << bits) - 1, &layout, true);
     if (rc) {
 	return rc;
     }
@@ -1028,7 +1033,7 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
     rc = k3_root_pmp_layout_build(scratch, tee_active ? k3_optee_host : domain,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch), addr_max,
-				  &layout);
+				  &layout, true);
     if (rc) {
 	return rc;
     }
@@ -1048,7 +1053,7 @@ static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
     int rc;
 
     rc = k3_root_pmp_layout_build(scratch, tee_active ? k3_optee_host : domain,
-				  count, gran, addr_max, &layout);
+				  count, gran, addr_max, &layout, true);
     if (rc) {
 	return rc;
     }

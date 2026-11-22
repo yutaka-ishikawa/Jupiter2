@@ -11,6 +11,7 @@
 
 #include <sbi/sbi_scratch.h>
 #include <sbi/riscv_asm.h>
+#include <sbi/riscv_barrier.h>
 #include <sbi/sbi_hsm.h>
 #include <sbi/sbi_ecall_interface.h>
 #include <sbi/sbi_error.h>
@@ -29,6 +30,82 @@ static struct k3_hsm_stop_gate k3_global_hsm_gate;
 static unsigned int k3_sync_poisoned;
 static uint64_t k3_sync_generation;
 static struct k3_hsm_start_policy k3_start_policy;
+
+/* Protected by k3_start_policy.gate. Multiple OP-TEE harts may run. */
+static unsigned int k3_optee_harts;
+static bool k3_pmp_update_reserved;
+static bool k3_enclave_update_reserved;
+
+int k3_keystone_enclave_update_begin(void)
+{
+    int rc = SBI_EINVALID_STATE;
+
+    while (k3_policy_lock(&k3_start_policy)) {
+	cpu_relax();
+    }
+    if (!k3_optee_harts && !k3_enclave_update_reserved &&
+	!k3_pmp_update_reserved) {
+	k3_enclave_update_reserved = true;
+	rc = 0;
+    }
+    k3_policy_unlock(&k3_start_policy);
+    return rc;
+}
+
+void k3_keystone_enclave_update_end(void)
+{
+    while (k3_policy_lock(&k3_start_policy)) {
+	cpu_relax();
+    }
+    k3_enclave_update_reserved = false;
+    k3_policy_unlock(&k3_start_policy);
+}
+
+bool k3_keystone_optee_active(unsigned int hartindex)
+{
+    bool active;
+
+    if (hartindex >= 16U) {
+	return false;
+    }
+    while (k3_policy_lock(&k3_start_policy)) {
+	cpu_relax();
+    }
+    active = k3_optee_harts & (1U << hartindex);
+    k3_policy_unlock(&k3_start_policy);
+    return active;
+}
+
+int k3_keystone_optee_enter(unsigned int hartindex)
+{
+    unsigned int bit;
+    int rc = SBI_EINVALID_STATE;
+
+    if (hartindex >= 16U) {
+	return SBI_EINVAL;
+    }
+    bit = 1U << hartindex;
+    while (k3_policy_lock(&k3_start_policy)) {
+	cpu_relax();
+    }
+    if (!k3_pmp_update_reserved && !k3_enclave_update_reserved &&
+	!(k3_optee_harts & bit) &&
+	!__atomic_load_n(&k3_sync_poisoned, __ATOMIC_ACQUIRE)) {
+	k3_optee_harts |= bit;
+	rc = 0;
+    }
+    k3_policy_unlock(&k3_start_policy);
+    return rc;
+}
+
+void k3_keystone_optee_leave(unsigned int hartindex)
+{
+    while (k3_policy_lock(&k3_start_policy)) {
+	cpu_relax();
+    }
+    k3_optee_harts &= ~(1U << hartindex);
+    k3_policy_unlock(&k3_start_policy);
+}
 
 /* Explicit initialization during verified cold boot ONLY; not in the
  * production SM startup path until PMP ownership and HSM replay are proven. */
@@ -210,7 +287,13 @@ int k3_keystone_pmp_transition_begin(void)
     k3_hsm_gate_release(&k3_global_hsm_gate);
     return SBI_EINVALID_STATE;
   }
-  rc = k3_policy_set_protection_locked(&k3_start_policy, K3_PMP_TRANSITION);
+  rc = SBI_EINVALID_STATE;
+  if (!k3_optee_harts && !k3_pmp_update_reserved) {
+    rc = k3_policy_set_protection_locked(&k3_start_policy, K3_PMP_TRANSITION);
+    if (!rc) {
+	k3_pmp_update_reserved = true;
+    }
+  }
   k3_policy_unlock(&k3_start_policy);
   k3_hsm_gate_release(&k3_global_hsm_gate);
   return rc ? SBI_EINVALID_STATE : 0;
@@ -218,14 +301,14 @@ int k3_keystone_pmp_transition_begin(void)
 
 void k3_keystone_pmp_transition_finish(void)
 {
-  if (k3_policy_lock(&k3_start_policy)) {
-    __atomic_store_n(&k3_sync_poisoned, 1, __ATOMIC_RELEASE);
-    return;
+  while (k3_policy_lock(&k3_start_policy)) {
+    cpu_relax();
   }
   /* Even a successful UNSET does not establish globally inactive PMP.
    * Failure also leaves protection conservatively ACTIVE. */
   if (k3_policy_set_protection_locked(&k3_start_policy, K3_PMP_ACTIVE))
     __atomic_store_n(&k3_sync_poisoned, 1, __ATOMIC_RELEASE);
+  k3_pmp_update_reserved = false;
   k3_policy_unlock(&k3_start_policy);
 }
 

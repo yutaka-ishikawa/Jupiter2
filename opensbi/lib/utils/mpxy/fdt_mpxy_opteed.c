@@ -131,10 +131,9 @@ static int mpxy_opteed_send_message_withresp(
     ulong entry_point;
 
 #ifdef CONFIG_K3_KEYSTONE_SM
-    /* Only the initial OP-TEE to Linux handoff is enabled. */
-    if (msg_id != OPTEED_MSG_COMPLETE) {
-	return SBI_ENOTSUPP;
-    }
+    extern int k3_keystone_optee_enter(unsigned int hartindex);
+    extern void k3_keystone_optee_leave(unsigned int hartindex);
+    int rc;
 #endif
     if (!tdomain || !udomain || tdomain == udomain) {
 	return SBI_ENOTSUPP;
@@ -156,8 +155,22 @@ static int mpxy_opteed_send_message_withresp(
 	if (GET_ABI_ENTRY_TYPE(words[0]) == ABI_ENTRY_TYPE_FAST) {
 	    entry_point = (ulong)&entry_vector_table->fast_abi_entry;
 	}
+#ifdef CONFIG_K3_KEYSTONE_SM
+	rc = k3_keystone_optee_enter(hartidx);
+	if (rc) {
+	    return rc;
+	}
+#endif
 	sbi_memcpy(hart_shmem_base(ms), msgbuf, msg_len);
+#ifdef CONFIG_K3_KEYSTONE_SM
+	rc = sbi_ecall_tee_domain_enter(entry_point);
+	if (rc) {
+	    k3_keystone_optee_leave(hartidx);
+	}
+	return rc;
+#else
 	return sbi_ecall_tee_domain_enter(entry_point);
+#endif
     }
 
     if (msg_id == OPTEED_MSG_COMPLETE) {
@@ -171,7 +184,13 @@ static int mpxy_opteed_send_message_withresp(
 	ms = hart_mpxy_state_get(udomain, hartidx);
 #ifdef CONFIG_K3_KEYSTONE_SM
 	if (IS_SHMEM_ADDR_VALID(ms)) {
-	    return SBI_ENOTSUPP;
+	    rc = sbi_ecall_tee_domain_exit();
+	    if (!rc) {
+		sbi_memcpy(hart_shmem_base(ms), &words[1], msg_len - sizeof(ulong));
+		*resp_len = msg_len - sizeof(ulong);
+		k3_keystone_optee_leave(hartidx);
+	    }
+	    return rc;
 	}
 	if (current_hartid() != tdomain->boot_hartid) {
 	    if (words[0] != TEEABI_OPTEED_RETURN_ON_DONE || words[1]) {

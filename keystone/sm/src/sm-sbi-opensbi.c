@@ -12,6 +12,7 @@
 #include <sbi/sbi_ecall.h>
 #include "sm-sbi-opensbi.h"
 #include "pmp.h"
+#include "ipi.h"
 #include "sm-sbi.h"
 #include "sm.h"
 #include "cpu.h"
@@ -38,10 +39,20 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid,
 					      struct sbi_ecall_return *out)
 {
     uintptr_t retval;
+#ifdef KEYSTONE_K3_PMP_N_REG
+    bool update = funcid == SBI_SM_CREATE_ENCLAVE ||
+		  funcid == SBI_SM_CREATE_ENCLAVE_V2 ||
+		  funcid == SBI_SM_DESTROY_ENCLAVE;
+#endif
+
     out->value = 0;
     SM_TRACE_VALUES("sbi.enter", funcid, regs->mepc);
 
 #ifdef KEYSTONE_K3_PMP_N_REG
+    if (k3_keystone_optee_active(current_hartindex())) {
+	return keystone_ecall_return(regs, out,
+				     SBI_ERR_SM_ENCLAVE_SBI_PROHIBITED);
+    }
     if (!sm_is_ready()) {
 	sbi_printf("[SM/K3] Keystone SBI function %lu unavailable: "
 		   "admission checks failed\n",
@@ -71,6 +82,11 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid,
 	}
     }
 
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (update && k3_keystone_enclave_update_begin()) {
+	return keystone_ecall_return(regs, out, SBI_EINVALID_STATE);
+    }
+#endif
     switch (funcid) {
     case SBI_SM_CREATE_ENCLAVE:
 	retval = sbi_sm_create_enclave(&out->value, regs->a0);
@@ -132,6 +148,12 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid,
 	retval = SBI_ERR_SM_NOT_IMPLEMENTED;
 	break;
     }
+
+#ifdef KEYSTONE_K3_PMP_N_REG
+    if (update) {
+	k3_keystone_enclave_update_end();
+    }
+#endif
 
     /* RUN/RESUME/STOP/EXIT already selected a different frame. */
     if (out->skip_regs_update) {
