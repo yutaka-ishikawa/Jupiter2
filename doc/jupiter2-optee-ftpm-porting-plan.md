@@ -137,6 +137,18 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   同居用DTB生成にも256 KiBの最小値を設定し、その生成結果でKeystoneの
   `hello` と `hello-native` が引き続き成功することを別のQEMU起動で確認した。
   同一ゲストでのKeystone・OP-TEE同居およびTA並行呼出しは未実施。
+- **QEMUの16 hart並行呼出し**。通常K3 OpenSBIと同じOP-TEE Coreを使い、
+  `-accel tcg,thread=multi` で実行。ゲストで16子プロセスを一斉に解放し、
+  CPUごとに異なる入力とTAの応答を照合した。全子が成功し、
+  `PASS: parallel OP-TEE TA calls on all 16 CPUs` を確認した。
+  試験終了後のQEMU電源断はタイムアウトした。
+- **QEMUの同一ゲスト同居試験**。Keystone SM入りOpenSBI、同居用DTB、
+  TEEとMPXYを含む `linux-k3` 6.18.3、対応するKeystoneドライバーを使用。
+  Linuxは16 CPUで起動し、MPXY mailboxの16チャネルを登録した。
+  OP-TEEのprobeはMPXYエラー `-524` の後に `-22` で失敗し、
+  同居テストは `TEEC_InitializeContext=0xffff0008` で停止した。
+  同じゲストで実行したKeystone `hello-native` は終了値0・DESTROY成功。
+  OP-TEEへのドメイン切替を安全に行うPMP実装が未完了のため、同居は不合格。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。

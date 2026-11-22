@@ -6,8 +6,11 @@
 #include <unistd.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
+#include <sys/wait.h>
 #include <tee_client_api.h>
 #include "protocol.h"
+
+#define HARTS 16
 
 static int check_ta(unsigned int cpu)
 {
@@ -40,9 +43,9 @@ static int check_ta(unsigned int cpu)
     }
     op.paramTypes = TEEC_PARAM_TYPES(TEEC_VALUE_INOUT, TEEC_NONE,
 				     TEEC_NONE, TEEC_NONE);
-    op.params[0].value.a = 41;
+    op.params[0].value.a = 41 + cpu;
     rc = TEEC_InvokeCommand(&session, COEXISTENCE_CMD_INCREMENT, &op, &origin);
-    if (rc == TEEC_SUCCESS && op.params[0].value.a == 42 &&
+    if (rc == TEEC_SUCCESS && op.params[0].value.a == 42 + cpu &&
 	op.params[0].value.b == COEXISTENCE_TA_MARKER) {
 	passed = 1;
 	printf("PASS: CPU %u OP-TEE TA response verified\n", cpu);
@@ -57,11 +60,52 @@ done:
     return !passed;
 }
 
+static int check_parallel(void)
+{
+    int gate[2];
+    pid_t children[HARTS];
+    unsigned int count = 0;
+    int failed = 0;
+    unsigned int cpu;
+    int status;
+    char unused;
+    ssize_t released;
+
+    if (pipe(gate)) {
+	perror("pipe");
+	return 1;
+    }
+    while (count < HARTS) {
+	pid_t child = fork();
+
+	if (child < 0) {
+	    perror("fork");
+	    failed = 1;
+	    break;
+	}
+	if (child == 0) {
+	    close(gate[1]);
+	    /* EOF releases the workers once all write descriptors are closed. */
+	    released = read(gate[0], &unused, sizeof(unused));
+	    close(gate[0]);
+	    _exit(released != 0 || check_ta(count));
+	}
+	children[count++] = child;
+    }
+    close(gate[0]);
+    close(gate[1]);
+    for (cpu = 0; cpu < count; cpu++) {
+	if (waitpid(children[cpu], &status, 0) != children[cpu] ||
+	    !WIFEXITED(status) || WEXITSTATUS(status)) {
+	    failed = 1;
+	}
+    }
+    return failed;
+}
+
 int main(void)
 {
     int log;
-    unsigned int cpu;
-    int failed = 0;
     long online = sysconf(_SC_NPROCESSORS_ONLN);
 
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -78,14 +122,8 @@ int main(void)
 	}
     }
     printf("OP-TEE test: online CPUs=%ld\n", online);
-    if (online != 16) {
-	goto stop;
-    }
-    for (cpu = 0; cpu < 16; cpu++) {
-	failed |= check_ta(cpu);
-    }
-    if (!failed) {
-	printf("PASS: OP-TEE TA calls on all 16 CPUs\n");
+    if (online == HARTS && !check_parallel()) {
+	printf("PASS: parallel OP-TEE TA calls on all 16 CPUs\n");
 	reboot(RB_POWER_OFF);
     }
 stop:

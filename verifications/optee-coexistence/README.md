@@ -104,5 +104,8 @@ OP-TEEは `CFG_TEE_CORE_NB_CORE=16 CFG_NUM_THREADS=16` とし、検証用TAを
 上記のinitramfs手順で `/init` に配置する。カーネルは
 `CONFIG_TEE=y`、`CONFIG_OPTEE=y`、`CONFIG_RISCV_SBI_MPXY_MBOX=y` を使う。
 起動引数には `earlycon=sbi keep_bootcon printk.devkmsg=on rdinit=/init`
-を指定する。UARTで `PASS: CPU 0` から `PASS: CPU 15` までと、最後の
-`PASS: OP-TEE TA calls on all 16 CPUs` を確認する。TA呼出しは各CPUで逐次実行する。
+を指定する。QEMUは `-accel tcg,thread=multi` で実行する。
+テストはCPUごとに子プロセスを生成し、パイプで一斉に解放する。
+各子はCPUへ固定し、異なる入力でTA応答を検査する。
+UARTの `PASS: parallel OP-TEE TA calls on all 16 CPUs` は全子プロセスが
+成功したときに出力される。OP-TEEのログと混在して個別の行が分割される場合がある。
