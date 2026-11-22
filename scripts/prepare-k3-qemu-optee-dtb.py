@@ -6,7 +6,10 @@ import os
 from pathlib import Path
 import struct
 import subprocess
+import sys
 import tempfile
+
+sys.dont_write_bytecode = True
 
 REGIONS = (("optee", 0x171000000, 0x1000000),
            ("optee-shm", 0x172000000, 0x1000000))
