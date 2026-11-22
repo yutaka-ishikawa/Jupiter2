@@ -437,6 +437,29 @@ int pmp_set_keystone(int region_idx, uint8_t perm)
     return SBI_ERR_SM_PMP_SUCCESS;
 }
 
+#ifdef KEYSTONE_K3_PMP_N_REG
+int k3_pmp_check_os_region(int region, bool enabled)
+{
+    unsigned long flags, base, order;
+    unsigned int reg, bits;
+
+    if (region < 0 || region >= PMP_MAX_N_REGION ||
+	!is_pmp_region_valid(region) || !region_is_napot_all(region)) {
+	return -1;
+    }
+    reg = region_register_idx(region);
+    if (!k3_pmp_index_allowed(reg) || pmp_get(reg, &flags, &base, &order)) {
+	return -1;
+    }
+    if (!enabled) {
+	return flags ? -1 : 0;
+    }
+    bits = sbi_hart_pmp_addrbits(sbi_scratch_thishart_ptr());
+    return flags == (PMP_A_NAPOT | PMP_ALL_PERM) && !base &&
+	   order >= bits + PMP_SHIFT ? 0 : -1;
+}
+#endif
+
 int pmp_unset(int region_idx);
 
 /* Read raw entries: pmp_get() represents size as an order and cannot

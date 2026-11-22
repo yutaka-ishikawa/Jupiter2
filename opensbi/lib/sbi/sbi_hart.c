@@ -823,6 +823,37 @@ static int k3_optee_pmp_switch_policy(struct sbi_scratch *scratch,
 				   enter ? host : tee, enter ? tee : host);
 }
 
+/* Keep the SM-owned full-range OS entry off while OP-TEE runs. */
+static int k3_optee_pmp_switch_with_os_slot(
+	struct sbi_scratch *scratch, const struct k3_root_pmp_layout *layout,
+	bool enter)
+{
+    extern int k3_keystone_check_os_pmp(bool enabled);
+    extern int k3_keystone_set_os_pmp(bool enabled);
+    int rc;
+
+    if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV) ||
+	k3_keystone_check_os_pmp(enter)) {
+	return SBI_EDENIED;
+    }
+
+    if (enter && k3_keystone_set_os_pmp(false)) {
+	rc = SBI_EFAIL;
+    } else {
+	rc = k3_optee_pmp_switch_policy(scratch, layout, enter);
+    }
+
+    if ((enter && rc) || (!enter && !rc)) {
+	/* The Linux policy is active before restoring its OS entry. */
+	if (k3_keystone_set_os_pmp(true)) {
+	    sbi_printf("K3 OP-TEE PMP: OS entry restoration failed\n");
+	    sbi_hart_hang();
+	}
+    }
+    __asm__ __volatile__("sfence.vma" ::: "memory");
+    return rc;
+}
+
 /* Only the trusted domain-context path may call this. Domain assignment
  * and CPU state still belong to the caller until the CSR update succeeds.
  */
@@ -861,7 +892,7 @@ int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target)
     if (rc) {
 	return rc;
     }
-    return k3_optee_pmp_switch_policy(scratch, &layout, enter);
+    return k3_optee_pmp_switch_with_os_slot(scratch, &layout, enter);
 }
 
 /* Keystone admits the Linux layout before installing the S-mode policy. */
@@ -885,7 +916,7 @@ int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch)
     if (rc) {
 	return rc;
     }
-    return k3_optee_pmp_switch_policy(scratch, &layout, true);
+    return k3_optee_pmp_switch_with_os_slot(scratch, &layout, true);
 }
 
 /* Exercise both directions with lower privilege modes stopped. */

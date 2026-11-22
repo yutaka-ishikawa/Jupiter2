@@ -93,6 +93,24 @@ int osm_pmp_set(uint8_t perm)
   return pmp_set_keystone(os_region_id, perm);
 }
 
+#ifdef KEYSTONE_K3_PMP_N_REG
+int k3_keystone_check_os_pmp(bool enabled)
+{
+    return k3_pmp_check_os_region(os_region_id, enabled);
+}
+
+int k3_keystone_set_os_pmp(bool enabled)
+{
+    int rc;
+
+    rc = enabled ? osm_pmp_set(PMP_ALL_PERM) : pmp_unset(os_region_id);
+    if (rc) {
+	return -1;
+    }
+    return k3_keystone_check_os_pmp(enabled);
+}
+#endif
+
 #ifndef KEYSTONE_K3_PMP_N_REG
 static int smm_init(void)
 {

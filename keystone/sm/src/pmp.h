@@ -88,6 +88,7 @@ typedef int region_id;
 /* external functions */
 int pmp_init(void);
 #ifdef KEYSTONE_K3_PMP_N_REG
+int k3_pmp_check_os_region(int region, bool enabled);
 struct k3_pmp_partition_evidence;
 /* Evidence-only preflight, not an ownership handoff or boot authorization. */
 int k3_pmp_uniform_partition_prepare(const struct k3_pmp_partition_evidence *ev);

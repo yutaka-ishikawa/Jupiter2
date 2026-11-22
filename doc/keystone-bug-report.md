@@ -100,7 +100,7 @@
 | KSB-073 | 全16 CPU起動後、hello二種のhost runnerがload access faultで停止 | K3の独立UTM割当てとホストPMP復帰の不整合 | SM修正・実QEMUで旧版の障害再現、修正版hello二種8回PASS、実機再試験待ち |
 | KSB-074 | OPTEEDの呼出元・メッセージ長・切替結果の検査不足 | OpenSBI取込コードとK3 Keystone切替ガードの接続 | 修正済み（`4b0f75220`）、実ゲストのMPXYは未検証 |
 | KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 試験的な変更を取り消し、同居時の影響は未確認 |
-| KSB-076 | OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止 | K3移植のPMP検査と配置が起動時のLinux所属を前提とする | 初期配置とSM初期化をK3 QEMUで確認、OP-TEE起動はKeystoneのOS用許可枠で停止 |
+| KSB-076 | OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止 | K3移植のPMP検査と配置が起動時のLinux所属を前提とする | K3 QEMUでOS用許可枠を無効化してCoreへ到達。Linuxへの引き渡しは未確認 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1218,6 +1218,12 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   権限を設定するよう変更した。K3 QEMUでSM初期化まで到達した。切替検査は
   KSB-077修正後も、`sm_init()` がOS用に設定した枠14の全域RWX（`prot=0x1f`）を
   検出して `-4` を返す。この枠が有効な間はOP-TEE Coreへ入らない。
+- Keystone側でOS用枠を特定し、各hartのOP-TEE移行時に無効化する。Linux用の固定枠を
+  復元した後にOS用枠を復元し、いずれもCSRを読み戻す。移行失敗時も元のLinux用枠を
+  復元し、その確認に失敗すればhartを停止する。
+- K3 QEMUでOP-TEE Coreへ到達した後、DTB読取り中の `fdt32_ld` で
+  load access fault（cause 5、tval `0x173400004`）が発生した。Linuxへの復帰と
+  復旧の異常系は未試験。Keystone単独構成では16 hartで `hello` と `hello-native` が成功した。
 
 ### KSB-077: KeystoneのPMP初期化で設定ビットが別の枠に残る
 
