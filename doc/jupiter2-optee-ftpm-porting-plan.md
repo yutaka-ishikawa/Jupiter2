@@ -52,7 +52,14 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   16 hart・2 GiBで生成したDTBとOP-TEE ELFを渡してOpenSBIの起動ログを確認した。
   既存予約との重複と、1 GiBで対象範囲がRAM外になる場合は生成を拒否した。
   この予約はLinux向けのメモリー配置情報であり、PMPによる隔離は別途実装する。
-- 残作業は、DTBのOP-TEEドメインとMPXYチャネル・Linux側ノードの定義、共通PMP
+- DTB生成の `--mpxy-domain NAME` で、既存のtrusted OpenSBI domainへの
+  OPTEED参照とLinux側のmailbox・OP-TEEノードを追加できる。入力には
+  `/chosen/opensbi-domains` 配下のtrusted domain（`phandle` 必須）と
+  `untrusted-domain` が必要。既存K3のチャネル `0x1000`〜`0x100f` を
+  hart順で生成し、Linux側ではTEEプロトコルID 2と組み合わせる。
+  生成結果はQEMU由来のDTBに試験用domainノードを加え、`fdtget` で照合した。
+  この検査にドメインの起動やPMP切替は含まれない。
+- 残作業は、DTBのOP-TEEドメインとアクセス権の確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。
 

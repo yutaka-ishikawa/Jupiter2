@@ -32,7 +32,77 @@ def ranges(node):
     return list(struct.iter_unpack(">QQ", reg))
 
 
-def prepare(source, output):
+def add_mpxy(root, edit, domain_name):
+    chosen = root.children["chosen"]
+    domains = chosen.children["opensbi-domains"]
+    domain = domains.children[domain_name]
+    if (domain_name == "untrusted-domain" or
+            b"opensbi,domain,instance" not in
+            domain.props.get("compatible", b"").split(b"\0")):
+        raise ValueError("expected a trusted OpenSBI domain instance")
+    untrusted = domains.children["untrusted-domain"]
+    if (b"opensbi,domain,instance" not in
+            untrusted.props.get("compatible", b"").split(b"\0")):
+        raise ValueError("expected an untrusted-domain instance")
+    cpus = root.children["cpus"]
+    hart_ids = sorted(struct.unpack(">I", node.props["reg"])[0]
+                      for node in cpus.children.values()
+                      if node.props.get("device_type") == b"cpu\0")
+    if hart_ids != list(range(16)):
+        raise ValueError("MPXY layout requires harts 0 through 15")
+
+    handles = set()
+    channel_ids = tuple(range(0x1000, 0x1010))
+
+    def scan(node):
+        interfaces = node.props.get("compatible", b"").split(b"\0")
+        if set(interfaces).intersection(
+                (b"riscv,sbi-mpxy-opteed", b"riscv,sbi-mpxy-mbox",
+                 b"linaro,optee-tz")):
+            raise ValueError("input already contains an OP-TEE or MPXY node")
+        node_handles = {struct.unpack(">I", node.props[prop])[0]
+                        for prop in ("phandle", "linux,phandle")
+                        if prop in node.props}
+        if handles & node_handles or len(node_handles) > 1:
+            raise ValueError("conflicting DT phandles")
+        handles.update(node_handles)
+        ids = node.props.get("riscv,sbi-mpxy-channel-id", b"")
+        if any(channel in channel_ids for (channel,) in struct.iter_unpack(">I", ids)):
+            raise ValueError("input already uses a K3 OP-TEE MPXY channel ID")
+        for child in node.children.values():
+            scan(child)
+
+    scan(root)
+    trusted_handle = struct.unpack(">I", domain.props["phandle"])[0]
+    mailbox_handle = max(handles) + 1
+    if not trusted_handle or mailbox_handle >= 0xffffffff:
+        raise ValueError("invalid domain phandle or exhausted phandle space")
+
+    def new_node(path, compatible):
+        edit(["-c"], path)
+        edit(["-t", "s"], path, "compatible", compatible)
+
+    opteed = "/chosen/sbi-mpxy-opteed"
+    new_node(opteed, "riscv,sbi-mpxy-opteed")
+    edit(["-t", "x"], opteed, "opensbi-domain-instance", f"{trusted_handle:x}")
+    edit(["-t", "x"], opteed, "riscv,sbi-mpxy-channel-id",
+         *(f"{channel:x}" for channel in channel_ids))
+
+    if "firmware" not in root.children:
+        edit(["-c"], "/firmware")
+    mailbox = "/firmware/sbi-mpxy-mailbox"
+    new_node(mailbox, "riscv,sbi-mpxy-mbox")
+    edit(["-t", "x"], mailbox, "phandle", f"{mailbox_handle:x}")
+    edit(["-t", "x"], mailbox, "#mbox-cells", "2")
+    optee = "/firmware/optee"
+    new_node(optee, "linaro,optee-tz")
+    edit(["-t", "s"], optee, "method", "smc")
+    edit(["-t", "x"], optee, "mboxes",
+         *(cell for channel in channel_ids
+           for cell in (f"{mailbox_handle:x}", f"{channel:x}", "2")))
+
+
+def prepare(source, output, domain_name=None):
     data = source.read_bytes()
     root, occupied = read_tree(data)
     cells = struct.pack(">I", 2)
@@ -77,6 +147,8 @@ def prepare(source, output):
             edit(["-t", "x"], path, "reg", f"{start >> 32:x}",
                  f"{start & 0xffffffff:x}", "0", f"{size:x}")
             edit([], path, "no-map")
+        if domain_name is not None:
+            add_mpxy(root, edit, domain_name)
         os.link(staged, output)
 
 
@@ -84,9 +156,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--mpxy-domain", metavar="NAME",
+                        help="attach MPXY nodes to an existing trusted OpenSBI domain")
     args = parser.parse_args()
     try:
-        prepare(args.input, args.output)
+        prepare(args.input, args.output, args.mpxy_domain)
     except (OSError, ValueError, KeyError, struct.error,
             subprocess.CalledProcessError) as error:
         parser.exit(1, f"{parser.prog}: {error}\n")
