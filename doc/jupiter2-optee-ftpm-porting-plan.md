@@ -149,6 +149,13 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   同居テストは `TEEC_InitializeContext=0xffff0008` で停止した。
   同じゲストで実行したKeystone `hello-native` は終了値0・DESTROY成功。
   OP-TEEへのドメイン切替を安全に行うPMP実装が未完了のため、同居は不合格。
+- **各hartでの直接切替に向けたKeystoneの割当て検査**。
+  K3のEnclave作成時にEPMとUTMの両範囲について、呼出元OpenSBIドメインの
+  S-mode読み書き権限を検査する。Linux側ドメインでアクセス不可のOP-TEE Core
+  領域は、この検査によりEID割当て・PMP更新前に除外される。
+  16 hartのK3 QEMUで同居用DTBと `linux-k3` を起動し、Keystoneの
+  `hello`、`hello-native`、電源断が成功した。保護領域を指定する拒否試験、
+  両ドメインが読み書きできるTEE共有領域の専用予約、PMP切替と同居は未確認。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。

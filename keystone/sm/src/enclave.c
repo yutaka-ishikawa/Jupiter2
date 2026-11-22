@@ -456,6 +456,18 @@ create_enclave_internal(unsigned long *eidptr,
 	return SBI_ERR_SM_ENCLAVE_ILLEGAL_ARGUMENT;
     }
 
+#ifdef KEYSTONE_K3_PMP_N_REG
+    /* OpenSBI's host-domain policy can reserve memory for OP-TEE.
+     * Check the full ranges before allocating an EID or PMP entries.
+     */
+    if (!sbi_domain_check_addr_range(sbi_domain_thishart_ptr(), base, size,
+				     PRV_S, SBI_DOMAIN_READ | SBI_DOMAIN_WRITE) ||
+	!sbi_domain_check_addr_range(sbi_domain_thishart_ptr(), utbase, utsize,
+				     PRV_S, SBI_DOMAIN_READ | SBI_DOMAIN_WRITE)) {
+	return SBI_ERR_SM_ENCLAVE_NOT_ACCESSIBLE;
+    }
+#endif
+
     SM_TRACE_STAGE("CREATE layout valid");
     /* set params */
     params.dram_base = base;
