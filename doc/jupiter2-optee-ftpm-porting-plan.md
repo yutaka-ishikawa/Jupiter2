@@ -78,6 +78,11 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   **QEMUファームウェア試験**では、この割当てで起動し、boot hartの
   `untrusted-domain` 所属と、Core領域のS/Uアクセス禁止・共有領域RWに対応する
   PMP設定のOpenSBI読戻し成功をUARTで確認した。LinuxとOP-TEEは未起動。
+- **QEMUのS-mode引き渡し試験**では、Linuxの代わりに
+  [最小ペイロード](../verifications/optee-coexistence/README.md)を起動した。
+  16 hart・2 GiBで、boot hartの `untrusted-domain` 所属、Keystone SMの
+  初期化完了、`0x102200000` のペイロードからのSBIコンソール出力を確認した。
+  OP-TEE ELFもロードしたが、OP-TEEへの制御移行は行っていない。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。

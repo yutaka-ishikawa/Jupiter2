@@ -43,3 +43,25 @@ supplicantのTA検索先（例 `/lib/optee_armtz`）へ配置する。Keystone�
 この試験の範囲はTA呼出し、OCALLで中断したEnclaveの復帰、資源の解放。
 PMPの隔離や遷移時の故障試験は
 [同居設計の受入試験](../../doc/keystone-optee-coexistence-design.md#7-受入試験)で扱う。
+
+## K3 QEMUでのS-mode引き渡し試験
+
+Linuxの代わりに小さなRV64ペイロードを使い、OpenSBIとKeystone SMの
+初期化後に `untrusted-domain` のS-modeへ制御が渡ることを確認する。
+
+```sh
+riscv64-linux-gnu-gcc -nostdlib -static -no-pie -Wl,-Ttext=0x102200000 \
+    -o entry.elf verifications/optee-coexistence/smode-handoff.S
+riscv64-linux-gnu-objcopy -O binary -j .text entry.elf entry.bin
+qemu-system-riscv64 -M jupiter2 \
+    -cpu rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16 \
+    -smp 16 -m 2G -display none -monitor none -serial stdio \
+    -dtb boot.dtb -bios fw_dynamic.bin -kernel entry.bin \
+    -device loader,file=tee.elf
+```
+
+`boot.dtb` は同居用DTB生成ツールの出力で、Linux側ドメインの開始アドレスを
+固定しない構成を使う。UARTで `Boot HART Domain : untrusted-domain`、
+`SM initialized`、`K3: S-mode handoff reached` を確認する。
+ペイロードは出力後に待機する。QEMUを終了してログを保存する。
+試験範囲はファームウェアからの初回引き渡しまで。
