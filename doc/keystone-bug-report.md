@@ -106,7 +106,7 @@
 | KSB-080 | OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト | OpenSBIの実行時切替で毎回PMP配置の全領域をUARTへ出力 | 実行時の詳細出力を抑制し、K3 QEMUで並行TA応答を確認 |
 | KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
 | KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | K3 QEMUでLinuxのRFENCEを処理し、TAとEnclaveの完了を確認 |
-| KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | K3 QEMUのOP-TEE先行起動、原因未特定 | 起動hart 0固定でも1回タイムアウト |
+| KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時のゲート競合で停止する経路を確認 | K3 QEMUで競合を強制して同じ停止パターンを再現。自然発生時は未特定 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1348,3 +1348,11 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   即時エラーを返し、呼び出し側が診断を出さずにhartを停止する経路がある。
   診断ビルドを9回実行し、いずれもLinuxの16 CPU起動まで進んだ。起動停止は再現せず、
   このコード経路が該当のhart 9で発生したことは未確認。
+- 追加の診断ビルドで通常条件8回とQMP監視付き12回は全16 CPUでLinuxまで進んだ。
+  ホストCPUを2個に制限した別の10回では9回でLinuxが起動し、1回は20秒で
+  タイムアウトした。この1回にHSMゲート競合の診断は出ていない。
+- K3 QEMUの診断ビルドで、hart 8が共有ゲートを保持している間にhart 9の初回HSM起動完了を
+  実行させた。hart 9の初期PMP設定は成功したが、HSM起動完了が
+  `SBI_EINVALID_STATE`（`-10`）を返した。残る副hartはOP-TEE初期化を完了し、
+  hart 9の初期化とLinuxへの引き渡しを待ったままタイムアウトした。
+  この競合で元の症状が起こり得ることは確認したが、自然発生した回の原因は未確定。
