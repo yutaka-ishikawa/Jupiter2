@@ -106,7 +106,7 @@
 | KSB-080 | OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト | OpenSBIの実行時切替で毎回PMP配置の全領域をUARTへ出力 | 実行時の詳細出力を抑制し、K3 QEMUで並行TA応答を確認 |
 | KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
 | KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | K3 QEMUでLinuxのRFENCEを処理し、TAとEnclaveの完了を確認 |
-| KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時のゲート競合で停止する経路を確認 | K3 QEMUで競合を強制して同じ停止パターンを再現。自然発生時は未特定 |
+| KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時の一時的なゲート競合で副hartを停止 | 当時版のK3 QEMUで自然再現し、停止時レジスタで経路を特定 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1368,3 +1368,14 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   16 CPUがオンラインになった。別の実QEMU試験でTAとEnclaveの同時実行、
   全16 CPUの並行TA呼出しも成功した。明示DESTROYは `-EAGAIN` 後の再試行に成功し、
   close単独の競合試験でも遅延ワークとTA応答が成功した。製品ソースは変更していない。
+- `7eef141ee` と同じファームウェアソースで診断コードを追加せず再ビルドした。
+  元の16 hart、2 GiB、マルチスレッドTCG、起動hart 0、PMP詳細ログありで反復し、
+  最初の3回はLinuxに到達、4回目は起動停止が自然発生した。hart 11はPMP設定成功後に
+  OP-TEE初期化完了を出さず、残る副hartは完了した。100秒超でLinux未到達、観測後半に
+  UART出力は増えなかった。
+- 4回目のQMPレジスタを約3秒間隔で2回採取した。hart 11は `sbi_hart_hang()` に留まり、
+  `ra` は `sbi_hsm_hart_start_finish()` のエラー分岐の直後、`a0=-10`、`a1=11`、
+  `a3=1` だった。当該ELFの逆アセンブルでは、このレジスタの組合せは共有HSM/PMPゲートが
+  使用中のときに返る分岐と一致する。起動台帳の更新に失敗する後段の経路は `a1=1` を返す。
+  主hartはOP-TEEの副hart完了待ち、他の副hartはOpenSBIのHSM待機にいた。
+  この自然再現で原因経路を確認した。初回のhart 9にはレジスタ採取がない。
