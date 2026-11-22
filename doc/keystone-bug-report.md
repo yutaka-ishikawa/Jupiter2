@@ -102,9 +102,9 @@
 | KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 試験的な変更を取り消し、同居時の影響は未確認 |
 | KSB-076 | OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止 | K3移植のPMP検査と配置が起動時のLinux所属を前提とする | K3 QEMUでOP-TEEの16 hart初期化と主hartのLinux引き渡しを確認 |
 | KSB-078 | OP-TEE先行起動後にLinuxが副hartを開始できない | 既存のドメイン終了が内部HSM停止を必要とし、K3は全停止を拒否 | 初回引き渡しの内部停止を実装し、K3 QEMUでLinuxの16 CPU起動を確認 |
-| KSB-079 | OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる | 排他の試作と既存のDESTROYING隔離処理の組合せ | K3 QEMUで `-EAGAIN`、明示再試行とclose後の破棄成功を確認。TA再開はKSB-081 |
+| KSB-079 | OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる | 排他の試作と既存のDESTROYING隔離処理の組合せ | K3 QEMUで `-EAGAIN`、明示再試行とclose後の破棄、TA応答を確認 |
 | KSB-080 | OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト | OpenSBIの実行時切替で毎回PMP配置の全領域をUARTへ出力 | 実行時の詳細出力を抑制し、K3 QEMUで並行TA応答を確認 |
-| KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | K3 QEMUのclose競合で再現、対処前 |
+| KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1294,3 +1294,8 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   入力41が未変更で検証マーカーは0だった。遅延ワークは破棄を完了した。
 - MPXYの予約競合を再試行可能な状態として通知し、Linux側で同じ要求を再送する案と、
   RPCからの復帰までKeystone側のPMP更新を延期する案がある。
+- PMP予約の競合だけを `SBI_EINVALID_STATE` としてMPXY経由でLinuxへ伝え、
+  OP-TEEドライバーが最大1秒、同じ要求を再送する。通信エラー時は応答を処理せずエラーを返す。
+- 16 hartのK3 QEMU同居ゲストで明示DESTROYとcloseを順に試験した。両方で最初の
+  DESTROYは `-EAGAIN`、明示再試行と遅延ワークは破棄に成功し、TA応答はともに
+  42かつマーカー `0x4a325441` だった。試験用ドライバーの追加ログで遅延ワークの結果を確認した。

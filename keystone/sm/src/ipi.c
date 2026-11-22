@@ -79,7 +79,7 @@ bool k3_keystone_optee_active(unsigned int hartindex)
 int k3_keystone_optee_enter(unsigned int hartindex)
 {
     unsigned int bit;
-    int rc = SBI_EINVALID_STATE;
+    int rc = SBI_EFAIL;
 
     if (hartindex >= 16U) {
 	return SBI_EINVAL;
@@ -88,11 +88,14 @@ int k3_keystone_optee_enter(unsigned int hartindex)
     while (k3_policy_lock(&k3_start_policy)) {
 	cpu_relax();
     }
-    if (!k3_pmp_update_reserved && !k3_enclave_update_reserved &&
-	!(k3_optee_harts & bit) &&
-	!__atomic_load_n(&k3_sync_poisoned, __ATOMIC_ACQUIRE)) {
-	k3_optee_harts |= bit;
-	rc = 0;
+    if (!__atomic_load_n(&k3_sync_poisoned, __ATOMIC_ACQUIRE) &&
+	!(k3_optee_harts & bit)) {
+	if (k3_pmp_update_reserved || k3_enclave_update_reserved) {
+	    rc = SBI_EINVALID_STATE;
+	} else {
+	    k3_optee_harts |= bit;
+	    rc = 0;
+	}
     }
     k3_policy_unlock(&k3_start_policy);
     return rc;

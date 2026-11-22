@@ -7,6 +7,8 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/cpuhotplug.h>
+#include <linux/delay.h>
+#include <linux/jiffies.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
 #include <linux/interrupt.h>
@@ -80,7 +82,7 @@ static int __mpxy_mbox_send_message(struct rpmi_mbox_message *msg)
 }
 
 /* Simple wrapper functions to be able to use a function pointer */
-static void optee_riscv_mpxy_mbox_send_resp(unsigned long a0, unsigned long a1,
+static int optee_riscv_mpxy_mbox_send_resp(unsigned long a0, unsigned long a1,
 					    unsigned long a2, unsigned long a3,
 					    unsigned long a4, unsigned long a5,
 					    unsigned long a6, unsigned long a7,
@@ -96,10 +98,16 @@ static void optee_riscv_mpxy_mbox_send_resp(unsigned long a0, unsigned long a1,
 					  &tx, sizeof(tx), rx, sizeof(*rx));
 	ret = __mpxy_mbox_send_message(&msg);
 	if (ret) {
-		pr_err_ratelimited(
-			"%s: OPTEED MPXY messaging failed, errno: %d\n",
-			__func__, ret);
+		*res = (struct mpxy_opteed_resp) {
+			.a0 = OPTEE_SMC_RETURN_UNKNOWN_FUNCTION,
+		};
+		if (ret != -EAGAIN) {
+			pr_err_ratelimited(
+				"%s: OPTEED MPXY messaging failed, errno: %d\n",
+				__func__, ret);
+		}
 	}
+	return ret;
 }
 
 /*
@@ -998,10 +1006,25 @@ static int optee_mpxy_do_call_with_arg(struct tee_context *ctx,
 	optee_cq_wait_init(&optee->call_queue, &w, system_thread);
 	while (true) {
 		struct mpxy_opteed_resp res;
+		unsigned long deadline = jiffies + msecs_to_jiffies(1000);
 
-		optee_riscv_mpxy_mbox_send_resp(param.a0, param.a1, param.a2,
-						param.a3, param.a4, param.a5,
-						param.a6, param.a7, &res);
+		do {
+			rc = optee_riscv_mpxy_mbox_send_resp(param.a0, param.a1,
+				param.a2, param.a3, param.a4, param.a5,
+				param.a6, param.a7, &res);
+			if (rc != -EAGAIN) {
+				break;
+			}
+			/* Firmware rejected the request before entering OP-TEE. */
+			if (time_after_eq(jiffies, deadline)) {
+				rc = -ETIMEDOUT;
+				break;
+			}
+			usleep_range(500, 1000);
+		} while (true);
+		if (rc) {
+			break;
+		}
 
 		if (res.a0 == OPTEE_SMC_RETURN_ETHREAD_LIMIT) {
 			/*

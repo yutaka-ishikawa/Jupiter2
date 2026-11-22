@@ -676,8 +676,10 @@ int sbi_mpxy_send_message(u32 channel_id, u8 msg_id,
 
 	sbi_hart_unmap_saddr();
 
-	if (ret == SBI_ERR_TIMEOUT || ret == SBI_ERR_IO)
+	if (ret == SBI_ERR_TIMEOUT || ret == SBI_ERR_IO ||
+	    ret == SBI_ERR_INVALID_STATE) {
 		return ret;
+	}
 	else if (ret)
 		return SBI_ERR_FAILED;
 

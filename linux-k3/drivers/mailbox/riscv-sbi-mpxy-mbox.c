@@ -269,6 +269,9 @@ static int mpxy_send_message_with_resp(u32 channel_id, u32 msg_id,
 	}
 
 	put_cpu();
+	if (sret.error == SBI_ERR_INVALID_STATE) {
+		return -EAGAIN;
+	}
 	return sbi_err_map_linux_errno(sret.error);
 }
 
