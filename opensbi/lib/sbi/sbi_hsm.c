@@ -93,6 +93,9 @@ struct sbi_hsm_data {
 	unsigned long saved_menvcfgh;
 #endif
 	atomic_t start_ticket;
+#ifdef CONFIG_K3_KEYSTONE_SM
+    bool optee_restart;
+#endif
 };
 #ifdef CONFIG_K3_KEYSTONE_SM
 int sbi_hsm_k3_e2_finish_and_mark_started(unsigned int hartindex)
@@ -366,19 +369,66 @@ int sbi_hsm_init(struct sbi_scratch *scratch, bool cold_boot)
 	return 0;
 }
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+bool sbi_hsm_optee_restart(struct sbi_scratch *scratch)
+{
+    struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch, hart_data_offset);
+    bool restart = hdata->optee_restart;
+
+    hdata->optee_restart = false;
+    return restart;
+}
+
+void __noreturn sbi_hsm_optee_boot_stop(struct sbi_scratch *scratch)
+{
+    extern int k3_keystone_set_os_pmp(bool enabled);
+    struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch, hart_data_offset);
+
+    /* Preserve the verified OpenSBI layout for the Linux warm start. */
+    if (hdata->optee_restart || k3_keystone_set_os_pmp(false) ||
+	!__sbi_hsm_hart_change_state(hdata, SBI_HSM_STATE_STARTED,
+				     SBI_HSM_STATE_STOP_PENDING)) {
+	sbi_hart_hang();
+    }
+    hdata->optee_restart = true;
+    sbi_exit(scratch);
+}
+#endif
+
 void __noreturn sbi_hsm_exit(struct sbi_scratch *scratch)
 {
 	struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch,
 							    hart_data_offset);
 	void (*jump_warmboot)(void) = (void (*)(void))scratch->warmboot_addr;
 
-	if (!__sbi_hsm_hart_change_state(hdata, SBI_HSM_STATE_STOP_PENDING,
-					 SBI_HSM_STATE_STOPPED))
-		goto fail_exit;
 #ifdef CONFIG_K3_KEYSTONE_SM
-	/* Revoke the old local proof. Next Start must re-validate PMP. */
-	if (k3_e2_mark_stopped(&k3_e2_hsm_ledger, current_hartindex()))
-		goto fail_exit;
+    extern int k3_keystone_hsm_boot_stop_begin(void);
+    extern void k3_keystone_hsm_stop_end(void);
+    int rc;
+
+    if (!hdata->optee_restart) {
+	goto fail_exit;
+    }
+    do {
+	rc = k3_keystone_hsm_boot_stop_begin();
+    } while (rc == SBI_EALREADY);
+    if (rc) {
+	goto fail_exit;
+    }
+
+    /* Publish the ledger before exposing STOPPED to a Linux HSM start. */
+    rc = k3_e2_mark_stopped(&k3_e2_hsm_ledger, current_hartindex());
+    if (rc || !__sbi_hsm_hart_change_state(hdata, SBI_HSM_STATE_STOP_PENDING,
+					   SBI_HSM_STATE_STOPPED)) {
+	k3_keystone_hsm_stop_end();
+	goto fail_exit;
+    }
+    k3_keystone_hsm_stop_end();
+#else
+    if (!__sbi_hsm_hart_change_state(hdata, SBI_HSM_STATE_STOP_PENDING,
+				     SBI_HSM_STATE_STOPPED)) {
+	goto fail_exit;
+    }
 #endif
 
 	if (hsm_device_has_hart_hotplug()) {

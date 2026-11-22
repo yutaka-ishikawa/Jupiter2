@@ -153,6 +153,21 @@ int k3_keystone_hsm_start_begin(unsigned int hartindex)
   k3_hsm_gate_release(&k3_global_hsm_gate);
   return allowed ? SBI_EINVALID_STATE : 0;
 }
+/* Boot handoff can quarantine a hart only before dynamic PMP updates. */
+int k3_keystone_hsm_boot_stop_begin(void)
+{
+    if (k3_hsm_gate_acquire(&k3_global_hsm_gate)) {
+	return SBI_EALREADY;
+    }
+    if (k3_start_policy.protection != K3_PMP_INACTIVE ||
+	k3_sync_generation ||
+	__atomic_load_n(&k3_sync_poisoned, __ATOMIC_ACQUIRE)) {
+	k3_hsm_gate_release(&k3_global_hsm_gate);
+	return SBI_EDENIED;
+    }
+    return 0;
+}
+
 /* Hart-specific finish/cancel: only a matching outstanding reservation is released. */
 static int k3_keystone_hsm_release_reservation(unsigned int hartindex,
                                                int completed)

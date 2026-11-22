@@ -649,7 +649,14 @@ static void __noreturn init_warm_startup(struct sbi_scratch *scratch,
 	 * Configure PMP at last because if SMEPMP is detected,
 	 * M-mode access to the S/U space will be rescinded.
 	 */
+#ifdef CONFIG_K3_KEYSTONE_SM
+    if (sbi_hsm_optee_restart(scratch)) {
+	rc = 0;
+    } else
+#endif
+    {
 	rc = sbi_hart_pmp_configure(scratch);
+    }
 	if (rc)
 		sbi_hart_hang();
 

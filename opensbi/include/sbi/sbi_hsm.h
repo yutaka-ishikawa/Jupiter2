@@ -69,6 +69,10 @@ void __noreturn sbi_hsm_exit(struct sbi_scratch *scratch);
 int sbi_hsm_hart_start(struct sbi_scratch *scratch,
 		       const struct sbi_domain *dom,
 		       u32 hartid, ulong saddr, ulong smode, ulong arg1);
+#ifdef CONFIG_K3_KEYSTONE_SM
+bool sbi_hsm_optee_restart(struct sbi_scratch *scratch);
+void __noreturn sbi_hsm_optee_boot_stop(struct sbi_scratch *scratch);
+#endif
 int sbi_hsm_hart_stop(struct sbi_scratch *scratch, bool exitnow);
 void sbi_hsm_hart_resume_start(struct sbi_scratch *scratch);
 void __noreturn sbi_hsm_hart_resume_finish(struct sbi_scratch *scratch,

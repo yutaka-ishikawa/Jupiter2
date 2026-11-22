@@ -183,8 +183,13 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
 					     target_dom->next_addr,
 					     target_dom->next_mode,
 					     false);
-		else
-			sbi_hsm_hart_stop(scratch, true);
+	else {
+#ifdef CONFIG_K3_KEYSTONE_SM
+	    sbi_hsm_optee_boot_stop(scratch);
+#else
+	    sbi_hsm_hart_stop(scratch, true);
+#endif
+	}
 	}
     return 0;
 }

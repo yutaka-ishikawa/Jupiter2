@@ -101,7 +101,7 @@
 | KSB-074 | OPTEEDの呼出元・メッセージ長・切替結果の検査不足 | OpenSBI取込コードとK3 Keystone切替ガードの接続 | 修正済み（`4b0f75220`）、実ゲストのMPXYは未検証 |
 | KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 試験的な変更を取り消し、同居時の影響は未確認 |
 | KSB-076 | OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止 | K3移植のPMP検査と配置が起動時のLinux所属を前提とする | K3 QEMUでOP-TEEの16 hart初期化と主hartのLinux引き渡しを確認 |
-| KSB-078 | OP-TEE先行起動後にLinuxが副hartを開始できない | 既存のドメイン終了が内部HSM停止を必要とし、K3は全停止を拒否 | K3 QEMUで再現、副hartの引き渡しは未対応 |
+| KSB-078 | OP-TEE先行起動後にLinuxが副hartを開始できない | 既存のドメイン終了が内部HSM停止を必要とし、K3は全停止を拒否 | 初回引き渡しの内部停止を実装し、K3 QEMUでLinuxの16 CPU起動を確認 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1245,5 +1245,8 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - K3 QEMUで副hartのOP-TEE起動完了通知も許可した試行では、Linuxが副hartの
   起動失敗を記録した。既存のドメイン終了経路は副hartを `sbi_hsm_hart_stop()` で
   停止するが、K3 Keystoneの固定オンライン方針が内部呼出しも `SBI_EDENIED` で拒否する。
-- 現行の引き渡しを主hartの起動完了通知に限定した。副hartの停止とLinuxによる再始動を、
-  KeystoneのPMP同期・HSM条件を維持して扱う必要がある。
+- 副hartの初回引き渡しには専用の内部HSM停止を使う。動的PMP更新前に限り、
+  KeystoneのHSM/PMPゲート内で停止台帳を更新して `STOPPED` を公開する。
+  Linuxからの再始動では保持したOpenSBIのPMP設定を読み戻し、Keystoneの許可枠を再設定する。
+- K3 QEMUの単一スレッドとマルチスレッドTCGで、Linuxによる全16 CPUの起動を確認した。
+  LinuxからのTA要求は既存のMPXYガードで拒否され、同居ゲストの電源断も完了していない。

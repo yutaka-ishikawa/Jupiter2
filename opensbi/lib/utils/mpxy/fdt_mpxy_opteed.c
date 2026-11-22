@@ -55,6 +55,7 @@ struct abi_entry_vectors *entry_vector_table = NULL;
 
 /* Defined in optee_os/core/arch/riscv/include/tee/teeabi_opteed.h */
 #define TEEABI_OPTEED_RETURN_ENTRY_DONE 0xBE000000
+#define TEEABI_OPTEED_RETURN_ON_DONE 0xBE000001
 
 static char opteed_domain_name[64];
 static struct sbi_domain *tdomain, *udomain;
@@ -169,10 +170,14 @@ static int mpxy_opteed_send_message_withresp(
 	}
 	ms = hart_mpxy_state_get(udomain, hartidx);
 #ifdef CONFIG_K3_KEYSTONE_SM
-	if (IS_SHMEM_ADDR_VALID(ms) || current_hartid() != tdomain->boot_hartid) {
+	if (IS_SHMEM_ADDR_VALID(ms)) {
 	    return SBI_ENOTSUPP;
 	}
-	if (words[0] != TEEABI_OPTEED_RETURN_ENTRY_DONE || !words[1] ||
+	if (current_hartid() != tdomain->boot_hartid) {
+	    if (words[0] != TEEABI_OPTEED_RETURN_ON_DONE || words[1]) {
+		return SBI_EINVAL;
+	    }
+	} else if (words[0] != TEEABI_OPTEED_RETURN_ENTRY_DONE || !words[1] ||
 	    words[1] % sizeof(u32) ||
 	    !sbi_domain_check_addr_range(tdomain, words[1],
 		sizeof(*entry_vector_table), PRV_S, SBI_DOMAIN_EXECUTE)) {
