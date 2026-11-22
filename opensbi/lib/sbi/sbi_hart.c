@@ -654,15 +654,15 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     unsigned int bits, available;
     int rc;
 
-    if (!host || !tee || host == tee || host != sbi_domain_thishart_ptr() ||
-	k3_optee_host) {
+    if (!host || !tee || host == tee || k3_optee_host ||
+	(sbi_domain_thishart_ptr() != host && sbi_domain_thishart_ptr() != tee)) {
 	return SBI_EINVAL;
     }
     bits = sbi_hart_pmp_addrbits(scratch);
     if (!bits || bits >= __riscv_xlen) {
 	return SBI_ENOTSUPP;
     }
-    rc = k3_root_pmp_layout_build(scratch, sbi_domain_thishart_ptr(),
+    rc = k3_root_pmp_layout_build(scratch, host,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
 				  (1UL << bits) - 1, &layout);
@@ -758,6 +758,8 @@ static int k3_optee_pmp_transition(
     int rc;
 
     if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV)) {
+	K3_PMP_TRACE("OP-TEE transition rejected mstatus=0x%lx\n",
+		     csr_read(CSR_MSTATUS));
 	return SBI_EDENIED;
     }
     full_range_order = sbi_hart_pmp_addrbits(scratch) + PMP_SHIFT;
@@ -810,6 +812,8 @@ static int k3_optee_pmp_switch_policy(struct sbi_scratch *scratch,
 	}
 	rc = pmp_get(i, &prot, &addr, &order);
 	if (rc || ((prot & PMP_A) && (prot & (PMP_R | PMP_W | PMP_X)))) {
+	    K3_PMP_TRACE("OP-TEE transition rejected Keystone slot=%u prot=0x%lx rc=%d\n",
+			 i, prot, rc);
 	    return SBI_EDENIED;
 	}
     }
@@ -858,6 +862,30 @@ int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target)
 	return rc;
     }
     return k3_optee_pmp_switch_policy(scratch, &layout, enter);
+}
+
+/* Keystone admits the Linux layout before installing the S-mode policy. */
+int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch)
+{
+    struct k3_root_pmp_layout layout;
+    unsigned int bits;
+    int rc;
+
+    if (!k3_optee_tee || sbi_domain_thishart_ptr() != k3_optee_tee) {
+	return 0;
+    }
+    bits = sbi_hart_pmp_addrbits(scratch);
+    if (!bits || bits >= __riscv_xlen) {
+	return SBI_ENOTSUPP;
+    }
+    rc = k3_root_pmp_layout_build(scratch, k3_optee_host,
+				  sbi_hart_pmp_count(scratch),
+				  sbi_hart_pmp_log2gran(scratch),
+				  (1UL << bits) - 1, &layout);
+    if (rc) {
+	return rc;
+    }
+    return k3_optee_pmp_switch_policy(scratch, &layout, true);
 }
 
 /* Exercise both directions with lower privilege modes stopped. */
@@ -953,6 +981,8 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
     struct k3_root_pmp_layout layout;
     unsigned int bits;
     unsigned long addr_max;
+    const struct sbi_domain *domain = sbi_domain_thishart_ptr();
+    bool tee_active = domain == k3_optee_tee;
     int rc;
 
     if (!scratch || !locked_mask) {
@@ -964,7 +994,7 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
 	return SBI_ENOTSUPP;
     }
     addr_max = (1UL << bits) - 1;
-    rc = k3_root_pmp_layout_build(scratch, sbi_domain_thishart_ptr(),
+    rc = k3_root_pmp_layout_build(scratch, tee_active ? k3_optee_host : domain,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch), addr_max,
 				  &layout);
@@ -982,9 +1012,11 @@ static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
     unsigned short locked_mask;
     unsigned int i, free_slots;
     unsigned long prot, addr, len;
+    const struct sbi_domain *domain = sbi_domain_thishart_ptr();
+    bool tee_active = domain == k3_optee_tee;
     int rc;
 
-    rc = k3_root_pmp_layout_build(scratch, sbi_domain_thishart_ptr(),
+    rc = k3_root_pmp_layout_build(scratch, tee_active ? k3_optee_host : domain,
 				  count, gran, addr_max, &layout);
     if (rc) {
 	return rc;

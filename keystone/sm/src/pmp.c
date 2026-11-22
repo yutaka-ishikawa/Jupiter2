@@ -313,8 +313,10 @@ int pmp_set_global(int region_idx, uint8_t perm)
 
 int pmp_init(void)
 {
+#ifndef KEYSTONE_K3_PMP_N_REG
     uintptr_t pmpaddr = 0;
     uintptr_t pmpcfg = 0;
+#endif
     int i;
 #ifdef KEYSTONE_K3_PMP_N_REG
     if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
@@ -335,11 +337,19 @@ int pmp_init(void)
 	}
 #endif
 	switch (i) {
+#ifdef KEYSTONE_K3_PMP_N_REG
+#define X(n, g) \
+    case n: { \
+	PMP_UNSET(n, g); \
+	break; \
+    }
+#else
 #define X(n, g)                                                                \
     case n: {                                                                  \
 	PMP_SET(n, g, pmpaddr, pmpcfg);                                        \
 	break;                                                                 \
     }
+#endif
 	    LIST_OF_PMP_REGS
 #undef X
 	}

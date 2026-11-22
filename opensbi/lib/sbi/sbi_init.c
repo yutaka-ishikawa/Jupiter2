@@ -571,6 +571,15 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
 	count = sbi_scratch_offset_ptr(scratch, init_count_offset);
 	(*count)++;
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+    rc = sbi_hart_keystone_optee_boot_policy(scratch);
+    if (rc) {
+	sbi_printf("K3 OP-TEE: initial PMP policy failed (%d) on hart %u\n",
+		   rc, hartid);
+	sbi_hart_hang();
+    }
+#endif
+
 	sbi_hsm_hart_start_finish(scratch, hartid);
 }
 
@@ -664,6 +673,15 @@ static void __noreturn init_warm_startup(struct sbi_scratch *scratch,
 	count = sbi_scratch_offset_ptr(scratch, init_count_offset);
 	(*count)++;
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+    rc = sbi_hart_keystone_optee_boot_policy(scratch);
+    if (rc) {
+	sbi_printf("K3 OP-TEE: initial PMP policy failed (%d) on hart %u\n",
+		   rc, hartid);
+	sbi_hart_hang();
+    }
+#endif
+
 	sbi_hsm_hart_start_finish(scratch, hartid);
 }
 
@@ -689,6 +707,15 @@ static void __noreturn init_warm_resume(struct sbi_scratch *scratch,
 #ifdef CONFIG_K3_KEYSTONE_SM
 	/* Never resume S-mode with a fresh unverified PMP layout. */
 	k3_keystone_a1_post_pmp_before_smode(scratch, hartid);
+#endif
+
+#ifdef CONFIG_K3_KEYSTONE_SM
+    rc = sbi_hart_keystone_optee_boot_policy(scratch);
+    if (rc) {
+	sbi_printf("K3 OP-TEE: initial PMP policy failed (%d) on hart %u\n",
+		   rc, hartid);
+	sbi_hart_hang();
+    }
 #endif
 
 	sbi_hsm_hart_resume_finish(scratch, hartid);
