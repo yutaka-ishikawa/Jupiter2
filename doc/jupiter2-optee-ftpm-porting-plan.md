@@ -89,6 +89,17 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   UARTでLinuxの `/init` 実行と16 CPUオンラインを確認した。
   比較用のDebianカーネルでの結果で、Jupiter2の `linux-k3` では未確認。
   OP-TEEはELFのロードまでで、Enclave実行とTA呼び出しも未実施。
+- **Jupiter2のLinux・Keystoneゲスト試験**では、`a70e2fae0` の
+  `linux-k3` 6.18.3から16 hartのQEMU試験用Imageをビルドし、
+  同じカーネルのシンボル情報でビルドした `keystone-driver.ko` をロードした。
+  カーネルはSMP、FPU/Vector、APLIC/IMSIC、CMA、モジュール、initramfsを
+  有効にした最小構成を使用。カーネルImageのSHA-256は
+  `b6fc49c85c714892cdd038ba6d534f4f103cc177bd17fb94f9508767d3ffab3b`。
+  同居用DTB、16 hart・2 GiBのK3 QEMUで、16 CPUオンラインと
+  `hello`・`hello-native` のEnclave実行、終了値0、DESTROY成功を確認した。
+  初回のDTBでは `untrusted-domain` にリセット権限がなく、電源断が完了しなかった。
+  試験用DTBに `system-reset-allowed` を追加した再試験でも両サンプルが成功し、
+  QEMUは電源断後に終了コード0を返した。OP-TEEはELFのロードまで。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。
