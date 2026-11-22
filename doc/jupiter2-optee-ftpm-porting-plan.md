@@ -128,6 +128,15 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   有効にすると未書込みバンクを検出して開発用HUKへ進み、Linuxからの
   検証用TA往復が成功した。1 hart有効の単独試験で、他のハードウェア依存設定は
   前項と同じ。実機固有のHUK、ヒューズの書込み、IOPMP、TE200、RTCの動作は未検証。
+- **QEMUの16 hart OP-TEE単独試験**。同じ通常K3 OpenSBI、`linux-k3`、
+  `CFG_TEE_CORE_NB_CORE=16 CFG_NUM_THREADS=16 CFG_K3_EFUSE=y` のOP-TEE Core、
+  16チャネルのDTBを使用。標準のOpenSBIヒープではCPU 13の初期化ログで止まり、
+  `opensbi,config` の `heap-size` だけを256 KiBにすると16 CPUがオンラインになった。
+  [ゲストテスト](../verifications/optee-coexistence/optee-16-hart-init.c)を各CPUに順に
+  固定し、TAが入力41を42に変換してマーカーを返すことを16件すべてで確認した。
+  同居用DTB生成にも256 KiBの最小値を設定し、その生成結果でKeystoneの
+  `hello` と `hello-native` が引き続き成功することを別のQEMU起動で確認した。
+  同一ゲストでのKeystone・OP-TEE同居およびTA並行呼出しは未実施。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。

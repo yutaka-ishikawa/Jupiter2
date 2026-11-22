@@ -12,6 +12,7 @@ import tempfile
 sys.dont_write_bytecode = True
 
 DEFAULT_DOMAIN = "optee-domain"
+MIN_FIRMWARE_HEAP = 256 * 1024
 REGIONS = (("optee", 0x171000000, 0x1000000),
            ("optee-shm", 0x172000000, 0x1000000))
 
@@ -163,6 +164,28 @@ def add_mpxy(root, edit, domain_name):
            for cell in (f"{mailbox_handle:x}", f"{channel:x}", "2")))
 
 
+def ensure_firmware_heap(root, edit):
+    chosen = root.children["chosen"]
+    configs = [(name, node) for name, node in chosen.children.items()
+               if b"opensbi,config" in node.props.get("compatible", b"").split(b"\0")]
+    if len(configs) > 1:
+        raise ValueError("multiple OpenSBI configuration nodes")
+    if configs:
+        name, node = configs[0]
+        path = f"/chosen/{name}"
+        if "heap-size" in node.props:
+            size, = struct.unpack(">I", node.props["heap-size"])
+            if size >= MIN_FIRMWARE_HEAP:
+                return
+    else:
+        path = "/chosen/opensbi-config"
+        if "opensbi-config" in chosen.children:
+            raise ValueError("conflicting OpenSBI configuration node")
+        edit(["-c"], path)
+        edit(["-t", "s"], path, "compatible", "opensbi,config")
+    edit(["-t", "x"], path, "heap-size", f"{MIN_FIRMWARE_HEAP:x}")
+
+
 def prepare(source, output, domain_name=DEFAULT_DOMAIN):
     data = source.read_bytes()
     root, occupied = read_tree(data)
@@ -209,6 +232,7 @@ def prepare(source, output, domain_name=DEFAULT_DOMAIN):
                  f"{start & 0xffffffff:x}", "0", f"{size:x}")
             edit([], path, "no-map")
         add_mpxy(root, edit, domain_name)
+        ensure_firmware_heap(root, edit)
         os.link(staged, output)
 
 

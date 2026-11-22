@@ -90,3 +90,19 @@ gen_init_cpio initramfs.list > initramfs.cpio
 UARTの `K3 Linux userspace reached` とオンラインCPU数を記録する。
 LinuxとKeystone SMの起動確認を対象とする。Enclaveの実行やOP-TEEへの
 通信は同居ゲスト試験で確認する。
+
+## K3 QEMUでのOP-TEE単独16 hart試験
+
+通常K3 OpenSBIでOP-TEE Coreを先に起動し、Linuxへ引き渡す試験構成を使う。
+OP-TEEは `CFG_TEE_CORE_NB_CORE=16 CFG_NUM_THREADS=16` とし、検証用TAを
+`EARLY_TA_PATHS` で組み込む。DTBでは全16 hartを有効にし、MPXYのチャネル
+`0x1000`〜`0x100f` を設定する。`opensbi,config` の `heap-size` は
+`<0x40000>` とする。eFuseモデルとドメインMMIOの条件は
+[移植計画](../../doc/jupiter2-optee-ftpm-porting-plan.md)を参照。
+
+`optee-16-hart-init.c` をRV64向け `libteec.a` に静的リンクし、
+上記のinitramfs手順で `/init` に配置する。カーネルは
+`CONFIG_TEE=y`、`CONFIG_OPTEE=y`、`CONFIG_RISCV_SBI_MPXY_MBOX=y` を使う。
+起動引数には `earlycon=sbi keep_bootcon printk.devkmsg=on rdinit=/init`
+を指定する。UARTで `PASS: CPU 0` から `PASS: CPU 15` までと、最後の
+`PASS: OP-TEE TA calls on all 16 CPUs` を確認する。TA呼出しは各CPUで逐次実行する。
