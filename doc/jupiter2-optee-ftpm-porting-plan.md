@@ -100,6 +100,21 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   初回のDTBでは `untrusted-domain` にリセット権限がなく、電源断が完了しなかった。
   試験用DTBに `system-reset-allowed` を追加した再試験でも両サンプルが成功し、
   QEMUは電源断後に終了コード0を返した。OP-TEEはELFのロードまで。
+- **QEMUでのOP-TEE単独TA試験**。通常K3 OpenSBI、`linux-k3` 6.18.3
+  （TEE・OPTEE・MPXY mailbox内蔵）、OP-TEE Core
+  `2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59` を使用。
+  K3実機向け既定設定では鍵管理初期化中にeFuse MMIOへのアクセスでdata-abortした。
+  QEMU試験用として `CFG_K3_EFUSE=n CFG_K3_PRNG=n CFG_K3_IOPMP=n
+  CFG_TE200_CRYPTO_DRIVER=n CFG_MMP_RTC=n CFG_DRIVERS_RTC=n CFG_RTC_PTA=n`
+  でビルドし、実効設定は `CFG_WITH_SOFTWARE_PRNG=y`、
+  `CFG_K3_HUK_ALLOW_UNFUSED=y`。開発用HUKを許す構成である。
+  QEMUは16 hartで起動し、試験用DTBでhart 0のみを有効にした。
+  OP-TEEは1 core・1 thread、MPXYはチャネル `0x1000`、
+  検証用TAは `EARLY_TA_PATHS` で組み込んだ。
+  Linuxユーザー空間で `TEEC_InitializeContext` と `TEEC_OpenSession` が成功し、
+  TAへの入力41に対して42と所定のマーカーが返ったことをUARTで確認した。
+  この試験の合格範囲はOP-TEE単独のMPXY・TA往復。Keystone同居、
+  16 hartでのOP-TEE動作、fTPM、ハードウェア保護は未検証。
 - 残作業は、実起動用DTBの残りのメモリー・MMIOポリシーの確定、共通PMP
   ポリシーとhart間同期を伴うドメイン切替、ゲストでの通信と逐次・並行試験。
   現行のK3 Keystone構成ではドメイン切替を抑止している。
