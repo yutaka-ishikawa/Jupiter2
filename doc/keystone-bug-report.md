@@ -105,7 +105,7 @@
 | KSB-079 | OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる | 排他の試作と既存のDESTROYING隔離処理の組合せ | K3 QEMUで `-EAGAIN`、明示再試行とclose後の破棄、TA応答を確認 |
 | KSB-080 | OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト | OpenSBIの実行時切替で毎回PMP配置の全領域をUARTへ出力 | 実行時の詳細出力を抑制し、K3 QEMUで並行TA応答を確認 |
 | KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | LinuxでMPXY要求を再試行し、K3 QEMUのclose競合でTA応答を確認 |
-| KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | 16 hart K3 QEMUの診断ビルドでIPI ID 1を確認 |
+| KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | 16 hart K3 QEMUでLinuxのRFENCEが送信元と確認 |
 | KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | K3 QEMUのOP-TEE先行起動、原因未特定 | 起動hart 0固定でも1回タイムアウト |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
@@ -1317,7 +1317,12 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
 - CPU 8のEnclaveとCPU 15のTAで試した回は双方が完了し、Enclaveの破棄に成功した。
 - 診断ビルドの実QEMUで再現した3回ともhart 2で `irq=11 mtopei=0x10001 mip=0x800`
   を確認した。`mtopei` の割り込みIDは1で、OpenSBIのIMSICドライバーがIPIに
-  割り当てるIDと一致する。IPIの個別イベント種別は未特定。
+  割り当てるIDと一致する。
+- 送受信の診断を加えた実QEMU試験の5回目では、受信hart 2の保留ビットは `0x10`
+  （イベント4、`IPI_TLB`）だった。送信元はLinuxドメインのhart 3で、保存された
+  SBI呼出しはRFENCE拡張 `0x52464e43` の `REMOTE_SFENCE_VMA_ASID`（機能2）だった。
+  `0xffffffff80010e8a` を試験ビルドのLinux `vmlinux` で照合すると `__sbi_ecall` に一致する。
+  この再現のIPIはLinuxによる別hartのTLB無効化要求。Linux内で要求を起こした上位処理は未追跡。
 - 通常のOpenSBIトラップはM-mode外部割り込みをIRQチップに渡し、IMSICはID 1を
   `sbi_ipi_process()` へ渡す。KeystoneのEnclave用トラップもこの配送を扱い、必要な
   Enclave中断とLinux復帰を既存の保護条件で扱う必要がある。
