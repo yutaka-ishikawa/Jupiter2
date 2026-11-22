@@ -108,6 +108,7 @@
 | KSB-082 | 同居ゲストのEnclave実行中に外部割り込みで停止 | IMSIC経由のM-mode IPIをEnclave用トラップが処理しない | K3 QEMUでLinuxのRFENCEを処理し、TAとEnclaveの完了を確認 |
 | KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時の一時的なゲート競合で副hartを停止 | 取得を再試行するよう修正し、K3 QEMUで強制競合と反復起動を確認 |
 | KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | OP-TEE実行中のhartがLinux向けSBIソフトウェアIPIの宛先から外れる | Linux宛てIPIを保持するよう修正。16 hart QEMUでfTPMと同居試験が成功 |
+| KSB-085 | 並行CREATE／DESTROY時に全hart PMP更新が失敗する | ローカル切替のゲート競合でhartが停止。固定回数のACKポーリングでも早期打ち切り | PMP状態の確認とACK待ちを修正 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1510,3 +1511,39 @@ SBIエラー検査、STOP/RESUME、乱数、crypto未対応構成、edgecall 2 M
 - Linuxサンプル試験のUARTに `/dev/kmsg` の合格行を出すため
   `printk.devkmsg=on` を追加した。一律PMPと混在PMPの両方で
   CPU 3・8上の `hello` と `hello-native` が終了値0と明示DESTROYを返した。
+
+### KSB-085: 並行CREATE／DESTROY時に全hart PMP更新が失敗する
+
+- 16 hart・Keystone用PMP 5枠の同居QEMUで、backingなしの2 workerを
+  CPU 0・1に固定した。各workerは別Enclaveで4周のライフサイクルを実行する。
+  診断用ドライバーはCREATE再試行回数を表示し、診断用テストはDESTROYの
+  `-EAGAIN` を再試行する。
+- 修正前に `pmp_unset_global` が失敗した試行では、QMPでhart 1のPCが
+  `sbi_hart_hang`、戻り先が `context_switch_to_enclave` 内の停止呼び出し直後、
+  `a0=-10` であることを確認。そのhartのM-mode外部割り込みもpendingだった。
+  切替時の `k3_keystone_pmp_assert_active()` は、全hart PMP更新の送信者が握る
+  HSMゲートと競合すると `-10` を返す。宛先hartが停止し、送信側はACKを得られなかった。
+- PMPポリシーがACTIVEまたはTRANSITIONで、HSM Startが進行していなければ、
+  ローカル切替はポリシーロック下で状態を確認する。これらの状態はすでに
+  新規HSM Startを拒否する。TRANSITIONを保持し、起動時に状態を設定する経路では
+  従来どおりHSMゲートを使う。
+- この修正だけで実行した試行には、停止せずに全hart更新が不合格となる例もあった。
+  追加診断で、hart 3のACK待ちが524,202タイマーティック（24 MHzで約21.8 ms）
+  で終了し、その直後に読んだメールボックスがDONEだった。固定100万回の
+  ポーリングを、ACK確認区間全体で100 msの実時間期限に変更した。
+  世代一致、受信側でのPMP読み戻し、失敗時の保護を引き続き適用する。
+- PMP枠の枯渇は別の拒否条件。たとえばEPMとUTMとbackingを1枠ずつ使う
+  Enclaveを2つ保持するには6枠必要で、5枠の構成ではCREATEを拒否する。
+  EPM/UTMの枠割り当て失敗時に出るSBIの `100003`
+  （`SBI_ERR_SM_ENCLAVE_PMP_FAILURE`）は、既存のエラー契約。
+- 2件の修正を適用した診断用並行試験は5回中4回成功。backing付きの
+  元の試験では、再ビルド後も5枠に収まらないCREATEをSBI `100003` で
+  拒否した。別起動の `/dev/tpmrm0` の乱数取得と正常電源断も確認した。
+- 100 ms期限の診断ビルドでも、送信元hart 1からhart 0への解除要求が
+  2,488,587ティック（約103.7 ms）でPENDINGのまま残る別の試行があった。
+  その後のQMPでhart 0はLinuxのidleにいて、M-mode外部割り込みはpendingで
+  なかった。期限超過時の状態を確認できたが、IPIが配送されなかったのか
+  宛先が処理する前に期限に達したのかは未確定。
+- 約21.8 msはACKループ中のゲストタイマー経過。ループ内のデバッグ出力は
+  なく、診断行はタイマー値を採取した後に出した。QEMUのスケジューリング
+  待ちとゲスト内処理時間の内訳は未計測。

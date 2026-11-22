@@ -339,7 +339,24 @@ void k3_keystone_pmp_transition_finish(void)
  * Never publish INACTIVE from a local PMP operation. */
 int k3_keystone_pmp_assert_active(void)
 {
+  bool already_active;
   int rc;
+
+  /* The broadcast owner holds the HSM gate while waiting for this hart.
+   * ACTIVE and TRANSITION already exclude HSM Start; checking those
+   * states must neither contend for that gate nor overwrite TRANSITION.
+   */
+  while (k3_policy_lock(&k3_start_policy)) {
+    cpu_relax();
+  }
+  already_active = !k3_start_policy.inflight &&
+      (k3_start_policy.protection == K3_PMP_ACTIVE ||
+       k3_start_policy.protection == K3_PMP_TRANSITION);
+  k3_policy_unlock(&k3_start_policy);
+  if (already_active) {
+    return 0;
+  }
+
   if (k3_hsm_gate_acquire(&k3_global_hsm_gate)) return SBI_EINVALID_STATE;
   if (k3_policy_lock(&k3_start_policy)) {
     k3_hsm_gate_release(&k3_global_hsm_gate);

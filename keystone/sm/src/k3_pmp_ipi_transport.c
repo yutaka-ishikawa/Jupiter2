@@ -4,8 +4,10 @@
 /* K3 IPI transport. This adapter is not part of the production SM build until
  * all-hart enumeration, HSM replay, and PMP ownership have been integrated. */
 #include <sbi/sbi_ipi.h>
+#include <sbi/riscv_barrier.h>
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_scratch.h>
+#include <sbi/sbi_timer.h>
 #include <sbi/sbi_hsm.h>
 #include <sbi/sbi_hart.h>
 #include <sbi/sbi_domain.h>
@@ -13,6 +15,8 @@
 #include <sbi/sbi_ecall_interface.h>
 #include "k3_pmp_ipi_transport.h"
 #include "k3_pmp_mailbox.h"
+
+#define K3_PMP_ACK_TIMEOUT_MS 100
 
 static int k3_pmp_ipi_event = -1;
 static unsigned long k3_mailbox_offset;
@@ -105,15 +109,18 @@ int k3_pmp_ipi_transport_bind_apply(k3_pmp_apply_fn fn)
 int k3_pmp_ipi_transport_send(ulong mask, ulong base,
                               const struct k3_pmp_ipi_request *request)
 {
+  const struct sbi_timer_device *timer = sbi_timer_get_device();
   unsigned int n = 0;
   unsigned int i;
+  u64 started, timeout_ticks;
   ulong unmatched;
   int rc;
   struct sbi_hartmask deliverable;
   struct sbi_domain *dom = sbi_domain_thishart_ptr();
   if (k3_pmp_ipi_event < 0 || !k3_apply || !request || !mask || base != 0)
     return SBI_ENOTSUPP;
-  if (!dom || sbi_hsm_hart_interruptible_mask(dom, &deliverable))
+  if (!timer || timer->timer_freq < 1000 ||
+      !dom || sbi_hsm_hart_interruptible_mask(dom, &deliverable))
     return SBI_ENOTSUPP;
   if (sbi_scratch_last_hartindex() >= sizeof(ulong) * 8)
     return SBI_ENOTSUPP;
@@ -137,26 +144,36 @@ int k3_pmp_ipi_transport_send(ulong mask, ulong base,
   SM_TRACE_RESULT("PMP send result", rc);
   if (rc) return rc;
   if (sm_verify_ipi_fault()) return SBI_EFAIL;
-  /* A send is never an ACK. Observe every target's exact generation. */
+  /* A send is never an ACK. Use one wall-clock budget for the broadcast,
+   * independent of how quickly the sending hart spins.
+   */
+  started = sbi_timer_value();
+  timeout_ticks = (timer->timer_freq / 1000) * K3_PMP_ACK_TIMEOUT_MS;
   for (i = 0; i <= sbi_scratch_last_hartindex(); i++) {
     struct sbi_scratch *remote = sbi_hartindex_to_scratch(i);
     u32 hartid = sbi_hartindex_to_hartid(i);
     struct k3_pmp_mailbox *mb;
     if (!(mask & (1UL << hartid))) continue;
     mb = sbi_scratch_offset_ptr(remote, k3_mailbox_offset);
-    unsigned long spins = 1000000UL;
     int state;
+
     do {
       state = k3_pmp_mailbox_check(mb, request->generation);
-      if (state < 0) {
-        SM_TRACE_VALUES("PMP ACK failed", hartid, request->generation);
-        return SBI_EFAIL;
+      if (state != 0) {
+        break;
       }
-      if (state == 1) break;
-    } while (--spins);
-    if (!spins) {
-      SM_TRACE_VALUES("PMP ACK timeout", hartid, request->generation);
+      cpu_relax();
+    } while (sbi_timer_value() - started < timeout_ticks);
+    if (!state) {
+      state = k3_pmp_mailbox_check(mb, request->generation);
+    }
+    if (state < 0) {
+      SM_TRACE_VALUES("PMP ACK failed", hartid, request->generation);
       return SBI_EFAIL;
+    }
+    if (!state) {
+      SM_TRACE_VALUES("PMP ACK timeout", hartid, request->generation);
+      return SBI_ETIMEDOUT;
     }
   }
   for (i = 0; i <= sbi_scratch_last_hartindex(); i++) {
