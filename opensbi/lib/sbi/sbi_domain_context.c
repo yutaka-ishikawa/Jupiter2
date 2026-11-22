@@ -92,29 +92,43 @@ static void hart_context_set(struct sbi_domain *dom, u32 hartindex,
  *
  * @param ctx pointer to the current HART context
  * @param dom_ctx pointer to the target domain context
+ * @param set_caller whether to record the current context as the caller
+ *
+ * @return 0 on success or an SBI error before committing the switch
  */
-static void switch_to_next_domain_context(struct hart_context *ctx,
-					  struct hart_context *dom_ctx)
+static int switch_to_next_domain_context(struct hart_context *ctx,
+					 struct hart_context *dom_ctx,
+					 bool set_caller)
 {
-	u32 hartindex = current_hartindex();
-	struct sbi_trap_context *trap_ctx;
-	struct sbi_domain *current_dom = ctx->dom;
-	struct sbi_domain *target_dom = dom_ctx->dom;
-	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
-#ifndef CONFIG_K3_KEYSTONE_SM
-	unsigned int pmp_count = sbi_hart_pmp_count(scratch);
+    u32 hartindex = current_hartindex();
+    struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+    struct sbi_trap_context *trap_ctx = sbi_trap_get_context(scratch);
+    struct sbi_domain *current_dom, *target_dom;
+#ifdef CONFIG_K3_KEYSTONE_SM
+    int rc;
+#else
+    unsigned int pmp_count = sbi_hart_pmp_count(scratch);
 #endif
 
+    if (!ctx || !dom_ctx || ctx == dom_ctx || !trap_ctx) {
+	return SBI_EINVAL;
+    }
+    current_dom = ctx->dom;
+    target_dom = dom_ctx->dom;
+
 #ifdef CONFIG_K3_KEYSTONE_SM
-	/* ADR-002: A live Keystone PMP policy must never be erased by
-	 * OpenSBI domain switching.  Domain migration has no validated
-	 * SM-owned PMP transition yet; fail closed before changing either
-	 * hart ownership or PMP CSRs.  This is a temporary restriction,
-	 * NOT an implementation of domain migration.
-	 */
-	sbi_printf("K3 Keystone: domain switch blocked (PMP ownership)\n");
-	sbi_hart_hang();
+    /* Update only the OpenSBI-owned fixed slots before publishing the
+     * new domain. On error the source retains its existing context.
+     */
+    rc = sbi_hart_keystone_switch_optee_pmp(target_dom);
+    if (rc) {
+	return rc;
+    }
 #endif
+
+    if (set_caller) {
+	dom_ctx->prev_ctx = ctx;
+    }
 
 	/* Assign current hart to target domain */
 	spin_lock(&current_dom->assigned_harts_lock);
@@ -127,12 +141,7 @@ static void switch_to_next_domain_context(struct hart_context *ctx,
 	sbi_hartmask_set_hartindex(hartindex, &target_dom->assigned_harts);
 	spin_unlock(&target_dom->assigned_harts_lock);
 
-	/* Reconfigure PMP settings for the new domain.
-	 * Keystone has no validated SM-owned domain migration protocol.
-	 * Exclude the OpenSBI PMP mutation sequence from Keystone objects
-	 * even though the entry gate above already hangs (defense in depth).
-	 * Do not treat this as enabling domain migration.
-	 */
+    /* Generic domains retain the full PMP reconfiguration path. */
 #ifndef CONFIG_K3_KEYSTONE_SM
 	for (int i = 0; i < pmp_count; i++) {
 		pmp_disable(i);
@@ -150,13 +159,15 @@ static void switch_to_next_domain_context(struct hart_context *ctx,
 	ctx->stval	= csr_swap(CSR_STVAL, dom_ctx->stval);
 	ctx->sip	= csr_swap(CSR_SIP, dom_ctx->sip);
 	ctx->satp	= csr_swap(CSR_SATP, dom_ctx->satp);
+#ifdef CONFIG_K3_KEYSTONE_SM
+    __asm__ __volatile__("sfence.vma" ::: "memory");
+#endif
 	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_10)
 		ctx->scounteren = csr_swap(CSR_SCOUNTEREN, dom_ctx->scounteren);
 	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12)
 		ctx->senvcfg	= csr_swap(CSR_SENVCFG, dom_ctx->senvcfg);
 
 	/* Save current trap state and restore target domain's trap state */
-	trap_ctx = sbi_trap_get_context(scratch);
 	sbi_memcpy(&ctx->trap_ctx, trap_ctx, sizeof(*trap_ctx));
 	sbi_memcpy(trap_ctx, &dom_ctx->trap_ctx, sizeof(*trap_ctx));
 
@@ -175,6 +186,7 @@ static void switch_to_next_domain_context(struct hart_context *ctx,
 		else
 			sbi_hsm_hart_stop(scratch, true);
 	}
+    return 0;
 }
 
 /**
@@ -202,16 +214,7 @@ int sbi_domain_context_enter(struct sbi_domain *dom)
 	struct hart_context *ctx = hart_context_thishart_get();
 	struct hart_context *dom_ctx = hart_context_get(dom, current_hartindex());
 
-	/* Validate the domain context existence */
-	if (!dom_ctx)
-		return SBI_EINVAL;
-
-	/* Update target context's previous context to indicate the caller */
-	dom_ctx->prev_ctx = ctx;
-
-	switch_to_next_domain_context(ctx, dom_ctx);
-
-	return 0;
+    return switch_to_next_domain_context(ctx, dom_ctx, true);
 }
 
 int sbi_domain_context_exit(void)
@@ -244,6 +247,10 @@ int sbi_domain_context_exit(void)
 		ctx = hart_context_thishart_get();
 	}
 
+    if (!ctx) {
+	return SBI_EINVAL;
+    }
+
 	dom_ctx = ctx->prev_ctx;
 
 	/* If no previous caller context */
@@ -265,9 +272,7 @@ int sbi_domain_context_exit(void)
 	if (!dom_ctx)
 		dom_ctx = hart_context_get(&root, hartindex);
 
-	switch_to_next_domain_context(ctx, dom_ctx);
-
-	return 0;
+    return switch_to_next_domain_context(ctx, dom_ctx, false);
 }
 
 int sbi_domain_context_init(void)
