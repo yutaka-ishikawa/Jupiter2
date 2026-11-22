@@ -102,8 +102,9 @@
 | KSB-075 | ドメイン切替でSstcタイマー期限を引き継ぐ | OpenSBIドメインコンテキストに `stimecmp` がない | 試験的な変更を取り消し、同居時の影響は未確認 |
 | KSB-076 | OP-TEE先行起動でK3 Keystoneの初期PMP設定が停止 | K3移植のPMP検査と配置が起動時のLinux所属を前提とする | K3 QEMUでOP-TEEの16 hart初期化と主hartのLinux引き渡しを確認 |
 | KSB-078 | OP-TEE先行起動後にLinuxが副hartを開始できない | 既存のドメイン終了が内部HSM停止を必要とし、K3は全停止を拒否 | 初回引き渡しの内部停止を実装し、K3 QEMUでLinuxの16 CPU起動を確認 |
-| KSB-079 | OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる | 排他の試作と既存のDESTROYING隔離処理の組合せ | 状態変更前の排他とclose後の再試行を実装、競合のQEMU再現は未実施 |
+| KSB-079 | OP-TEEとのPMP更新競合でKeystoneのDESTROYを再試行できなくなる | 排他の試作と既存のDESTROYING隔離処理の組合せ | K3 QEMUで `-EAGAIN`、明示再試行とclose後の破棄成功を確認。TA再開はKSB-081 |
 | KSB-080 | OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト | OpenSBIの実行時切替で毎回PMP配置の全領域をUARTへ出力 | 実行時の詳細出力を抑制し、K3 QEMUで並行TA応答を確認 |
+| KSB-081 | Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する | MPXY経路がPMP予約競合を再試行せず、Linux側が応答を引き続き処理する | K3 QEMUのclose競合で再現、対処前 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1268,6 +1269,10 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   `hello-native` が成功した。同居構成ではOP-TEEドライバーの初期化と16 CPUの
   `TEEC_InitializeContext` 成功を確認した。この時点の並行TA試験はタイムアウトした
   （KSB-080）。closeの競合処理は未確認。
+- `31673e834` のK3 QEMU同居ゲストで競合を確認した。明示経路ではCPU 2の最初の
+  DESTROYが `-EAGAIN`、CPU 3のTAが期待値42を返した後の再試行が成功した。
+  close経路ではテスト用ドライバのログで遅延ワークの破棄成功を確認した。
+  この試行ではTA応答が不正となり、試験全体は失敗した（KSB-081）。
 
 ### KSB-080: OP-TEEの16 CPU並行TA試験がPMP詳細ログでタイムアウト
 
@@ -1279,3 +1284,13 @@ QEMU guest統合はこの報告に含まない。再現操作は[RAM起動ガイ
   一覧、配置の検査、拒否時の診断、CSRの読み戻しは維持した。
 - 修正後は同じK3 QEMU試験で `PASS: parallel OP-TEE TA calls on all 16 CPUs` を
   確認した。このinitramfsの試験対象はTA呼び出しで、Enclaveとの同時実行は未検証。
+
+### KSB-081: Keystoneの遅延DESTROY中にOP-TEEのRPC復帰が失敗する
+
+- 16 hartの同居ゲストで、CPU 3の長時間TA呼び出し中にCPU 2でDESTROYを発行し、
+  `-EAGAIN` の後にプロセスがファイルを閉じた。診断付きOpenSBIの再試験で、
+  RPC復帰 `0x32000003` のPMP予約が `SBI_EINVALID_STATE`（`-10`）で拒否された。
+- LinuxはMPXYエラー `-524` を記録し、TAの呼び出し結果は `rc=0` だったが、
+  入力41が未変更で検証マーカーは0だった。遅延ワークは破棄を完了した。
+- MPXYの予約競合を再試行可能な状態として通知し、Linux側で同じ要求を再送する案と、
+  RPCからの復帰までKeystone側のPMP更新を延期する案がある。
