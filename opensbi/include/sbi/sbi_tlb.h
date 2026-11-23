@@ -54,6 +54,8 @@ do { \
 
 #define SBI_TLB_INFO_SIZE		sizeof(struct sbi_tlb_info)
 
+bool sbi_tlb_process_once(struct sbi_scratch *scratch);
+
 int sbi_tlb_request(ulong hmask, ulong hbase, struct sbi_tlb_info *tinfo);
 
 int sbi_tlb_init(struct sbi_scratch *scratch, bool cold_boot);

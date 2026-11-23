@@ -8,6 +8,7 @@
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_scratch.h>
 #include <sbi/sbi_timer.h>
+#include <sbi/sbi_tlb.h>
 #include <sbi/sbi_hsm.h>
 #include <sbi/sbi_hart.h>
 #include <sbi/sbi_domain.h>
@@ -109,6 +110,7 @@ int k3_pmp_ipi_transport_bind_apply(k3_pmp_apply_fn fn)
 int k3_pmp_ipi_transport_send(ulong mask, ulong base,
                               const struct k3_pmp_ipi_request *request)
 {
+  struct sbi_scratch *local = sbi_scratch_thishart_ptr();
   const struct sbi_timer_device *timer = sbi_timer_get_device();
   unsigned int n = 0;
   unsigned int i;
@@ -162,6 +164,11 @@ int k3_pmp_ipi_transport_send(ulong mask, ulong base,
       if (state != 0) {
         break;
       }
+      /*
+       * A target hart may be waiting in RFENCE with M interrupts disabled.
+       * Service its request locally so it can return and handle the PMP IPI.
+       */
+      sbi_tlb_process_once(local);
       cpu_relax();
     } while (sbi_timer_value() - started < timeout_ticks);
     if (!state) {

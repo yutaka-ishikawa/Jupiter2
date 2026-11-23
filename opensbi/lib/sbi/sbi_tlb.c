@@ -226,7 +226,7 @@ static void tlb_entry_process(struct sbi_tlb_info *tinfo)
 	}
 }
 
-static bool tlb_process_once(struct sbi_scratch *scratch)
+bool sbi_tlb_process_once(struct sbi_scratch *scratch)
 {
 	struct sbi_tlb_info tinfo;
 	struct sbi_fifo *tlb_fifo =
@@ -242,7 +242,7 @@ static bool tlb_process_once(struct sbi_scratch *scratch)
 
 static void tlb_process(struct sbi_scratch *scratch)
 {
-	while (tlb_process_once(scratch));
+	while (sbi_tlb_process_once(scratch));
 }
 
 static void tlb_sync(struct sbi_scratch *scratch)
@@ -255,7 +255,7 @@ static void tlb_sync(struct sbi_scratch *scratch)
 		 * While we are waiting for remote hart to set the sync,
 		 * consume fifo requests to avoid deadlock.
 		 */
-		tlb_process_once(scratch);
+		sbi_tlb_process_once(scratch);
 	}
 
 	return;
@@ -361,7 +361,7 @@ static int tlb_update(struct sbi_scratch *scratch,
 		 * TODO: Introduce a wait/wakeup event mechanism to handle
 		 * this properly.
 		 */
-		tlb_process_once(scratch);
+		sbi_tlb_process_once(scratch);
 		sbi_dprintf("hart%d: hart%d tlb fifo full\n", curr_hartid,
 			    sbi_hartindex_to_hartid(remote_hartindex));
 		return SBI_IPI_UPDATE_RETRY;
