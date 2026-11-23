@@ -1,0 +1,41 @@
+UART抜粋。各行の先頭の番号は元ログの行番号。
+
+=== ksb084-follow-baseline.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9353: fTPM PASS: TPM2_GetRandom returned 16 bytes via /dev/tpmrm0
+9392: reboot: Power down
+
+=== ksb084-follow-fixed.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9353: fTPM PASS: TPM2_GetRandom returned 16 bytes via /dev/tpmrm0
+9392: reboot: Power down
+
+=== ksb084-pmp-quarantine-ack-test.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+1518: pmp_set_global:PMP global set unavailable or incomplete
+1519: keystone_enclave: CREATE PMP state uncertain; retaining enclave pages
+1533: OBS worker=0 cpu=0 begin_ns=1217845583 end_ns=1278085250 completed=0 callbacks=0 interrupts=0 failed=1
+1534: OBS worker=1 cpu=1 begin_ns=1219471792 end_ns=1277687792 completed=0 callbacks=0 interrupts=0 failed=1
+1538: VERIFY_STRESS_QUARANTINE exit=1
+1539: reboot: Power down
+
+=== ksb084-pmp-quarantine-normal1.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+1528: OBS worker=0 cpu=0 begin_ns=1179188250 end_ns=2036865542 completed=4 callbacks=72 interrupts=7 failed=0
+1529: OBS worker=1 cpu=1 begin_ns=1180383667 end_ns=2083872500 completed=4 callbacks=72 interrupts=4 failed=0
+1533: VERIFY_STRESS_QUARANTINE exit=0
+1534: reboot: Power down
+
+=== ksb084-pmp-quarantine-normal2.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+1528: OBS worker=0 cpu=0 begin_ns=1321765208 end_ns=2291772167 completed=4 callbacks=72 interrupts=5 failed=0
+1529: OBS worker=1 cpu=1 begin_ns=1321051833 end_ns=2243429917 completed=4 callbacks=72 interrupts=5 failed=0
+1533: VERIFY_STRESS_QUARANTINE exit=0
+1534: reboot: Power down
+
+=== ksb084-pmp-quarantine-normal3.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+1528: OBS worker=0 cpu=0 begin_ns=1189697375 end_ns=2057604250 completed=4 callbacks=72 interrupts=7 failed=0
+1529: OBS worker=1 cpu=1 begin_ns=1188941083 end_ns=2109785459 completed=4 callbacks=72 interrupts=5 failed=0
+1533: VERIFY_STRESS_QUARANTINE exit=0
+1534: reboot: Power down

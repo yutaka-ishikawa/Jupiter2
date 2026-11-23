@@ -1,0 +1,87 @@
+UART抜粋。各行の先頭の番号は元ログの行番号。
+
+=== ksb084-ftpm-enclave-diag-1.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9178: [PMP-diag] ACK timeout hart=7 state=1 remote-rfence=1 local-rfence=0
+9179: [PMP-diag] generation=1 mask=fffb rc=-12
+9180: pmp_set_global:PMP global set unavailable or incomplete
+9181: keystone_enclave: CREATE PMP state uncertain; retaining enclave pages
+9187: Enclave init failed: 3
+9195: Enclave and fTPM runner failed
+9196: fTPM FAIL
+9201: reboot: Power down
+
+=== ksb084-ftpm-enclave-diag-2.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9178: [PMP-diag] ACK timeout hart=14 state=1 remote-rfence=1 local-rfence=0
+9179: [PMP-diag] generation=1 mask=fffb rc=-12
+9180: pmp_set_global:PMP global set unavailable or incomplete
+9181: keystone_enclave: CREATE PMP state uncertain; retaining enclave pages
+9187: Enclave init failed: 3
+9195: Enclave and fTPM runner failed
+9196: fTPM FAIL
+9201: reboot: Power down
+
+=== ksb084-ftpm-enclave-diag-3.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=4
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-diag-4.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=5
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-diag-5.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9178: [PMP-diag] ACK timeout hart=3 state=1 remote-rfence=1 local-rfence=0
+9179: [PMP-diag] generation=1 mask=fffb rc=-12
+9180: pmp_set_global:PMP global set unavailable or incomplete
+9181: keystone_enclave: CREATE PMP state uncertain; retaining enclave pages
+9187: Enclave init failed: 3
+9195: Enclave and fTPM runner failed
+9196: fTPM FAIL
+9201: reboot: Power down
+
+=== ksb084-ftpm-enclave-rfence-proof-1.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9372: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=4
+9373: Enclave CPU=2 run=0 exit=0 destroy=0
+9374: PASS: fTPM response released the concurrently running Enclave
+9405: reboot: Power down
+
+=== ksb084-ftpm-enclave-rfence-proof-2.log ===
+1445: smp: Brought up 1 node, 16 CPUs
+9381: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=6
+9382: Enclave CPU=2 run=0 exit=0 destroy=0
+9383: PASS: fTPM response released the concurrently running Enclave
+9414: reboot: Power down
+
+=== ksb084-ftpm-enclave-rfence-proof-3.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9372: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=4
+9373: Enclave CPU=2 run=0 exit=0 destroy=0
+9374: PASS: fTPM response released the concurrently running Enclave
+9405: reboot: Power down
+
+=== ksb084-ftpm-enclave-rfence-proof-4.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=5
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-rfence-proof-5.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9178: [PMP-diag] ACK timeout hart=6 state=1 remote-rfence=1 local-rfence=0 local-queue-from-target=1
+9179: [PMP-diag] generation=1 mask=fffb rc=-12
+9180: pmp_set_global:PMP global set unavailable or incomplete
+9181: keystone_enclave: CREATE PMP state uncertain; retaining enclave pages
+9187: Enclave init failed: 3
+9195: Enclave and fTPM runner failed
+9196: fTPM FAIL
+9201: reboot: Power down

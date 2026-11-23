@@ -1,0 +1,24 @@
+UART抜粋。各行の先頭の番号は元ログの行番号。
+
+=== ksb084-ftpm-enclave-verified-1.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=8
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-verified-2.log ===
+1445: smp: Brought up 1 node, 16 CPUs
+9179: pmp_set_global:PMP global set unavailable or incomplete
+9180: keystone_enclave: CREATE PMP state uncertain; retaining enclave pages
+9186: Enclave init failed: 3
+9194: Enclave and fTPM runner failed
+9195: fTPM FAIL
+9200: reboot: Power down
+
+=== ksb084-ftpm-enclave-verified-3.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=7
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down

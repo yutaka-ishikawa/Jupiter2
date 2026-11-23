@@ -109,6 +109,7 @@
 | KSB-083 | 同居ゲストがOP-TEEの副hart初期化で停止 | HSM起動完了時の一時的なゲート競合で副hartを停止 | 取得を再試行するよう修正し、K3 QEMUで強制競合と反復起動を確認 |
 | KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | OP-TEE実行中のhartがLinux向けSBIソフトウェアIPIの宛先から外れる | Linux宛てIPIを保持するよう修正。16 hart QEMUでfTPMと同居試験が成功 |
 | KSB-085 | 並行CREATE／DESTROY時に全hart PMP更新が失敗する | ローカル切替のゲート競合でhartが停止。固定回数のACKポーリングでも早期打ち切り | PMP状態の確認とACK待ちを修正 |
+| KSB-086 | fTPM同居QEMUでEnclaveのCREATEが間欠的に失敗する | PMP ACK待ちとRFENCE待ちが競合 | ACK待ちでローカルのRFENCEを処理。修正後の16 hart同時実行試験は5回合格 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1561,3 +1562,36 @@ SBIエラー検査、STOP/RESUME、乱数、crypto未対応構成、edgecall 2 M
   ページ保持をログに出し、CREATEは `-EIO` で終了した。その後のDESTROYも
   SMで拒否され、ゲストは正常に電源断した。診断用の失敗注入は製品コードに含めない。
   この試験は失敗後の処理を検証するもので、自然発生したACK遅延の原因は未確定。
+
+
+### KSB-086: fTPM同居QEMUでEnclaveのCREATEが間欠的に失敗する
+
+- eFuse有効のOP-TEE Core、Linuxの `tpm_ftpm_tee`、Keystoneを載せた
+  16 hartのJupiter2 QEMUで、3起動中1回、EnclaveのCREATEが失敗した。
+  fTPMのテストコマンドを発行する前に、全hartへのPMP更新が未完了となった。
+- 追加診断では、送信元hart 2の最初のPMP更新で、宛先hart 3、7、14が
+  別々の起動でPMPメールボックスをPENDINGのまま残し、100 msでタイムアウトした。
+  各宛先に未完了のRFENCEが1件あった。キューも調べた別の再現では、
+  hart 6のPMP ACKをhart 2が待つ間に、hart 6のRFENCE要求が
+  hart 2の処理キューに残っていることを確認した。
+- RFENCEを発行したhartは、M-mode割り込みを受け付けずに応答を待つ。
+  PMPの送信元が自分宛てのRFENCEをキューに残したままPMP ACKを待つと、
+  宛先もRFENCE待ちから戻れず、PMP IPIを処理できない。
+- 修正コミット `8299c7faf` では、PMP ACK待ちの間に送信元hartのRFENCE
+  キューを既存のOpenSBI処理で1件ずつ進める。100 msの期限、世代一致、
+  PMPの読み戻し、失敗時の状態保持も引き続き適用する。
+- 修正済みファームウェアの16 hart QEMU試験は5起動すべてで合格した。
+  Linux CPU 3から `/dev/tpmrm0` 経由で `TPM2_GetRandom(16)` を実行し、
+  CPU 2のEnclaveで各起動4〜7回のタイマー割り込みをTPMコマンドの送受信中に
+  観測した。いずれもEnclaveの終了と破棄、およびゲストの電源断を確認した。
+- 同じ修正済みファームウェアで、backingなしの2 workerが各4周の
+  ライフサイクルを実行する並行CREATE／DESTROY試験も1起動で合格した。
+- 初回の失敗ログにはRFENCEの診断情報が無いため、その1件およびKSB-085の
+  過去の失敗が同じ待ち合わせだったかは未確認。実機は未検証。
+
+
+UART抜粋は、[初回の3試行](evidence/jupiter2-ksb086/01-initial-uart.log)、
+[再現診断](evidence/jupiter2-ksb086/02-diagnostic-uart.log)、
+[修正後の同居・並行試験](evidence/jupiter2-ksb086/03-fixed-uart.log)、
+[KSB-084・085の回帰試験](evidence/jupiter2-ksb086/04-prior-regression-uart.log)
+に記録した。

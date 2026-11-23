@@ -1,0 +1,43 @@
+UART抜粋。各行の先頭の番号は元ログの行番号。
+
+=== ksb084-ftpm-enclave-fixed-1.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=4
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-fixed-2.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=5
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-fixed-3.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=7
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-fixed-4.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=5
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-ftpm-enclave-fixed-5.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+9356: fTPM CPU=3 device=/dev/tpmrm0 TPM2_GetRandom(16): PASS; commands=1; Enclave timer stops during command=4
+9357: Enclave CPU=2 run=0 exit=0 destroy=0
+9358: PASS: fTPM response released the concurrently running Enclave
+9397: reboot: Power down
+
+=== ksb084-pmp-rfence-fixed-stress.log ===
+1444: smp: Brought up 1 node, 16 CPUs
+1527: OBS worker=0 cpu=0 begin_ns=1732041708 end_ns=3103131917 completed=4 callbacks=72 interrupts=6 failed=0
+1528: OBS worker=1 cpu=1 begin_ns=1732477083 end_ns=3030614876 completed=4 callbacks=72 interrupts=6 failed=0
+1532: VERIFY_STRESS_QUARANTINE exit=0
+1533: reboot: Power down

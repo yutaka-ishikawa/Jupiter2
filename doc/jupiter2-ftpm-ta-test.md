@@ -179,4 +179,11 @@ reboot: Power down
 [障害記録](keystone-bug-report.md#ksb-084-qemuのftpmモジュール登録中に間欠的にタイムアウト)
 で追跡する。
 
-再起動をまたぐNV保持、Keystone EnclaveとfTPMの同時実行、実機での動作は未検証。
+16 hartの同居QEMUでは、CPU 2でEnclaveを実行しながら、
+CPU 3の `/dev/tpmrm0` から `TPM2_GetRandom(16)` を呼び出した。
+初回の試験では3起動のうち1回がEnclave作成中のPMP同期で失敗した。
+KSB-086の修正後は5起動すべてで16バイトの応答を取り、コマンドの送受信中に
+Enclaveのタイマー割り込みを観測した。Enclaveの正常終了・破棄と電源断も確認した。
+[障害記録](keystone-bug-report.md#ksb-086-ftpm同居qemuでenclaveのcreateが間欠的に失敗する)
+
+再起動をまたぐNV保持と実機での動作は未検証。
