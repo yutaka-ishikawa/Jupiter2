@@ -1,0 +1,32 @@
+diff --git a/core/mm/core_mmu.c b/core/mm/core_mmu.c
+index fad6ef0..d16d192 100644
+--- a/core/mm/core_mmu.c
++++ b/core/mm/core_mmu.c
+@@ -1078,6 +1078,12 @@ static void collect_mem_ranges(struct memory_map *mem_map)
+ 	const struct core_mmu_phys_mem *mem = NULL;
+ 	vaddr_t ram_start = secure_only[0].paddr;
+ 	size_t n = 0;
++    size_t primary_mapping_size = secure_only[0].size;
++
++#ifdef CFG_K3_FSBL_EVENT_LOG
++    /* The ROM_SEC mapping owns the final pages of primary secure DDR. */
++    primary_mapping_size -= CFG_K3_FSBL_EVENT_LOG_SIZE;
++#endif
+ 
+ #define ADD_PHYS_MEM(_type, _addr, _size) \
+ 		add_phys_mem(mem_map, #_addr, (_type), (_addr), (_size))
+@@ -1149,12 +1155,12 @@ static void collect_mem_ranges(struct memory_map *mem_map)
+ 		} else {
+ 			ADD_PHYS_MEM(MEM_AREA_SEC_RAM_OVERALL, next_pa,
+ 				     secure_only[0].paddr +
+-				     secure_only[0].size - next_pa);
++				     primary_mapping_size - next_pa);
+ 		}
+ 	} else {
+ 		ADD_PHYS_MEM(MEM_AREA_TEE_RAM, TEE_RAM_START, TEE_RAM_PH_SIZE);
+ 		ADD_PHYS_MEM(MEM_AREA_SEC_RAM_OVERALL, secure_only[n].paddr,
+-			     secure_only[0].size);
++			     primary_mapping_size);
+ 	}
+ 
+ 	for (n = 1; n < ARRAY_SIZE(secure_only); n++)

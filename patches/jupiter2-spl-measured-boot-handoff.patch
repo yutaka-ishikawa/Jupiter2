@@ -1,0 +1,182 @@
+diff --git a/common/spl/spl_fit.c b/common/spl/spl_fit.c
+index cf56b0c..c4bcaf0 100644
+--- a/common/spl/spl_fit.c
++++ b/common/spl/spl_fit.c
+@@ -733,6 +733,10 @@ static int spl_simple_fit_parse(struct spl_fit_info *ctx)
+ }
+ 
+ #ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++static bool jupiter2_mb_ready;
++static u8 jupiter2_mb_buffer[256];
++static struct jupiter2_mb_log jupiter2_log;
++
+ static int jupiter2_measure(struct jupiter2_mb_log *log,
+ 			     const struct spl_image_info *image,
+ 			     const char *name)
+@@ -743,6 +747,11 @@ static int jupiter2_measure(struct jupiter2_mb_log *log,
+     if (!image->size || image->load_addr > ~0UL - image->size) {
+ 	return -EINVAL;
+     }
++    if (image->load_addr < JUPITER2_MB_LOG_BASE +
++			    JUPITER2_MB_LOG_CAPACITY &&
++	image->load_addr + image->size > JUPITER2_MB_LOG_BASE) {
++	return -EINVAL;
++    }
+     payload = map_sysmem(image->load_addr, image->size);
+     sha256_csum_wd(payload, image->size, digest, CHUNKSZ_SHA256);
+     unmap_sysmem(payload);
+@@ -765,6 +774,59 @@ static void jupiter2_print_log(const struct jupiter2_mb_log *log)
+ 	}
+     }
+ }
++
++int jupiter2_mb_publish(void *fdt)
++{
++    struct jupiter2_mb_log *log = &jupiter2_log;
++    ulong start = (ulong)fdt;
++    ulong end;
++    int node;
++    int ret;
++    void *destination;
++
++    if (!jupiter2_mb_ready || !fdt || fdt_check_header(fdt)) {
++	return -EINVAL;
++    }
++    end = start + fdt_totalsize(fdt);
++    if (end < start ||
++	(start < JUPITER2_MB_LOG_BASE + JUPITER2_MB_LOG_CAPACITY &&
++	 end > JUPITER2_MB_LOG_BASE)) {
++	return -EINVAL;
++    }
++    if (fdt_node_offset_by_compatible(fdt, -1, "arm,tpm_event_log") !=
++	-FDT_ERR_NOTFOUND) {
++	return -EINVAL;
++    }
++    node = fdt_add_subnode(fdt, 0, "tpm-event-log");
++    if (node < 0) {
++	return node;
++    }
++    ret = fdt_setprop_string(fdt, node, "compatible", "arm,tpm_event_log");
++    if (!ret) {
++	ret = fdt_setprop_u64(fdt, node, "tpm_event_log_sm_addr",
++			      JUPITER2_MB_LOG_BASE);
++    }
++    if (!ret) {
++	ret = fdt_setprop_u32(fdt, node, "tpm_event_log_size", log->length);
++    }
++    if (ret) {
++	return ret;
++    }
++
++    destination = map_sysmem(JUPITER2_MB_LOG_BASE,
++			     JUPITER2_MB_LOG_CAPACITY);
++    memset(destination, 0, JUPITER2_MB_LOG_CAPACITY);
++    memcpy(destination, log->data, log->length);
++    flush_dcache_range(JUPITER2_MB_LOG_BASE,
++		       JUPITER2_MB_LOG_BASE + JUPITER2_MB_LOG_CAPACITY);
++    unmap_sysmem(destination);
++    flush_dcache_range(round_down(start, CONFIG_RISCV_CBOM_BLOCK_SIZE),
++		       round_up(end, CONFIG_RISCV_CBOM_BLOCK_SIZE));
++
++    jupiter2_mb_ready = false;
++    jupiter2_print_log(log);
++    return 0;
++}
+ #endif
+ 
+ int spl_load_simple_fit(struct spl_image_info *spl_image,
+@@ -778,8 +840,6 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	int firmware_node;
+ 
+ #ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
+-    u8 measured_log[256];
+-    struct jupiter2_mb_log log;
+     bool measure = false;
+     bool uboot_measured = false;
+ #endif
+@@ -829,6 +889,9 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	}
+ 
+ 	/* Load the image and set up the spl_image structure */
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++    spl_image->size = 0;
++#endif
+ 	ret = spl_load_fit_image(info, sector, &ctx, node, spl_image);
+ 	if (ret)
+ 		return ret;
+@@ -845,9 +908,11 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ #ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
+     measure = spl_image->os == IH_OS_OPENSBI;
+     if (measure) {
+-	ret = jupiter2_mb_init(&log, measured_log, sizeof(measured_log));
++	jupiter2_mb_ready = false;
++	ret = jupiter2_mb_init(&jupiter2_log, jupiter2_mb_buffer,
++			       sizeof(jupiter2_mb_buffer));
+ 	if (!ret) {
+-	    ret = jupiter2_measure(&log, spl_image, "OpenSBI");
++	    ret = jupiter2_measure(&jupiter2_log, spl_image, "OpenSBI");
+ 	}
+ 	if (ret) {
+ 	    return ret;
+@@ -904,7 +969,7 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	    if (uboot_measured) {
+ 		return -EINVAL;
+ 	    }
+-	    ret = jupiter2_measure(&log, &image_info, "U-Boot");
++	    ret = jupiter2_measure(&jupiter2_log, &image_info, "U-Boot");
+ 	    if (ret) {
+ 		return ret;
+ 	    }
+@@ -945,7 +1010,7 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	if (!uboot_measured) {
+ 	    return -ENOENT;
+ 	}
+-	jupiter2_print_log(&log);
++	jupiter2_mb_ready = true;
+     }
+ #endif
+ 
+diff --git a/common/spl/spl_opensbi.c b/common/spl/spl_opensbi.c
+index 9842356..39f5423 100644
+--- a/common/spl/spl_opensbi.c
++++ b/common/spl/spl_opensbi.c
+@@ -15,6 +15,9 @@
+ #include <asm/smp.h>
+ #include <opensbi.h>
+ #include <linux/libfdt.h>
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++#include <jupiter2_measured_boot.h>
++#endif
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+@@ -88,6 +91,14 @@ void spl_invoke_opensbi(struct spl_image_info *spl_image)
+ 	hang();
+     }
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++    ret = jupiter2_mb_publish(spl_image->fdt_addr);
++    if (ret) {
++	pr_err("J2MB: event log handoff failed: %d\n", ret);
++	hang();
++    }
++#endif
++
+     /* Prepare opensbi_info object */
+     opensbi_info.magic = FW_DYNAMIC_INFO_MAGIC_VALUE;
+     opensbi_info.version = FW_DYNAMIC_INFO_VERSION;
+diff --git a/include/jupiter2_measured_boot.h b/include/jupiter2_measured_boot.h
+index 7610388..2f979f9 100644
+--- a/include/jupiter2_measured_boot.h
++++ b/include/jupiter2_measured_boot.h
+@@ -7,6 +7,10 @@
+ 
+ #define JUPITER2_MB_SHA256_SIZE 32
+ #define JUPITER2_MB_EV_NO_ACTION 3
++#define JUPITER2_MB_LOG_BASE 0x171ff0000UL
++#define JUPITER2_MB_LOG_CAPACITY 0x10000UL
++
++int jupiter2_mb_publish(void *fdt);
+ 
+ struct jupiter2_mb_log {
+     u8 *data;

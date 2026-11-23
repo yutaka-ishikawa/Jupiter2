@@ -1,0 +1,13 @@
+14:K3 measured boot: DT event log bytes=116
+28:K3 measured boot: fixed event log PMP plan verified
+179:D/TC:00    add_phys_mem:749 VCORE_UNPG_RW_PA type SEC_RAM_OVERALL 0x17105d000 size 0x000c9000
+182:D/TC:00    add_phys_mem:749 VCORE_FREE_PA type SEC_RAM_OVERALL 0x171126000 size 0x002da000
+184:D/TC:00    add_phys_mem:749 next_pa type SEC_RAM_OVERALL 0x171400000 size 0x00bf0000
+193:D/TC:00    add_phys_mem:749 CFG_K3_FSBL_EVENT_LOG_BASE type ROM_SEC 0x171ff0000 size 0x00010000
+208:D/TC:00    dump_mmap_table:917 type SEC_RAM_OVERALL va 0x174c5d000..0x175beffff pa 0x17105d000..0x171feffff size 0x00f93000 (pgdir)
+209:D/TC:00    dump_mmap_table:917 type ROM_SEC      va 0x175c00000..0x175c0ffff pa 0x171ff0000..0x171ffffff size 0x00010000 (pgdir)
+213:I/TC: TPM: Fixed FSBL event log ready (116 bytes)
+1313:smp: Brought up 1 node, 16 CPUs
+5226:J2MB_PCR0_SHA256 cb592844121d926f1ca3ad4e1d6fb9d8e260ed6e3216361f7732e975a0e8bbf6
+5246:reboot: Power down
+host replay PCR 0 = cb592844121d926f1ca3ad4e1d6fb9d8e260ed6e3216361f7732e975a0e8bbf6

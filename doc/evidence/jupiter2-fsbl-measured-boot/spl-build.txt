@@ -1,0 +1,18 @@
+Source commit: 4c294a06c14e46e9c9cc934373c3e63919703017
+Commands: make k3_defconfig; make spl/u-boot-spl.bin; make FSBL.bin
+riscv64-linux-gcc.br_real (Buildroot 2021.11-12449-g1bef613319) 13.3.0
+CONFIG_SPL_MAX_SIZE=0x70F00
+CONFIG_SPL_BSS_MAX_SIZE=0x3000
+CONFIG_SPL_JUPITER2_MEASURED_BOOT=y
+CONFIG_SPL_SHA256=y
+  CC      spl/common/spl/spl_fit.o
+  CC      spl/common/spl/spl_opensbi.o
+  CC      spl/board/spacemit/k3/spl.o
+  LD      spl/u-boot-spl
+  COPY    spl/u-boot-spl.bin
+  BUILD   FSBL.bin
+433344 bytes FSBL.bin
+428981 bytes spl/u-boot-spl.bin
+717a3b4a484a5e3f7b136dfcb5f32e831e9dcc2a6ea949ad7b2a283f78843cf4  FSBL.bin
+71ef263135f08c00d1dd72ca56a8c8c4fd2ce66bc8fba9e22fe5d69f5381aa9f  spl/u-boot-spl.bin
+FSBL header and embedded SPL DTB: PASS

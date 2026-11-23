@@ -5,6 +5,7 @@
  */
 
 #include <sbi/sbi_error.h>
+#include <sbi/k3_measured_boot.h>
 #include <sbi/sbi_heap.h>
 #include <sbi/sbi_hart.h>
 #include <sbi/sbi_mpxy.h>
@@ -222,6 +223,44 @@ static int mpxy_opteed_send_message_withresp(
     return SBI_EINVAL;
 }
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+static int k3_measured_boot_log(const void *fdt, bool *present)
+{
+    const fdt64_t *address;
+    const fdt32_t *length;
+    int node;
+    int len;
+    u32 size;
+
+    *present = false;
+    node = fdt_node_offset_by_compatible(fdt, -1, "arm,tpm_event_log");
+    if (node == -FDT_ERR_NOTFOUND) {
+	return 0;
+    }
+    if (node < 0 || node != fdt_path_offset(fdt, "/tpm-event-log") ||
+	fdt_node_offset_by_compatible(fdt, node, "arm,tpm_event_log") !=
+	-FDT_ERR_NOTFOUND) {
+	return SBI_EINVAL;
+    }
+    address = fdt_getprop(fdt, node, "tpm_event_log_sm_addr", &len);
+    if (!address || len != sizeof(*address) ||
+	fdt64_ld(address) != K3_MB_LOG_BASE) {
+	return SBI_EINVAL;
+    }
+    length = fdt_getprop(fdt, node, "tpm_event_log_size", &len);
+    if (!length || len != sizeof(*length)) {
+	return SBI_EINVAL;
+    }
+    size = fdt32_ld(length);
+    if (!size || size > K3_MB_LOG_CAPACITY) {
+	return SBI_EINVAL;
+    }
+    *present = true;
+    sbi_printf("K3 measured boot: DT event log bytes=%u\n", size);
+    return 0;
+}
+#endif
+
 static int mpxy_opteed_init(const void *fdt, int nodeoff,
 			    const struct fdt_match *match)
 {
@@ -229,6 +268,9 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	const fdt32_t *val;
 	u32 channel_id;
 	int rc, len, i;
+#ifdef CONFIG_K3_KEYSTONE_SM
+    bool measured_boot;
+#endif
 
 	/* Setup domain for OP-TEE dispatcher */
 	rc = opteed_domain_setup(fdt, nodeoff, match);
@@ -239,8 +281,13 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	udomain = __get_udomain();
 
 #ifdef CONFIG_K3_KEYSTONE_SM
+    rc = k3_measured_boot_log(fdt, &measured_boot);
+    if (rc) {
+	sbi_printf("K3 measured boot: DT event log rejected (%d)\n", rc);
+	return rc;
+    }
     rc = sbi_hart_keystone_check_optee_pmp(sbi_scratch_thishart_ptr(),
-					  udomain, tdomain);
+					  udomain, tdomain, measured_boot);
     if (rc) {
 	sbi_printf("K3 OP-TEE PMP: fixed slot plan rejected (%d)\n", rc);
 	return rc;

@@ -166,7 +166,8 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
 struct sbi_domain;
 int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
 				    const struct sbi_domain *host,
-				    const struct sbi_domain *tee);
+				    const struct sbi_domain *tee,
+				    bool measured_boot);
 const struct sbi_domain *sbi_hart_keystone_optee_host(void);
 int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch);
 int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target);

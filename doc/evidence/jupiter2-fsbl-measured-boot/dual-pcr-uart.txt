@@ -1,0 +1,9 @@
+14:K3 measured boot: DT event log bytes=170
+28:K3 measured boot: fixed event log PMP plan verified
+213:I/TC: TPM: Fixed FSBL event log ready (170 bytes)
+1313:smp: Brought up 1 node, 16 CPUs
+4013:I/TA: TPM Startup(CLEAR) succeeded for event log replay
+5229:J2MB_PCR0_SHA256 cb592844121d926f1ca3ad4e1d6fb9d8e260ed6e3216361f7732e975a0e8bbf6
+5230:J2MB_PCR1_SHA256 ea16ecd1d1319f986751250b630c7007d97649a4bf706a6b8025367bac25a2a3
+5250:reboot: Power down
+Independent host replay: {'0': 'cb592844121d926f1ca3ad4e1d6fb9d8e260ed6e3216361f7732e975a0e8bbf6', '1': 'ea16ecd1d1319f986751250b630c7007d97649a4bf706a6b8025367bac25a2a3'}

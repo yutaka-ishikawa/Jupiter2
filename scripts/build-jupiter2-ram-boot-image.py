@@ -220,6 +220,8 @@ def build(args):
     if not all(tools.values()):
         fail('install u-boot-tools and device-tree-compiler; mkimage/dumpimage/dtc must be on PATH')
     paths = {key: getattr(args, key).resolve() for key in ('uboot_itb', 'esos_itb', 'opensbi_bin', 'fsbl')}
+    if args.optee_bin:
+        paths['optee_bin'] = args.optee_bin.resolve()
     inputs = {key: path.read_bytes() for key, path in paths.items()}
     if not inputs['fsbl'] or not inputs['opensbi_bin']:
         fail('FSBL and OpenSBI BIN must be nonempty')
@@ -287,6 +289,16 @@ def build(args):
                           os=text('opensbi'), load=cells(args.opensbi_load), entry=cells(args.opensbi_load))
     for node in (firmware, uboot, fdt):
         images.children[node.name] = node
+    if 'optee_bin' in inputs:
+        payload = inputs['optee_bin']
+        if not payload or payload.startswith((b'\x7fELF', b'\xd0\x0d\xfe\xed')):
+            fail('--optee-bin requires a nonempty raw tee.bin')
+        if len(payload) > 0xff0000:
+            fail('OP-TEE BIN does not fit in its private payload range')
+        images.children['optee'] = make_image(
+            'optee', payload, 'firmware', description=text('OP-TEE Core'),
+            arch=text('riscv'), os=text('tee'),
+            load=cells(0x171000000), entry=cells(0x171000000))
     for name in enames:
         if name in images.children:
             fail(f'ESOS image name conflicts with output image: {name}')
@@ -294,6 +306,9 @@ def build(args):
         node = imported_image(eroot.children['images'].children[name], name, eb, etotal, allow_lzo=True)
         images.children[node.name] = node
     regions = []
+    if args.spl_measurement_log:
+        regions.append({'name': 'fsbl-event-log',
+                        'start': 0x171ff0000, 'end': 0x172000000})
     load_sizes = {}
     for node in images.children.values():
         if node is not fdt and 'load' not in node.props:
@@ -332,7 +347,8 @@ def build(args):
     configs.props['default'] = text(args.configuration)
     selected = Node(args.configuration)
     selected.props = {'description': text(args.board), 'firmware': text('opensbi'), 'fdt': text('fdt'),
-                      'loadables': text('uboot') + b''.join(text(name) for name in enames)}
+                      'loadables': b''.join(text(name) for name in
+                                           ['uboot'] + (['optee'] if args.optee_bin else []) + enames)}
     if args.uboot_layout == 'reference':
         del selected.props['firmware']
         selected.props['loadables'] = text('opensbi') + selected.props['loadables']
@@ -415,6 +431,9 @@ def main():
                         help='verified total runtime extent, including BSS/heap/scratch; not just BIN size')
     parser.add_argument('--max-download-bytes', type=positive, required=True,
                         help='verified SPL fastboot download buffer limit, NOT NOR partition size')
+    parser.add_argument('--optee-bin', type=Path, help='raw K3 OP-TEE Core tee.bin')
+    parser.add_argument('--spl-measurement-log', action='store_true',
+                        help='reserve the fixed SPL event-log region')
     args = parser.parse_args()
     args.output = args.output.absolute()
     try:

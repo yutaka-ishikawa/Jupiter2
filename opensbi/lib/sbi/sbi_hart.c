@@ -17,6 +17,7 @@
 #include <sbi/sbi_csr_detect.h>
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_hart.h>
+#include <sbi/k3_measured_boot.h>
 #include <sbi/sbi_math.h>
 #include <sbi/sbi_platform.h>
 #include <sbi/sbi_pmu.h>
@@ -649,10 +650,36 @@ static int k3_optee_pmp_plan(const struct k3_root_pmp_layout *layout,
     return *available ? 0 : SBI_EINVAL;
 }
 
+/* The first PMP entry covering any log byte must cover the whole log. */
+static int k3_check_measured_boot_pmp(const struct k3_root_pmp_layout *layout,
+				     const unsigned long *permissions)
+{
+    unsigned int i;
+
+    for (i = 0; i < layout->regular; i++) {
+	const struct sbi_domain_memregion *reg = layout->region[i];
+	unsigned long end = reg->order >= __riscv_xlen ? ~0UL :
+			    reg->base | ((1UL << reg->order) - 1);
+
+	if (reg->base >= K3_MB_LOG_BASE + K3_MB_LOG_CAPACITY ||
+	    end < K3_MB_LOG_BASE) {
+	    continue;
+	}
+	if (reg->base != K3_MB_PRIVATE_BASE ||
+	    reg->order != K3_MB_PRIVATE_ORDER ||
+	    k3_root_pmp_permissions(reg) || !(permissions[i] & PMP_R)) {
+	    return SBI_EDENIED;
+	}
+	return 0;
+    }
+    return SBI_EDENIED;
+}
+
 /* Called once by the OPTEED driver before any S-mode entry. */
 int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
 				    const struct sbi_domain *host,
-				    const struct sbi_domain *tee)
+				    const struct sbi_domain *tee,
+				    bool measured_boot)
 {
     struct k3_root_pmp_layout layout;
     unsigned long permissions[K3_BOOT_PMP_COUNT] = {0};
@@ -677,6 +704,14 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     rc = k3_optee_pmp_plan(&layout, tee, permissions, &available);
     if (rc) {
 	return rc;
+    }
+
+    if (measured_boot) {
+	rc = k3_check_measured_boot_pmp(&layout, permissions);
+	if (rc) {
+	    return rc;
+	}
+	sbi_printf("K3 measured boot: fixed event log PMP plan verified\n");
     }
 
     k3_optee_host = host;

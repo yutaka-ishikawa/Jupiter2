@@ -1,0 +1,24 @@
+
+=== seed ===
+1313:smp: Brought up 1 node, 16 CPUs
+4013:I/TA: TPM Startup(CLEAR) succeeded for event log replay
+5239:nv_define TPM_RC=0x00000000
+5249:nv_seed TPM_RC=0x00000000
+5251:nv_read TPM_RC=0x00000000
+5254:MB_PCR0_1 cb592844121d926f1ca3ad4e1d6fb9d8e260ed6e3216361f7732e975a0e8bbf6
+5257:MB_PCR0_2 cb592844121d926f1ca3ad4e1d6fb9d8e260ed6e3216361f7732e975a0e8bbf6
+5287:shutdown_state TPM_RC=0x00000000
+9938:NV_EXPORT files=36
+9939:NV_RESULT seed PASS
+9955:reboot: Power down
+host replay PCR 0 = cb592844121d926f1ca3ad4e1d6fb9d8e260ed6e3216361f7732e975a0e8bbf6
+
+=== read ===
+1313:smp: Brought up 1 node, 16 CPUs
+1983:I/TA: TPM Startup(CLEAR) succeeded for event log replay
+3205:nv_read TPM_RC=0x00000000
+3208:MB_PCR0_1 1205f4789155711e2542dba1a64d226626fe3eb43baa854752d0b59077e010fc
+3211:MB_PCR0_2 1205f4789155711e2542dba1a64d226626fe3eb43baa854752d0b59077e010fc
+3212:NV_RESULT read PASS
+3228:reboot: Power down
+host replay PCR 0 = 1205f4789155711e2542dba1a64d226626fe3eb43baa854752d0b59077e010fc

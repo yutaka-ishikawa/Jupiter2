@@ -1,0 +1,117 @@
+diff --git a/board/spacemit/k3/spl.c b/board/spacemit/k3/spl.c
+index 38a9a15..e99c5d0 100644
+--- a/board/spacemit/k3/spl.c
++++ b/board/spacemit/k3/spl.c
+@@ -10,6 +10,9 @@
+ #include <log.h>
+ #include <linux/delay.h>
+ #include <remoteproc.h>
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++#include <jupiter2_measured_boot.h>
++#endif
+ #include <image.h>
+ #include <common.h>
+ #include <hang.h>
+@@ -715,6 +718,13 @@ void board_fit_image_post_process(const void *fit, int node, void **p_image,
+ 	hang();
+     }
+     free_image = ret > 0;
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++    ret = jupiter2_mb_measure_esos(*p_image, *p_size, name);
++    if (ret) {
++	pr_err("J2MB: ESOS measurement failed: %d\n", ret);
++	hang();
++    }
++#endif
+     pr_info("[RAMBOOT] ESOS %s payload=%p bytes=%lu\n", name, *p_image,
+ 	    (ulong)*p_size);
+ 
+diff --git a/common/spl/spl_fit.c b/common/spl/spl_fit.c
+index c4bcaf0..31608cc 100644
+--- a/common/spl/spl_fit.c
++++ b/common/spl/spl_fit.c
+@@ -734,7 +734,8 @@ static int spl_simple_fit_parse(struct spl_fit_info *ctx)
+ 
+ #ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
+ static bool jupiter2_mb_ready;
+-static u8 jupiter2_mb_buffer[256];
++static bool jupiter2_mb_collecting;
++static u8 jupiter2_mb_buffer[1024];
+ static struct jupiter2_mb_log jupiter2_log;
+ 
+ static int jupiter2_measure(struct jupiter2_mb_log *log,
+@@ -759,6 +760,21 @@ static int jupiter2_measure(struct jupiter2_mb_log *log,
+     return jupiter2_mb_append(log, 0, 1, digest, name, strlen(name) + 1);
+ }
+ 
++int jupiter2_mb_measure_esos(const void *payload, size_t size, const char *name)
++{
++    u8 digest[JUPITER2_MB_SHA256_SIZE];
++
++    if (!jupiter2_mb_collecting) {
++	return 0;
++    }
++    if (!payload || !size || size > (unsigned int)-1) {
++	return -EINVAL;
++    }
++    sha256_csum_wd(payload, size, digest, CHUNKSZ_SHA256);
++    return jupiter2_mb_append(&jupiter2_log, 0, 1, digest,
++			      name, strlen(name) + 1);
++}
++
+ static void jupiter2_print_log(const struct jupiter2_mb_log *log)
+ {
+     size_t i;
+@@ -824,6 +840,7 @@ int jupiter2_mb_publish(void *fdt)
+ 		       round_up(end, CONFIG_RISCV_CBOM_BLOCK_SIZE));
+ 
+     jupiter2_mb_ready = false;
++    jupiter2_mb_collecting = false;
+     jupiter2_print_log(log);
+     return 0;
+ }
+@@ -842,6 +859,7 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ #ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
+     bool measure = false;
+     bool uboot_measured = false;
++    bool optee_measured = false;
+ #endif
+ 
+ 	ret = spl_simple_fit_read(&ctx, info, sector, fit);
+@@ -917,6 +935,7 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	if (ret) {
+ 	    return ret;
+ 	}
++	jupiter2_mb_collecting = true;
+     }
+ #endif
+ 
+@@ -975,6 +994,16 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	    }
+ 	    uboot_measured = true;
+ 	}
++	if (measure && os_type == IH_OS_TEE) {
++	    if (!uboot_measured || optee_measured) {
++		return -EINVAL;
++	    }
++	    ret = jupiter2_measure(&jupiter2_log, &image_info, "OP-TEE");
++	    if (ret) {
++		return ret;
++	    }
++	    optee_measured = true;
++	}
+ #endif
+ 
+ 		if (os_takes_devicetree(os_type)) {
+diff --git a/include/jupiter2_measured_boot.h b/include/jupiter2_measured_boot.h
+index 2f979f9..bf08cf6 100644
+--- a/include/jupiter2_measured_boot.h
++++ b/include/jupiter2_measured_boot.h
+@@ -11,6 +11,7 @@
+ #define JUPITER2_MB_LOG_CAPACITY 0x10000UL
+ 
+ int jupiter2_mb_publish(void *fdt);
++int jupiter2_mb_measure_esos(const void *payload, size_t size, const char *name);
+ 
+ struct jupiter2_mb_log {
+     u8 *data;

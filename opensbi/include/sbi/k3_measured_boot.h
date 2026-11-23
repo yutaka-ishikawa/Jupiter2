@@ -1,0 +1,10 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+#ifndef __K3_MEASURED_BOOT_H__
+#define __K3_MEASURED_BOOT_H__
+
+#define K3_MB_PRIVATE_BASE 0x171000000ULL
+#define K3_MB_PRIVATE_ORDER 24
+#define K3_MB_LOG_BASE 0x171ff0000ULL
+#define K3_MB_LOG_CAPACITY 0x10000UL
+
+#endif

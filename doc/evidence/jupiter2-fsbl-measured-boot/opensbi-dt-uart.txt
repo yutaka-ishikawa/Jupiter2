@@ -1,0 +1,15 @@
+
+=== valid ===
+14:K3 measured boot: DT event log bytes=116
+28:K3 measured boot: fixed event log PMP plan verified
+1311:smp: Brought up 1 node, 16 CPUs
+5292:fTPM PASS: TPM2_GetRandom returned 16 bytes via /dev/tpmrm0
+5312:reboot: Power down
+
+=== bad-address ===
+14:K3 measured boot: DT event log rejected (-3)
+126:init_coldboot: PMP configure failed (error -2)
+
+=== bad-length ===
+14:K3 measured boot: DT event log rejected (-3)
+126:init_coldboot: PMP configure failed (error -2)

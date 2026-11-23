@@ -1,0 +1,49 @@
+diff --git a/fTPM.c b/fTPM.c
+index 210a651..b40d699 100644
+--- a/fTPM.c
++++ b/fTPM.c
+@@ -137,8 +137,10 @@ TEE_Result TA_CreateEntryPoint(void)
+ 
+     uint8_t startupClear[STARTUP_SIZE] = { 0x80, 0x01, 0x00, 0x00, 0x00, 0x0c,
+                                            0x00, 0x00, 0x01, 0x44, 0x00, 0x00 };
++#ifndef MEASURED_BOOT
+     uint8_t startupState[STARTUP_SIZE] = { 0x80, 0x01, 0x00, 0x00, 0x00, 0x0c,
+                                            0x00, 0x00, 0x01, 0x44, 0x00, 0x01 };
++#endif
+     uint32_t respLen;
+     uint8_t *respBuf;
+ #ifdef MEASURED_BOOT
+@@ -191,6 +193,7 @@ TEE_Result TA_CreateEntryPoint(void)
+     DMSG("Init Complete\n");
+ #endif
+ 
++#ifndef MEASURED_BOOT
+     // Startup with state
+     if (g_chipFlags.fields.TpmStatePresent) {
+ 
+@@ -215,15 +218,22 @@ TEE_Result TA_CreateEntryPoint(void)
+ #endif
+ 
+ Clear:
+-    // Re-use request buffer for response (ignored)
++#endif
++    // Re-use the request buffer for the response.
+     respBuf = startupClear;
+     respLen = STARTUP_SIZE;
+ 
+-    // Fall back to a Startup Clear
++    // Measured boot always replays this boot's log from reset PCRs.
+     ExecuteCommand(STARTUP_SIZE, startupClear, &respLen, &respBuf);
+ 
++#ifndef MEASURED_BOOT
+ Exit:
+-#ifdef MEASURED_BOOT
++#else
++    if (fTPMResponseCode(respLen, respBuf) != TPM_RC_SUCCESS) {
++	EMSG("TPM Startup(CLEAR) failed before event log replay");
++	return TEE_ERROR_BAD_STATE;
++    }
++    IMSG("TPM Startup(CLEAR) succeeded for event log replay");
+     if (get_tpm_event_log(tpm_event_log_buf, &tpm_event_log_len) !=
+ 	TEE_SUCCESS || !tpm_event_log_len ||
+ 	tpm_event_log_len > sizeof(tpm_event_log_buf) ||

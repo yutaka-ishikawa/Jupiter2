@@ -1,0 +1,145 @@
+diff --git a/fTPM.c b/fTPM.c
+index ea4a802..210a651 100644
+--- a/fTPM.c
++++ b/fTPM.c
+@@ -223,31 +223,21 @@ Clear:
+     ExecuteCommand(STARTUP_SIZE, startupClear, &respLen, &respBuf);
+ 
+ Exit:
++#ifdef MEASURED_BOOT
++    if (get_tpm_event_log(tpm_event_log_buf, &tpm_event_log_len) !=
++	TEE_SUCCESS || !tpm_event_log_len ||
++	tpm_event_log_len > sizeof(tpm_event_log_buf) ||
++	!process_eventlog(tpm_event_log_buf, tpm_event_log_len)) {
++	EMSG("Failed to replay the TPM event log");
++	return TEE_ERROR_BAD_STATE;
++    }
++#endif
++
+     // Init is complete, indicate so in fTPM admin state.
+     g_chipFlags.fields.TpmStatePresent = 1;
+     _admin__SaveChipFlags();
+-
+-    // Initialization complete
+     fTPMInitialized = true;
+ 
+-#ifdef MEASURED_BOOT
+-    // Extend existing TPM Event Log.
+-    if (get_tpm_event_log(tpm_event_log_buf,
+-                          &tpm_event_log_len) == TEE_SUCCESS)
+-    {
+-
+-#ifdef fTPMDebug
+-        // Dump the event log
+-        unsigned char* buff = tpm_event_log_buf;
+-        size_t buff_len = tpm_event_log_len;
+-        MSG("Preparing to extend the following TPM Event Log:");
+-        dump_event_log(tpm_event_log_buf, tpm_event_log_len);
+-#endif
+-        process_eventlog(tpm_event_log_buf, tpm_event_log_len);
+-
+-    }
+-#endif
+-
+     return TEE_SUCCESS;
+ }
+ 
+diff --git a/platform/fTPM_event_log.c b/platform/fTPM_event_log.c
+index a99714a..16c3bd9 100644
+--- a/platform/fTPM_event_log.c
++++ b/platform/fTPM_event_log.c
+@@ -349,11 +349,62 @@ static unsigned int process_event(unsigned int buf_index,
+          SwapBytes16(ret_tag), SwapBytes32(resp_size), SwapBytes32(tpm_rc));
+ #endif
+ 
++    if (resplen < 10 || response[6] || response[7] || response[8] ||
++	response[9]) {
++	free(response);
++	return 0U;
++    }
+     free(response);
+ 
+     return buf_index;
+ }
+ 
++static uint32_t read_le32(const unsigned char *p)
++{
++    return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
++	   (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
++}
++
++/* Validate the complete Jupiter2 SHA-256 profile before extending any PCR. */
++static bool valid_jupiter2_log(const unsigned char *buf, size_t size)
++{
++    static const unsigned char spec_id[] = {
++	'S', 'p', 'e', 'c', ' ', 'I', 'D', ' ',
++	'E', 'v', 'e', 'n', 't', '0', '3', 0,
++	0, 0, 0, 0, 0, 2, 0, 2, 1, 0, 0, 0,
++	0x0b, 0, 32, 0, 0,
++    };
++    static const unsigned char zero_digest[20];
++    const size_t header_size = 32;
++    const size_t record_size = 50;
++    size_t offset = header_size + sizeof(spec_id);
++
++    if (!buf || size <= offset || read_le32(buf) ||
++	read_le32(buf + 4) != EV_NO_ACTION ||
++	memcmp(buf + 8, zero_digest, sizeof(zero_digest)) ||
++	read_le32(buf + 28) != sizeof(spec_id) ||
++	memcmp(buf + header_size, spec_id, sizeof(spec_id))) {
++	return false;
++    }
++    while (offset < size) {
++	const unsigned char *event = buf + offset;
++	uint32_t data_size;
++
++	if (size - offset < record_size || read_le32(event) > 1 ||
++	    read_le32(event + 4) == EV_NO_ACTION ||
++	    read_le32(event + 8) != 1 || event[12] != 0x0b || event[13]) {
++	    return false;
++	}
++	data_size = read_le32(event + 46);
++	offset += record_size;
++	if (data_size > size - offset) {
++	    return false;
++	}
++	offset += data_size;
++    }
++    return true;
++}
++
+ bool process_eventlog(const unsigned char *const buf, const size_t log_size)
+ {
+     unsigned int buf_index = 0U;
+@@ -366,6 +417,9 @@ bool process_eventlog(const unsigned char *const buf, const size_t log_size)
+         return false;
+     }
+ 
++    if (!valid_jupiter2_log(buf, log_size)) {
++	return false;
++    }
+     log_extended = true;
+     buf_index = process_header(buf_index, buf, log_size);
+     if (buf_index == 0) {
+@@ -379,7 +433,13 @@ bool process_eventlog(const unsigned char *const buf, const size_t log_size)
+         /*
+          * Process the rest of the Event Log.
+          */
+-        buf_index = process_event(buf_index, buf, log_size);
++	unsigned int next = process_event(buf_index, buf, log_size);
++
++	if (next <= buf_index || next > log_size) {
++	    event_header_ptr = NULL;
++	    return false;
++	}
++	buf_index = next;
+         event_count++;
+     }
+ 
+@@ -389,5 +449,5 @@ bool process_eventlog(const unsigned char *const buf, const size_t log_size)
+ 
+     event_header_ptr = NULL;
+ 
+-    return true;
++    return event_count != 0;
+ }

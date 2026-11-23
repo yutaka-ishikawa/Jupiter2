@@ -81,7 +81,9 @@ class PackagingTests(unittest.TestCase):
         args.update(options)
         cmd = [sys.executable, str(SCRIPT)]
         for key, value in args.items():
-            cmd += ['--' + key.replace('_', '-'), str(value)]
+            cmd.append('--' + key.replace('_', '-'))
+            if value is not None:
+                cmd.append(str(value))
         return subprocess.run(cmd, cwd=self.base, capture_output=True, text=True)
 
     def test_roundtrip_and_payload_extraction(self):
@@ -140,6 +142,29 @@ class PackagingTests(unittest.TestCase):
         result = self.build(opensbi_reserve_bytes='0x900000')
         self.assertIn('overlapping', result.stderr)
         self.assertNotEqual(result.returncode, 0)
+
+    def test_measured_boot_optee_loadable_precedes_esos(self):
+        path = self.base / 'tee.bin'
+        path.write_bytes(b'OP-TEE fixture')
+        result = self.build(spl_measurement_log=None, optee_bin=path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fit, blob, total = builder.read_fit(self.base / 'release/images/ram-boot-vendor.itb')
+        config = fit.children['configurations'].children['conf_11']
+        self.assertEqual(builder.strings(config.props['loadables']), ['uboot', 'optee', 'rt'])
+        optee = fit.children['images'].children['optee']
+        self.assertEqual(builder.string(optee, 'os'), 'tee')
+        self.assertEqual(builder.number(optee.props['load']), 0x171000000)
+        self.assertEqual(builder.image_data(optee, blob, total), path.read_bytes())
+
+    def test_measured_boot_log_range_is_reserved(self):
+        result = self.build(spl_measurement_log=None, opensbi_load='0x171fe0000')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('opensbi and fsbl-event-log', result.stderr)
+        self.assertFalse((self.base / 'release').exists())
+
+    def test_measured_boot_load_range_can_end_at_log_start(self):
+        result = self.build(spl_measurement_log=None, opensbi_load='0x171ef0000')
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_size_limit_rejected_atomically(self):
         result = self.build(max_download_bytes='128')

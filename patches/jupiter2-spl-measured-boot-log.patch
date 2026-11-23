@@ -1,0 +1,88 @@
+diff --git a/include/jupiter2_measured_boot.h b/include/jupiter2_measured_boot.h
+new file mode 100644
+index 0000000..7610388
+--- /dev/null
++++ b/include/jupiter2_measured_boot.h
+@@ -0,0 +1,82 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++#ifndef JUPITER2_MEASURED_BOOT_H
++#define JUPITER2_MEASURED_BOOT_H
++
++#include <linux/string.h>
++#include <linux/types.h>
++
++#define JUPITER2_MB_SHA256_SIZE 32
++#define JUPITER2_MB_EV_NO_ACTION 3
++
++struct jupiter2_mb_log {
++    u8 *data;
++    size_t capacity;
++    size_t length;
++};
++
++/* TCG event logs serialize multibyte integers in little-endian order. */
++static inline void jupiter2_mb_put_le(u8 *dst, u32 value, size_t bytes)
++{
++    size_t i;
++
++    for (i = 0; i < bytes; i++) {
++	dst[i] = value >> (8 * i);
++    }
++}
++
++static inline int jupiter2_mb_init(struct jupiter2_mb_log *log,
++				    u8 *buffer, size_t capacity)
++{
++    /* One SHA-256 algorithm and no vendor data in the Spec ID payload. */
++    static const u8 spec_id[] = {
++	'S', 'p', 'e', 'c', ' ', 'I', 'D', ' ',
++	'E', 'v', 'e', 'n', 't', '0', '3', 0,
++	0, 0, 0, 0,  /* Platform class */
++	0, 2, 0, 2,  /* Spec version and UINTN size */
++	1, 0, 0, 0,  /* Algorithm count */
++	0x0b, 0, 32, 0,
++	0,          /* Vendor data size */
++    };
++    const size_t header_size = 32;
++
++    if (!buffer || capacity < header_size + sizeof(spec_id)) {
++	return -1;
++    }
++    memset(buffer, 0, header_size);
++    jupiter2_mb_put_le(buffer + 4, JUPITER2_MB_EV_NO_ACTION, 4);
++    jupiter2_mb_put_le(buffer + 28, sizeof(spec_id), 4);
++    memcpy(buffer + header_size, spec_id, sizeof(spec_id));
++    log->data = buffer;
++    log->capacity = capacity;
++    log->length = header_size + sizeof(spec_id);
++    return 0;
++}
++
++static inline int jupiter2_mb_append(struct jupiter2_mb_log *log, u32 pcr,
++				      u32 event_type, const u8 digest[32],
++				      const void *event, u32 event_size)
++{
++    const size_t header_size = 50;
++    size_t free = log->capacity - log->length;
++    u8 *record;
++
++    if (pcr > 1 || event_type == JUPITER2_MB_EV_NO_ACTION ||
++	free < header_size || event_size > free - header_size ||
++	!digest || (event_size && !event)) {
++	return -1;
++    }
++    record = log->data + log->length;
++    jupiter2_mb_put_le(record, pcr, 4);
++    jupiter2_mb_put_le(record + 4, event_type, 4);
++    jupiter2_mb_put_le(record + 8, 1, 4);
++    jupiter2_mb_put_le(record + 12, 0x000b, 2);
++    memcpy(record + 14, digest, JUPITER2_MB_SHA256_SIZE);
++    jupiter2_mb_put_le(record + 46, event_size, 4);
++    if (event_size) {
++	memcpy(record + header_size, event, event_size);
++    }
++    log->length += header_size + event_size;
++    return 0;
++}
++
++#endif

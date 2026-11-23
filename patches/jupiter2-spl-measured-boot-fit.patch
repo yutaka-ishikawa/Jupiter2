@@ -1,0 +1,157 @@
+diff --git a/common/spl/Kconfig b/common/spl/Kconfig
+index e0e7b99..3ba1446 100644
+--- a/common/spl/Kconfig
++++ b/common/spl/Kconfig
+@@ -1548,6 +1548,14 @@ config SPL_OPENSBI
+ 	  More details are available at https://github.com/riscv/opensbi and
+ 	  https://github.com/riscv/riscv-sbi-doc
+ 
++config SPL_JUPITER2_MEASURED_BOOT
++	bool "Log Jupiter2 SPL FIT measurements"
++	depends on SPL_LOAD_FIT && SPL_OPENSBI
++	select SPL_SHA256
++	help
++	  Measure the loaded OpenSBI and U-Boot images and emit the TCG 2.0
++	  log to UART for development verification.
++
+ config SPL_OPENSBI_LOAD_ADDR
+ 	hex "OpenSBI load address"
+ 	depends on SPL_OPENSBI
+diff --git a/common/spl/spl_fit.c b/common/spl/spl_fit.c
+index e22f605..cf56b0c 100644
+--- a/common/spl/spl_fit.c
++++ b/common/spl/spl_fit.c
+@@ -21,6 +21,11 @@
+ #include <cpu_func.h>
+ #include <linux/kernel.h>
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++#include <jupiter2_measured_boot.h>
++#include <u-boot/sha256.h>
++#endif
++
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+ #ifndef CONFIG_SPL_LOAD_FIT_APPLY_OVERLAY_BUF_SZ
+@@ -727,6 +732,41 @@ static int spl_simple_fit_parse(struct spl_fit_info *ctx)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++static int jupiter2_measure(struct jupiter2_mb_log *log,
++			     const struct spl_image_info *image,
++			     const char *name)
++{
++    u8 digest[JUPITER2_MB_SHA256_SIZE];
++    const void *payload;
++
++    if (!image->size || image->load_addr > ~0UL - image->size) {
++	return -EINVAL;
++    }
++    payload = map_sysmem(image->load_addr, image->size);
++    sha256_csum_wd(payload, image->size, digest, CHUNKSZ_SHA256);
++    unmap_sysmem(payload);
++    /* PCR 0, EV_POST_CODE. */
++    return jupiter2_mb_append(log, 0, 1, digest, name, strlen(name) + 1);
++}
++
++static void jupiter2_print_log(const struct jupiter2_mb_log *log)
++{
++    size_t i;
++
++    printf("J2MB FIT log bytes=%zu\n", log->length);
++    for (i = 0; i < log->length; i++) {
++	if (i % 32 == 0) {
++	    printf("J2MB ");
++	}
++	printf("%02x", log->data[i]);
++	if (i % 32 == 31 || i + 1 == log->length) {
++	    puts("\n");
++	}
++    }
++}
++#endif
++
+ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 			struct spl_load_info *info, ulong sector, void *fit)
+ {
+@@ -737,6 +777,13 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	int index = 0;
+ 	int firmware_node;
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++    u8 measured_log[256];
++    struct jupiter2_mb_log log;
++    bool measure = false;
++    bool uboot_measured = false;
++#endif
++
+ 	ret = spl_simple_fit_read(&ctx, info, sector, fit);
+ 	if (ret < 0)
+ 		return ret;
+@@ -795,6 +842,19 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	else if (!IS_ENABLED(CONFIG_SPL_OS_BOOT))
+ 		spl_image->os = IH_OS_U_BOOT;
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++    measure = spl_image->os == IH_OS_OPENSBI;
++    if (measure) {
++	ret = jupiter2_mb_init(&log, measured_log, sizeof(measured_log));
++	if (!ret) {
++	    ret = jupiter2_measure(&log, spl_image, "OpenSBI");
++	}
++	if (ret) {
++	    return ret;
++	}
++    }
++#endif
++
+ 	/*
+ 	 * Booting a next-stage U-Boot may require us to append the FDT.
+ 	 * We allow this to fail, as the U-Boot image might embed its FDT.
+@@ -822,6 +882,9 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 		if (firmware_node == node)
+ 			continue;
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++	image_info.size = 0;
++#endif
+ 		image_info.load_addr = 0;
+ 		ret = spl_load_fit_image(info, sector, &ctx, node, &image_info);
+ 		if (ret < 0) {
+@@ -836,6 +899,19 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 		if (!spl_fit_image_get_os(ctx.fit, node, &os_type))
+ 			pr_debug("Loadable is %s\n", genimg_get_os_name(os_type));
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++	if (measure && os_type == IH_OS_U_BOOT) {
++	    if (uboot_measured) {
++		return -EINVAL;
++	    }
++	    ret = jupiter2_measure(&log, &image_info, "U-Boot");
++	    if (ret) {
++		return ret;
++	    }
++	    uboot_measured = true;
++	}
++#endif
++
+ 		if (os_takes_devicetree(os_type)) {
+ 			spl_fit_append_fdt(&image_info, info, sector, &ctx);
+ 			spl_image->fdt_addr = image_info.fdt_addr;
+@@ -864,6 +940,15 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 	if (spl_image->entry_point == FDT_ERROR || spl_image->entry_point == 0)
+ 		spl_image->entry_point = spl_image->load_addr;
+ 
++#ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
++    if (measure) {
++	if (!uboot_measured) {
++	    return -ENOENT;
++	}
++	jupiter2_print_log(&log);
++    }
++#endif
++
+ 	spl_image->flags |= SPL_FIT_FOUND;
+ 
+ 	if (IS_ENABLED(CONFIG_IMX_HAB))

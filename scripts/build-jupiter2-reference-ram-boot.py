@@ -199,20 +199,20 @@ def verify_rpmi_dtb(fit, data, contract):
         raise ValueError('U-Boot/OpenSBI DT RPMI transport differs from enabled ESOS server')
 
 
-def configure(text):
+def configure(text, settings=SETTINGS):
     # Remove active settings and both standard and vendor-style commented forms.
     lines = [line for line in text.splitlines()
              if not any(line.lstrip('# ').split('=', 1)[0].split(' ', 1)[0] == key
-                        for key in SETTINGS)]
-    for key, value in SETTINGS.items():
+                        for key in settings)]
+    for key, value in settings.items():
         lines.append(f'# {key} is not set' if value is None else f'{key}={value}')
     return '\n'.join(lines) + '\n'
 
 
-def verify_config(path):
+def verify_config(path, settings=SETTINGS):
     config = dict(line.split('=', 1) for line in path.read_text().splitlines()
                   if line.startswith('CONFIG_') and '=' in line)
-    expected = {**SETTINGS, 'CONFIG_RISCV_SMODE': 'y',
+    expected = {**settings, 'CONFIG_RISCV_SMODE': 'y',
                 'CONFIG_SPL_LOAD_FIT': 'y', 'CONFIG_SPL_OPENSBI': 'y',
                 'CONFIG_SPL_REMOTEPROC_K3_PROC': 'y', 'CONFIG_SPL_LZO': 'y',
                 'CONFIG_SPL_FIT_IMAGE_POST_PROCESS': 'y',
@@ -308,6 +308,20 @@ def build(args):
     diagnostic_patch = Path(__file__).resolve().parents[1] / 'patches/jupiter2-reference-ram-boot-diagnostics.patch'
     run(['git', 'apply', '--check', diagnostic_patch], cwd=source)
     run(['git', 'apply', diagnostic_patch], cwd=source)
+    settings = dict(SETTINGS)
+    measurement_patches = []
+    if args.spl_measurement_log:
+        settings['CONFIG_SPL_JUPITER2_MEASURED_BOOT'] = 'y'
+        patches = diagnostic_patch.parent
+        for name in ('jupiter2-spl-measured-boot-log.patch',
+                     'jupiter2-spl-measured-boot-fit.patch',
+                     'jupiter2-spl-measured-boot-handoff.patch',
+                     'jupiter2-spl-measured-boot-payloads.patch',
+                     'jupiter2-spl-measured-boot-dtb.patch'):
+            patch = patches / name
+            run(['git', 'apply', '--check', patch], cwd=source)
+            run(['git', 'apply', '--intent-to-add', patch], cwd=source)
+            measurement_patches.append({'file': name, 'sha256': sha(patch)})
     spl_dts = source / 'arch/riscv/dts/k3_spl.dts'
     spl_dts.write_text(set_rcpu_entries(spl_dts.read_text(), firmwares))
     (records / 'rcpu-elf.json').write_text(json.dumps(firmwares, indent=2) + '\n')
@@ -317,7 +331,7 @@ def build(args):
     # Vendor config.mk writes to srctree, so each run uses its own checkout.
     shutil.copyfile(args.opensbi_bin, source / 'board/spacemit/k3/fw_dynamic.bin')
     defconfig = source / 'configs/k3_defconfig'
-    defconfig.write_text(configure(defconfig.read_text()))
+    defconfig.write_text(configure(defconfig.read_text(), settings))
     # The board USB path overrides CONFIG_BOOTCOMMAND after environment init.
     # Override that path too; changing defconfig alone does not stop autoboot.
     board = source / 'board/spacemit/k3/k3.c'
@@ -333,7 +347,8 @@ def build(args):
                 'variant': args.variant, 'board': 'k3-pico-itx', 'configuration': 'conf_11',
                 'esos_configuration': args.esos_configuration,
                 'inputs': {str(p): sha(p) for p in (args.opensbi_bin, args.esos_itb)},
-                'settings': SETTINGS, 'diagnostic_patch_sha256': sha(diagnostic_patch),
+                'settings': settings, 'diagnostic_patch_sha256': sha(diagnostic_patch),
+                'spl_measurement_patches': measurement_patches,
                 'rcpu_firmwares': firmwares,
                 'rpmi_contract': contract,
                 'hardware_verified': False, 'status': 'prepared'}
@@ -350,10 +365,10 @@ def build(args):
     manifest['compiler'] = subprocess.check_output([compiler, '--version'], text=True)
     make = ['make', f'CROSS_COMPILE={args.cross_compile}']
     run(make + ['k3_defconfig'], cwd=source)
-    verify_config(source / '.config')
+    verify_config(source / '.config', settings)
     shutil.copyfile(source / '.config', records / 'uboot.config')
     run(make + [f'-j{args.jobs}', 'all'], cwd=source)
-    verify_config(source / '.config')
+    verify_config(source / '.config', settings)
     verify_fsbl(source / 'FSBL.bin')
     compiled_dtb = source / 'spl/u-boot-spl.dtb'
     verify_rcpu_dtb(fit, compiled_dtb, firmwares)
@@ -372,7 +387,9 @@ def build(args):
          '--esos-itb', args.esos_itb, '--esos-configuration', args.esos_configuration,
          '--opensbi-bin', args.opensbi_bin, '--configuration', 'conf_11',
          '--variant', args.variant, '--opensbi-reserve-bytes', args.opensbi_reserve_bytes,
-         '--max-download-bytes', args.max_download_bytes, '--output', args.output / 'release'])
+         '--max-download-bytes', args.max_download_bytes, '--output', args.output / 'release']
+        + (['--spl-measurement-log'] if args.spl_measurement_log else [])
+        + (['--optee-bin', args.optee_bin] if args.optee_bin else []))
     manifest['host_tools'] = package_runtime_tools(args.output / 'release')
     manifest.update(status='packaged',
                     artifacts={p.name: sha(p) for p in (args.output / 'release/images').iterdir()})
@@ -399,6 +416,9 @@ def main():
     parser.add_argument('--opensbi-reserve-bytes', type=positive, required=True)
     parser.add_argument('--max-download-bytes', type=positive, required=True)
     parser.add_argument('--jobs', type=positive, default=min(os.cpu_count() or 1, 8))
+    parser.add_argument('--optee-bin', type=Path, help='raw K3 OP-TEE Core tee.bin')
+    parser.add_argument('--spl-measurement-log', action='store_true',
+                        help='emit experimental OpenSBI/U-Boot measurements on UART')
     parser.add_argument('--prepare-only', action='store_true')
     args = parser.parse_args()
     args.output = args.output.absolute()

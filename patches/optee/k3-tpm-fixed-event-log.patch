@@ -1,0 +1,130 @@
+diff --git a/core/arch/riscv/include/mm/generic_ram_layout.h b/core/arch/riscv/include/mm/generic_ram_layout.h
+index 4903ade..4221090 100644
+--- a/core/arch/riscv/include/mm/generic_ram_layout.h
++++ b/core/arch/riscv/include/mm/generic_ram_layout.h
+@@ -163,7 +163,14 @@
+ 					SMALL_PAGE_SIZE)
+ #endif /*CFG_WITH_PAGER*/
+ 
+-#define TA_RAM_SIZE		(ROUNDDOWN(TDDRAM_BASE + (TDDRAM_SIZE - \
++#ifdef CFG_K3_FSBL_EVENT_LOG
++#define FSBL_LOG_RESERVED_SIZE CFG_K3_FSBL_EVENT_LOG_SIZE
++#else
++#define FSBL_LOG_RESERVED_SIZE 0
++#endif
++
++#define TA_RAM_SIZE		(ROUNDDOWN(TDDRAM_BASE + (TDDRAM_SIZE - \
++					  FSBL_LOG_RESERVED_SIZE - \
+ 					  TEE_SDP_TEST_MEM_SIZE), \
+ 					  SMALL_PAGE_SIZE) - TA_RAM_START)
+ #endif /*CFG_TDDRAM_START*/
+diff --git a/core/arch/riscv/kernel/boot.c b/core/arch/riscv/kernel/boot.c
+index 040c509..c46feff 100644
+--- a/core/arch/riscv/kernel/boot.c
++++ b/core/arch/riscv/kernel/boot.c
+@@ -15,6 +15,7 @@
+ #include <kernel/misc.h>
+ #include <kernel/panic.h>
+ #include <kernel/thread.h>
++#include <kernel/tpm.h>
+ #include <libfdt.h>
+ #include <mm/core_memprot.h>
+ #include <mm/core_mmu.h>
+@@ -176,6 +177,9 @@ void boot_init_primary_late(unsigned long fdt,
+ 			    unsigned long tos_fw_config __unused)
+ {
+ 	init_external_dt(fdt, CFG_DTB_MAX_SIZE);
++#ifdef CFG_K3_FSBL_EVENT_LOG
++    tpm_map_log_area(get_external_dt());
++#endif
+ 	discover_nsec_memory();
+ 	update_external_dt();
+ 
+diff --git a/core/arch/riscv/plat-k3/conf.mk b/core/arch/riscv/plat-k3/conf.mk
+index ec79df7..c1e7b06 100644
+--- a/core/arch/riscv/plat-k3/conf.mk
++++ b/core/arch/riscv/plat-k3/conf.mk
+@@ -118,6 +118,15 @@ CFG_TEE_CORE_EMBED_INTERNAL_TESTS ?= y
+ # Memory layout flags
+ CFG_TDDRAM_START ?= 0x171000000
+ CFG_TDDRAM_SIZE  ?= 0x01000000
++
++# Reserve the final 64 KiB of private DDR for the FSBL TCG event log.
++CFG_K3_FSBL_EVENT_LOG ?= n
++ifeq ($(CFG_K3_FSBL_EVENT_LOG),y)
++$(call force,CFG_CORE_TPM_EVENT_LOG,y)
++$(call force,CFG_DT,y)
++$(call force,CFG_K3_FSBL_EVENT_LOG_BASE,0x171ff0000)
++$(call force,CFG_K3_FSBL_EVENT_LOG_SIZE,0x10000)
++endif
+ CFG_TEE_RAM_VA_SIZE ?= 0x00400000
+ CFG_CORE_HEAP_SIZE ?= 0x30000
+ CFG_SHMEM_START ?= 0x172000000
+diff --git a/core/kernel/tpm.c b/core/kernel/tpm.c
+index 2b94c7d..2ca741a 100644
+--- a/core/kernel/tpm.c
++++ b/core/kernel/tpm.c
+@@ -8,8 +8,20 @@
+ #include <kernel/tpm.h>
+ #include <libfdt.h>
+ #include <mm/core_memprot.h>
++#ifdef CFG_K3_FSBL_EVENT_LOG
++#include <mm/generic_ram_layout.h>
++#endif
+ #include <string.h>
+ 
++#ifdef CFG_K3_FSBL_EVENT_LOG
++static_assert(CFG_TDDRAM_START + CFG_TDDRAM_SIZE ==
++	      CFG_K3_FSBL_EVENT_LOG_BASE + CFG_K3_FSBL_EVENT_LOG_SIZE);
++static_assert(CFG_K3_FSBL_EVENT_LOG_BASE > TA_RAM_START);
++static_assert(!TEE_SDP_TEST_MEM_SIZE);
++register_phys_mem(MEM_AREA_ROM_SEC, CFG_K3_FSBL_EVENT_LOG_BASE,
++		  CFG_K3_FSBL_EVENT_LOG_SIZE);
++#endif
++
+ static void *tpm_log_addr;
+ static size_t tpm_log_size;
+ 
+@@ -51,7 +63,8 @@ static int read_dt_tpm_log_info(void *fdt, int node, paddr_t *buf,
+ 		return -1;
+ 	}
+ 
+-	if (!IS_ENABLED(CFG_CORE_SEL1_SPMC)) {
++	if (!IS_ENABLED(CFG_CORE_SEL1_SPMC) &&
++	    !IS_ENABLED(CFG_K3_FSBL_EVENT_LOG)) {
+ 		err = fdt_setprop(fdt, node, dt_tpm_event_log_addr, &zero_addr,
+ 				  sizeof(uint32_t) * 2);
+ 		if (err < 0) {
+@@ -123,6 +136,9 @@ TEE_Result tpm_get_event_log(void *buf, size_t *size)
+ 		return TEE_ERROR_SHORT_BUFFER;
+ 	}
+ 
++    if (!tpm_log_addr || !tpm_log_size) {
++	return TEE_ERROR_NO_DATA;
++    }
+ 	memcpy(buf, tpm_log_addr, tpm_log_size);
+ 
+ 	return TEE_SUCCESS;
+@@ -141,6 +157,22 @@ void tpm_map_log_area(void *fdt)
+ 	unsigned int rounded_size = 0;
+ 
+ 	get_tpm_phys_params(fdt, &log_addr, &tpm_log_size);
++#ifdef CFG_K3_FSBL_EVENT_LOG
++    if (log_addr != CFG_K3_FSBL_EVENT_LOG_BASE || !tpm_log_size ||
++	tpm_log_size > CFG_K3_FSBL_EVENT_LOG_SIZE) {
++	tpm_log_size = 0;
++	EMSG("TPM: Fixed FSBL event log rejected");
++	return;
++    }
++    tpm_log_addr = phys_to_virt(log_addr, MEM_AREA_ROM_SEC, tpm_log_size);
++    if (!tpm_log_addr) {
++	tpm_log_size = 0;
++	EMSG("TPM: Fixed FSBL event log mapping missing");
++	return;
++    }
++    IMSG("TPM: Fixed FSBL event log ready (%zu bytes)", tpm_log_size);
++    return;
++#endif
+ 
+ 	DMSG("TPM Event log PA: %#" PRIxPA, log_addr);
+ 	DMSG("TPM Event log size: %zu Bytes", tpm_log_size);

@@ -1,0 +1,80 @@
+diff --git a/common/spl/spl_fit.c b/common/spl/spl_fit.c
+index 31608cc..87eaa5b 100644
+--- a/common/spl/spl_fit.c
++++ b/common/spl/spl_fit.c
+@@ -796,6 +796,8 @@ int jupiter2_mb_publish(void *fdt)
+     struct jupiter2_mb_log *log = &jupiter2_log;
+     ulong start = (ulong)fdt;
+     ulong end;
++    u32 original_size;
++    u8 digest[JUPITER2_MB_SHA256_SIZE];
+     int node;
+     int ret;
+     void *destination;
+@@ -803,7 +805,8 @@ int jupiter2_mb_publish(void *fdt)
+     if (!jupiter2_mb_ready || !fdt || fdt_check_header(fdt)) {
+ 	return -EINVAL;
+     }
+-    end = start + fdt_totalsize(fdt);
++    original_size = fdt_totalsize(fdt);
++    end = start + original_size;
+     if (end < start ||
+ 	(start < JUPITER2_MB_LOG_BASE + JUPITER2_MB_LOG_CAPACITY &&
+ 	 end > JUPITER2_MB_LOG_BASE)) {
+@@ -823,12 +826,33 @@ int jupiter2_mb_publish(void *fdt)
+ 			      JUPITER2_MB_LOG_BASE);
+     }
+     if (!ret) {
+-	ret = fdt_setprop_u32(fdt, node, "tpm_event_log_size", log->length);
++	ret = fdt_setprop_u32(fdt, node, "tpm_event_log_size", 0);
+     }
+     if (ret) {
+ 	return ret;
+     }
+ 
++    /* Normalize only the length and preserve room for later FDT fixups. */
++    ret = fdt_pack(fdt);
++    if (ret) {
++	return ret;
++    }
++    sha256_csum_wd(fdt, fdt_totalsize(fdt), digest, CHUNKSZ_SHA256);
++    fdt_set_totalsize(fdt, original_size);
++    ret = jupiter2_mb_append(log, 1, 1, digest, "DTB", sizeof("DTB"));
++    if (ret) {
++	return ret;
++    }
++    node = fdt_path_offset(fdt, "/tpm-event-log");
++    if (node < 0) {
++	return node;
++    }
++    ret = fdt_setprop_inplace_u32(fdt, node, "tpm_event_log_size",
++				 log->length);
++    if (ret) {
++	return ret;
++    }
++
+     destination = map_sysmem(JUPITER2_MB_LOG_BASE,
+ 			     JUPITER2_MB_LOG_CAPACITY);
+     memset(destination, 0, JUPITER2_MB_LOG_CAPACITY);
+@@ -1036,6 +1060,21 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
+ 
+ #ifdef CONFIG_SPL_JUPITER2_MEASURED_BOOT
+     if (measure) {
++	const char *configuration = fit_get_name(ctx.fit, ctx.conf_node, NULL);
++	u8 digest[JUPITER2_MB_SHA256_SIZE];
++	size_t name_size;
++
++	if (!configuration || !*configuration) {
++	    return -EINVAL;
++	}
++	name_size = strlen(configuration) + 1;
++	sha256_csum_wd((const u8 *)configuration, name_size, digest,
++		       CHUNKSZ_SHA256);
++	ret = jupiter2_mb_append(&jupiter2_log, 1, 1, digest,
++				  configuration, name_size);
++	if (ret) {
++	    return ret;
++	}
+ 	if (!uboot_measured) {
+ 	    return -ENOENT;
+ 	}
