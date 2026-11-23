@@ -140,3 +140,32 @@ Linuxは起動したが、fTPMはログ再生を拒否し、TPMドライバー�
 セッションを開けなかった。テスト用ゲストはPCRを得られず電源断した。
 これはテストの期待する拒否結果。RAM起動関連のホスト試験は46件合格。
 [UARTログ抜粋](evidence/jupiter2-fsbl-measured-boot/malformed-event-uart.txt)
+
+## Measured BootとLinux IMAの同居試験
+
+16 hartのJupiter2 QEMUで、PCR 0・1向けの合成TCGログを固定領域へ置き、
+OpenSBI、OP-TEE、fTPM、Linux IMAを同じゲストで起動した。試験用フック
+`ima_test_ftpm=1` で、IMA初期化前にfTPMを登録した。Linuxでは
+`/ima-probe` を読み、次のファイルを採取した。
+
+```sh
+cat /sys/kernel/security/ima/ascii_runtime_measurements
+```
+
+```text
+10 fa0760193115858acc46c2a389323d6aeabeba10 ima-ng sha256:837a515af126716323ce1bd5ba92603aea03227417afd84dcd0b6cbe72f7ed02 boot_aggregate
+10 677960400c83fb676eef012427092eeede7c4c1e ima-ng sha256:6dff660d63e1d96096e4808576bfe39f0b736cb252c9d9cac3a5d3b6949a8399 /ima-probe
+```
+
+上記は全2行。第2列は従来のASCIIインターフェースのSHA-1テンプレート
+ダイジェストで、`sha256:` の後は測定対象のSHA-256ダイジェスト。
+SHA-256バンクのPCR照合には `ascii_runtime_measurements_sha256` の
+テンプレートダイジェストを用いた。PCR 0・1はTCGログの独立再生値と一致した。
+PCR 10はファイル測定前後で変わり、更新後の値は
+`SHA256(更新前PCR 10 || SHA-256テンプレートダイジェスト)` と一致した。
+ゲストは正常に電源断した。
+
+この試験ではFSBLを実行せず、QEMUローダーでイベントログを配置した。
+実機向けESOS FITを使ったFSBL起点のRAM起動は未実施。
+[ASCIIログ原文](evidence/jupiter2-fsbl-measured-boot/ima-ascii-runtime-measurements.txt) ·
+[UARTとPCR値](evidence/jupiter2-fsbl-measured-boot/ima-combined-uart.txt)
