@@ -131,3 +131,12 @@ OP-TEEが受領し、fTPMの `Startup(CLEAR)` 後に `/dev/tpmrm0` から
 QEMUではSPLを実行していない。FSBLが生成したログとの統合検査には
 対応する実機用ESOS FITと、実機のRAM起動が必要。
 [UARTログと照合結果](evidence/jupiter2-fsbl-measured-boot/dual-pcr-uart.txt)
+
+## 不正なイベントアルゴリズムの拒否
+
+SPL経由の試験に先立ち、16 hart QEMUで、SHA-256のみを宣言した
+合成ログのイベントにSHA-1のアルゴリズム番号を設定して渡した。
+Linuxは起動したが、fTPMはログ再生を拒否し、TPMドライバーがTAの
+セッションを開けなかった。テスト用ゲストはPCRを得られず電源断した。
+これはテストの期待する拒否結果。RAM起動関連のホスト試験は46件合格。
+[UARTログ抜粋](evidence/jupiter2-fsbl-measured-boot/malformed-event-uart.txt)

@@ -1,0 +1,6 @@
+1313:smp: Brought up 1 node, 16 CPUs
+1983:I/TA: TPM Startup(CLEAR) succeeded for event log replay
+2003:E/TA:   TA_CreateEntryPoint:241 Failed to replay the TPM event log
+2007:ftpm-tee tpm: ftpm_tee_probe: tee_client_open_session failed, err=ffff0007
+2010:NV_RESULT read FAIL
+2011:reboot: Power down
