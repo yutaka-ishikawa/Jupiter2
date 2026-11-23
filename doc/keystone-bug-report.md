@@ -110,6 +110,7 @@
 | KSB-084 | QEMUのfTPMモジュール登録中に間欠的にタイムアウト | OP-TEE実行中のhartがLinux向けSBIソフトウェアIPIの宛先から外れる | Linux宛てIPIを保持するよう修正。16 hart QEMUでfTPMと同居試験が成功 |
 | KSB-085 | 並行CREATE／DESTROY時に全hart PMP更新が失敗する | ローカル切替のゲート競合でhartが停止。固定回数のACKポーリングでも早期打ち切り | PMP状態の確認とACK待ちを修正 |
 | KSB-086 | fTPM同居QEMUでEnclaveのCREATEが間欠的に失敗する | PMP ACK待ちとRFENCE待ちが競合 | ACK待ちでローカルのRFENCEを処理。修正後の16 hart同時実行試験は5回合格 |
+| KSB-087 | fTPMの永続化失敗時にNV_Writeが成功を返す | 採用したfTPM TAの既存実装でNV書き戻し失敗がTPM結果に伝わらない | 16 hart QEMUで確認。未修正 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1595,3 +1596,22 @@ UART抜粋は、[初回の3試行](evidence/jupiter2-ksb086/01-initial-uart.log)
 [修正後の同居・並行試験](evidence/jupiter2-ksb086/03-fixed-uart.log)、
 [KSB-084・085の回帰試験](evidence/jupiter2-ksb086/04-prior-regression-uart.log)
 に記録した。
+
+
+### KSB-087: fTPMの永続化失敗時にNV_Writeが成功を返す
+
+- KSB-086修正済みの16 hart同居QEMUで、稼働後に `tee-supplicant` を停止した。
+  NV_Writeは成功を返したが、OP-TEEはストレージRPCの失敗を記録し、
+  評価用REE FSのファイル内容は変わらなかった。
+- supplicant再起動後、NV_Readは未保存の値を返した。再起動後の別の
+  NV_Writeも成功を返したが、REE FSのファイル内容は変わらなかった。
+- 原因は、採用したfTPM TAの既存のNVエラー処理にある。該当処理は
+  採用元コミット `6f99e783eb9b` に含まれ、QEMU試験で使用した
+  `platform/NVMem.c` に採用元からの差分がないことを確認した。
+  Jupiter2への移植環境では、supplicant停止でこの既存の問題が顕在化した。
+- 使用したfTPM版 `6f99e783eb9b` の `platform/NVMem.c` では、
+  `_plat__NvWriteBack()` がエラー時に `s_NVInitialized` を解除して戻り、
+  `_plat__NvCommit()` は成功を返す。この経路により、失敗が呼び出し元に伝わらず、
+  以後の書き戻しも止まる。修正と再試験は未実施。
+- [試験条件と結果](jupiter2-ftpm-ta-test.md#tpmコマンドと障害復旧)。
+  [UARTログ抜粋](evidence/jupiter2-ftpm-recovery/uart.txt)。

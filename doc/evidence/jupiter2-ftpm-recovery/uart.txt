@@ -1,0 +1,35 @@
+1309:smp: Brought up 1 node, 16 CPUs
+1379:E/TC:?? 00 get_rpc_alloc_res:645 RPC allocation failed. Non-secure world result: ret=0xffff000c ret_origin=0x2
+1384:ftpm-tee tpm: ftpm_tee_probe: tee_client_open_session failed, err=ffff000c
+1386:CHECK no-supplicant module=0 tpmrm-present=0
+5218:CHECK cap len=27 TPM_RC=0x00000000
+5220:CHECK pcr_read len=62 TPM_RC=0x00000000
+5222:CHECK pcr_extend len=19 TPM_RC=0x00000000
+5224:CHECK pcr_read len=62 TPM_RC=0x00000000
+5225:PASS PCR16 SHA256 expected extend digest
+5239:CHECK nv_define len=19 TPM_RC=0x00000000
+5249:CHECK nv_seed len=19 TPM_RC=0x00000000
+5251:CHECK nv_read len=25 TPM_RC=0x00000000
+5258:E/TC:?? 00 TA panicked with code 0xffff0000
+5271:D/TC:?? 00 user_ta_enter:195 tee_user_ta_enter: TA panicked with code 0xffff0000
+5274:tpm tpm0: ftpm_tee_tpm_op_send: SUBMIT_COMMAND invoke error: 0xffff3024
+5276:CHECK nv_fault len=-53212 TPM_RC=0x00000000
+5277:CHECK storage-readonly exit=0 signal=0
+5279:tpm tpm0: ftpm_tee_tpm_op_send: SUBMIT_COMMAND invoke error: 0xffff3024
+5281:CHECK nv_read len=-53212 TPM_RC=0x00000000
+5283:tpm tpm0: ftpm_tee_tpm_op_send: SUBMIT_COMMAND invoke error: 0xffff3024
+7524:PASS fTPM rebound platform device tpm
+7526:CHECK nv_read len=25 TPM_RC=0x00000000
+7536:CHECK nv_resume len=19 TPM_RC=0x00000000
+7538:CHECK nv_read len=25 TPM_RC=0x00000000
+7539:PASS storage restored, NV preserved and writable
+7543:E/TC:?? 00 get_rpc_alloc_res:645 RPC allocation failed. Non-secure world result: ret=0xffff000c ret_origin=0x2
+7544:CHECK nv_fault len=19 TPM_RC=0x00000000
+7545:CHECK supplicant-stopped NV_Write_success=1 backing_unchanged=1
+7547:CHECK cap len=27 TPM_RC=0x00000000
+7549:CHECK nv_read len=25 TPM_RC=0x00000000
+7550:CHECK supplicant-restarted cached_nv_is_uncommitted=1
+7552:CHECK nv_seed len=19 TPM_RC=0x00000000
+7553:CHECK supplicant-restarted NV_Write_success=1 backing_unchanged=1
+7554:TPM_RECOVERY_RESULT=1
+7558:reboot: Power down

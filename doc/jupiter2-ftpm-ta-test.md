@@ -186,4 +186,52 @@ KSB-086の修正後は5起動すべてで16バイトの応答を取り、コマ�
 Enclaveのタイマー割り込みを観測した。Enclaveの正常終了・破棄と電源断も確認した。
 [障害記録](keystone-bug-report.md#ksb-086-ftpm同居qemuでenclaveのcreateが間欠的に失敗する)
 
-再起動をまたぐNV保持と実機での動作は未検証。
+NV保持のコールドブート試験は後述。実機での動作は未検証。
+
+## TPMコマンドと障害復旧
+
+KSB-086修正済みファームウェアを使い、16 hartのJupiter2 QEMUで、
+`/dev/tpmrm0` にTPM 2.0コマンドを送った。既存データへの影響を避けるため、
+initramfs内の評価用REE FSと試験用NV index `0x01500020` を使った。
+
+| 試験 | 観測結果 |
+| --- | --- |
+| GetCapability | 固定プロパティ `TPM_PT_FAMILY_INDICATOR` の応答と成功コードを確認。 |
+| PCR_Read / PCR_Extend | SHA-256バンクのPCR 16を読み、既知ダイジェストでextendした。再読出しが独立に計算したSHA-256値と一致。 |
+| supplicant未起動でのprobe | TAセッションを開けず、TPMデバイスが登録されなかった。supplicantを起動してplatformドライバーをbindすると登録され、コマンドが成功。 |
+| REE FSの書込み禁止 | NV_WriteでTAがpanic。書込み許可を戻しただけでは旧セッションは `TEE_ERROR_TARGET_DEAD`。platformドライバーをunbind/bindすると、障害前のNV値の読出しと新しい値の書込み・読出しが成功。 |
+| 稼働後にsupplicantを停止・再起動 | 停止中のNV_WriteはRPC失敗にもかかわらずTPM成功を返した。REE FS内のファイル内容は変化せず、再起動後のNV_Readは未保存の値を返した。再起動後の別のNV_WriteもTPM成功を返したが、ファイル内容は変化しなかった。NV永続化の自動復旧は不合格。 |
+
+[UARTログ抜粋](evidence/jupiter2-ftpm-recovery/uart.txt)。
+ゲストは正常に電源断した。障害試験後の電源再投入をまたぐNV保持は未検証。
+
+## NV永続化のコールドブート試験
+
+[試験コード](../scripts/tests/jupiter2-ftpm-nv.c)は、試験専用NV index
+`0x01500020` を定義し、`/dev/tpmrm0` 経由で4バイトを書き込む。
+[QEMUランナー](../scripts/tests/jupiter2-ftpm-nv-qemu.sh)は、空のREE FSで
+書き込みを実行したゲストから保存ファイルを回収する。初回ゲストの電源断後、
+同じファイルだけをinitramfsに入れた別のQEMUプロセスで、
+NV indexを定義し直さず読み出して4バイトの一致を検証する。
+最後に空のREE FSでもう一度起動し、同じindexが存在しないことを確認する。
+
+上記のTPMデバイス試験で使う、空の `/var/lib/tee` を持つ
+`tpm-init.list` とDTBを用意する。クロスコンパイラー、OpenSBI、
+Linux、OP-TEEおよびQEMUは上記と同じものを指定する。
+
+```sh
+QEMU="$QEMU" SBI="$SBI" IMAGE="$LINUX_OUT/arch/riscv/boot/Image" \
+DTB="$OUT/ftpm-boot.dtb" OPTEE_ELF="$OPTEE_OUT/core/tee.elf" \
+GEN_INIT_CPIO="$LINUX_OUT/usr/gen_init_cpio" CROSS_COMPILE="$CROSS" \
+bash scripts/tests/jupiter2-ftpm-nv-qemu.sh "$OUT/tpm-init.list" "$OUT/nv-qemu"
+```
+
+出力先は新規ディレクトリを指定する。初回のUARTログには試験用REE FSの
+シリアライズ結果も含む。検証対象は保存済みファイルからのfTPMの状態復元。
+実機の永続媒体への書込みや、電源断時の媒体のフラッシュ動作は別途検証する。
+
+16 hartのQEMU実測では、初回に36ファイルを回収し、別プロセスで
+`NV_Read` が成功して書込み値 `TEST` の4バイトが一致した。
+空のREE FSを使った対照試験では、同じindexへの `NV_Read` が
+`TPM_RC_HANDLE`（第2ハンドル、`0x28b`）を返した。
+3回とも正常に電源断した。[UARTログ抜粋](evidence/jupiter2-ftpm-nv/uart.txt)。

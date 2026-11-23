@@ -1,0 +1,21 @@
+
+=== seed.log ===
+1309:smp: Brought up 1 node, 16 CPUs
+5214:nv_define TPM_RC=0x00000000
+5224:nv_seed TPM_RC=0x00000000
+9875:NV_EXPORT files=36
+9881:nv_read TPM_RC=0x00000000
+9882:NV_RESULT seed PASS
+9898:reboot: Power down
+
+=== read.log ===
+1309:smp: Brought up 1 node, 16 CPUs
+3620:nv_read TPM_RC=0x00000000
+3621:NV_RESULT read PASS
+3637:reboot: Power down
+
+=== empty.log ===
+1309:smp: Brought up 1 node, 16 CPUs
+5202:NV_EMPTY TPM_RC=0x0000028b
+5203:NV_RESULT empty PASS
+5223:reboot: Power down
