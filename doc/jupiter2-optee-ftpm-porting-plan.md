@@ -329,6 +329,12 @@ QEMUと実機はそれぞれ結果を記録する。
 
 ## 後続の判断
 
+FSBLを測定の起点とする方式を
+[設計書](jupiter2-fsbl-measured-boot-design.md)、
+[開発手順書](jupiter2-fsbl-measured-boot-development.md)、
+[検査手順書](jupiter2-fsbl-measured-boot-verification.md)
+に記載する。実装と統合検査はこれらの手順に従う。
+
 - **永続領域と製品鍵**。評価ではREE FSを候補とする。TAの
   `CFG_FTPM_TA_TEE_STORAGE_ID` とコア設定から、実際に選ばれたバックエンドを
   確認する。製品構成ではRPMB等のリプレイ保護、デバイス固有HUKと乱数源、
