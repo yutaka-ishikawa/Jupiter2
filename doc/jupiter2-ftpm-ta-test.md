@@ -235,3 +235,25 @@ bash scripts/tests/jupiter2-ftpm-nv-qemu.sh "$OUT/tpm-init.list" "$OUT/nv-qemu"
 空のREE FSを使った対照試験では、同じindexへの `NV_Read` が
 `TPM_RC_HANDLE`（第2ハンドル、`0x28b`）を返した。
 3回とも正常に電源断した。[UARTログ抜粋](evidence/jupiter2-ftpm-nv/uart.txt)。
+
+## fTPMとLinux IMAのQEMU試験
+
+16 hartのJupiter2 QEMUで、`CONFIG_IMA=y`、`CONFIG_SECURITYFS=y`、
+`CONFIG_IMA_MEASURE_PCR_IDX=10`、SHA-256、`ima-ng` を使った。
+fTPMは既存と同じREE配置TAと `CONFIG_TCG_FTPM_TEE=m` で動かした。
+比較用カーネルには、initramfs上のヘルパーをIMA初期化直前に呼ぶ
+試験用のブートオプションを一時的に追加した。そのヘルパーは
+`tee-supplicant` を起動し、fTPMモジュールをロードした。
+
+- **IMAより先にfTPMを登録**。IMAのファイル測定ルールを読み込み、
+  試験ファイルを読んだ。SHA-256のIMAログにPCR 10のイベントが1件記録された。
+  ログ内のファイルダイジェストを試験ファイルから独立に計算した値と照合し、
+  `SHA256(更新前のPCR 10 || IMAのテンプレートダイジェスト)` が
+  `/dev/tpmrm0` から読んだ更新後のPCR 10と一致した。
+- **通常の順序でfTPMを登録**。試験用ブートオプションを無効にし、
+  fTPMを通常どおりユーザー空間の `/init` で登録した。
+  IMAは初期化時にTPMを検出せず、測定ログは記録したがPCR 10は変化しなかった。
+
+両起動とも正常に電源断した。この結果はfTPMをIMA初期化前に登録した
+場合のLinux実行時測定を確認したもの。標準起動への組み込みと実機試験は未実施。
+[UARTログ抜粋](evidence/jupiter2-ftpm-ima/uart.txt)。
