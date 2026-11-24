@@ -112,6 +112,7 @@
 | KSB-086 | fTPM同居QEMUでEnclaveのCREATEが間欠的に失敗する | PMP ACK待ちとRFENCE待ちが競合 | ACK待ちでローカルのRFENCEを処理。修正後の16 hart同時実行試験は5回合格 |
 | KSB-087 | fTPMの永続化失敗時にNV_Writeが成功を返す | 採用したfTPM TAの既存実装でNV書き戻し失敗がTPM結果に伝わらない | 16 hart QEMUで確認。未修正 |
 | KSB-088 | OP-TEE同居試験が入力DTB不足で起動できない | 同居用DTBとinitramfsの生成経路が未登録 | 生成スクリプトと入力DTSを追加 |
+| KSB-089 | OP-TEE同居ゲストの `/init` が命令アクセスフォルトで停止 | 起動DTB用PMP領域のLinux予約漏れを確認。報告時のフォルト物理アドレスは未確認 | 予約を追加し、既存の同居試験で回帰確認 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1633,3 +1634,18 @@ UART抜粋は、[初回の3試行](evidence/jupiter2-ksb086/01-initial-uart.log)
   Linuxの16 CPU起動、Enclave実行16回、OCALL中を含むTA呼び出し33回、
   正常な電源断とQEMU終了コード0を確認した。
   利用者の環境での全試験と、今回のログにあるWTM乱数ケースは未再検証。
+
+### KSB-089: OP-TEE同居ゲストの /init が命令アクセスフォルトで停止
+
+- Linux 6.18.3 #4ではOP-TEEドライバの初期化後、PID 1の最初の命令
+  （仮想アドレス `0x1071c`）で命令アクセスフォルト（`cause=1`）が発生した。
+  提供されたinitramfsの `/init` はRV64静的ELFで、同アドレスは実行可能
+  セグメント内のエントリポイントだった。
+- 同居用DTSでは `0x181e00000` から2 MiBをOpenSBI側で実行不可としていたが、
+  Linuxの `reserved-memory` に対応する定義がなかった。通常ページの
+  割り当て対象に入らないよう、既存DTB生成スクリプトと同じ `no-map` 予約を追加した。
+  報告時のフォルトの物理アドレスは未取得で、予約漏れとの因果は未確定。
+- 修正後のDTBを使ったSstc有効のQEMU回帰では、Linuxによる2 MiBの予約、
+  16 CPUの起動、Enclave実行16回、TA呼び出し33回、正常電源断と終了コード0を
+  確認した。以前の合格試験用のLinux Image・ドライバを使用したため、
+  報告時のImageとinitramfsを組み合わせた再試験は未実施。

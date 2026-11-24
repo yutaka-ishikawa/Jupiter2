@@ -27,6 +27,12 @@
 		#size-cells = <0x02>;
 		#address-cells = <0x02>;
 
+		/* Match the OpenSBI boot-fdt region, which has no execute permission. */
+		optee-boot-fdt@181e00000 {
+			no-map;
+			reg = <0x01 0x81e00000 0x00 0x200000>;
+		};
+
 		optee-shm@172000000 {
 			no-map;
 			reg = <0x01 0x72000000 0x00 0x1000000>;
