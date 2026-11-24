@@ -1,0 +1,9 @@
+{
+  "board": "k3-pico-itx",
+  "uboot_configuration": "conf_11",
+  "esos_configuration": "conf_dual",
+  "esos_dtb_images": [
+    "rcpu0-dtb-pico-itx",
+    "rcpu1-dtb-pico-itx"
+  ]
+}

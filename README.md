@@ -47,56 +47,81 @@ Linux、SDK、Eyrie、sampleをまとめたソースツリーです。
 [UART接続手順](doc/milkv-jupiter2-uart.md)を参照してください。
 PCの操作ターミナルとUART端末を分け、電源投入からのUARTログを保存します。
 
-### 2.2 CPU・メモリー・OS・カーネル情報の取得
+### 2.2 導入前の実機情報を採取
 
-実機Linuxで、日時付きの記録ディレクトリを作ります。
+比較・導入の対象となるLinuxを実機で起動し、変更を加える前に実行します。
+同じ端末で2.3まで進め、同じ `INFO_DIR` を使います。
 
 ```bash
-INFO_DIR="$HOME/jupiter2-info-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$INFO_DIR"
+set -e
+CAPTURE_ID="$(date +%Y%m%d-%H%M%S)"
+INFO_DIR="$HOME/jupiter2-linux-capture-$CAPTURE_ID"
+mkdir -m 700 "$INFO_DIR"
+
+date -Iseconds > "$INFO_DIR/captured-at.txt"
 uname -a > "$INFO_DIR/uname.txt"
-lscpu > "$INFO_DIR/lscpu.txt"
+LC_ALL=C lscpu > "$INFO_DIR/lscpu.txt"
 cat /proc/cpuinfo > "$INFO_DIR/cpuinfo.txt"
-cat /proc/meminfo > "$INFO_DIR/meminfo.txt"
-cat /sys/devices/system/cpu/online > "$INFO_DIR/cpu-online.txt"
+sudo cat /proc/iomem > "$INFO_DIR/iomem.txt"
 sudo dmesg > "$INFO_DIR/dmesg.txt"
+sudo cat /sys/firmware/fdt > "$INFO_DIR/running.dtb"
+test -s "$INFO_DIR/running.dtb"
+
+lsblk -f > "$INFO_DIR/lsblk.txt"
+findmnt --target / > "$INFO_DIR/root-mount.txt"
+findmnt --target /boot > "$INFO_DIR/boot-mount.txt"
+cat /proc/cmdline > "$INFO_DIR/cmdline.txt"
+if test -r /proc/mtd; then
+    cat /proc/mtd > "$INFO_DIR/proc-mtd.txt"
+else
+    printf '%s\n' '/proc/mtd is unavailable' >> "$INFO_DIR/capture-notes.txt"
+fi
+if sudo test -f /boot/env_k3.txt; then
+    sudo cat /boot/env_k3.txt > "$INFO_DIR/env_k3.txt"
+else
+    printf '%s\n' '/boot/env_k3.txt is absent' >> "$INFO_DIR/capture-notes.txt"
+fi
 ```
+
+`boot-mount.txt` は `/boot` を含むファイルシステムを記録します。
+GRUBやextlinuxを使用している場合は、[導入手順の第5章](doc/milkv-jupiter2-stack-install.md#5-実機の現状記録とバックアップ)
+に従って使用中の設定もこのディレクトリに保存します。起動媒体、
+ボード型番、ファームウェアの版、選択したDTB名も `capture-notes.txt` に追記します。
 
 Jupiter2はX100とA100の混成です。CPUの種類やLinuxのonline数だけでPMPの能力を推定せず、
 ファームウェアのHart別ログも確認します。既知の構成は[実機調査](hardware/jupiter2/jupiter2-hardware-compatibility.md)、
 PMPの16/32個混在は[対応計画と結果](doc/jupiter2-heterogeneous-pmp-plan.md)を参照してください。
 
-### 2.3 起動設定・DTB・ストレージ構成の取得
-
-同じ実機Linux端末で実行します。
-
-```bash
-lsblk -f > "$INFO_DIR/lsblk.txt"
-findmnt / > "$INFO_DIR/root-mount.txt"
-findmnt /boot > "$INFO_DIR/boot-mount.txt"
-cat /proc/cmdline > "$INFO_DIR/cmdline.txt"
-cat /proc/mtd > "$INFO_DIR/proc-mtd.txt"
-sudo cp /boot/env_k3.txt "$INFO_DIR/env_k3.txt"
-sudo cp /sys/firmware/fdt "$INFO_DIR/running.dtb"
-```
-
-この例は今回のBianbuの`/boot/env_k3.txt`構成を使います。
-DTB、機器識別子、起動媒体の情報は手元の記録として管理します。
-
-### 2.4 NOR区画容量の確認とファームウェアのバックアップ
+### 2.3 NOR区画容量の確認とファームウェアのバックアップ
 
 [導入手順の第5章](doc/milkv-jupiter2-stack-install.md)で、
-`opensbi-partition-info-日時`と`jupiter2-rollback-日時`に区画情報・元OpenSBI・起動設定を保存します。
+同じ `INFO_DIR` の下に `opensbi-partition-info-日時/` と `jupiter2-rollback-日時/` を作り、
+区画情報・元OpenSBI・起動設定を保存します。
 バックアップのハッシュを記録し、対応する復旧方法と販売元FSBL/U-Bootの入手元も確認します。
 
 今回の実測では`mtd5`の`opensbi`が`0x60000`＝393216 bytes（384 KiB）です。
 番号や容量は実機の`/proc/mtd`で再確認してください。
 詳しい読取り調査は[SPI NOR調査](doc/jupiter2-spi-nor-inspection.md)を参照してください。
 
-### 2.5 取得情報・バックアップを開発PCへ保存
+### 2.4 取得情報・バックアップを開発PCへ保存
 
 **作成後は、記録・バックアップのディレクトリ全体を実機外の開発PCの `hardware/jupiter2/captures/<採取ID>/` にコピーしてください。**
-実機が起動しなくなった場合にも取り出せる場所へ保存します。
+実機の `INFO_DIR` の中身をそこに配置し、開発PCで記録したUARTログを
+`uart.log` として同じ場所に保存します。開発PCのリポジトリルートで、
+`CAPTURE_ID` を実機で採取した値に設定し、全ファイルのハッシュを記録します。
+
+```bash
+CAPTURE_ID=20261124-165032  # 実機で採取したIDに置き換える
+(
+    set -euo pipefail
+    cd "hardware/jupiter2/captures/$CAPTURE_ID"
+    find . -type f ! -path ./SHA256SUMS -print0 |
+        sort -z | xargs -0 -r sha256sum > SHA256SUMS
+    sha256sum -c SHA256SUMS
+)
+```
+
+採取ディレクトリは実機が起動しなくなった場合にも取り出せる場所に保存します。
 ここまでで元の起動構成と復旧に必要な情報をそろえてから、deployへ進みます。
 
 <a id="phase-build"></a>

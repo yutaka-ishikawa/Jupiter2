@@ -15,18 +15,15 @@ GDB_PORT=1234
 CONSOLE=0
 MONITOR=0
 MONITOR_PORT=4444
-SMP=""
-MEM=2G
 CMDLINE=""
 APPEND_SET=0
 CRYPTO=""
 RNG=""
 ZKR=""
-SSTC=""
-WTM=""
 WTM_FAULT=none
-PMP_PROFILE=uniform16
 ROOTFS_FORMAT=raw
+# shellcheck source=hardware/jupiter2/qemu.conf
+source "$ROOT/hardware/jupiter2/qemu.conf"
 usage() {
 cat <<'EOF'
 Usage: bash scripts/run-k3.sh [options]
@@ -40,7 +37,7 @@ Usage: bash scripts/run-k3.sh [options]
   --rootfs FILE            Raw guest rootfs image (default: selected profile image)
   --crypto unavailable|qemu-dev  Choose normal or explicit development crypto firmware
   --rng auto|zkr|jupiter2|counter  Select matching RNG firmware and devices
-  --pmp-profile uniform16|mixed  PMP regression profile (default: uniform16)
+  --pmp-profile uniform16|mixed  PMP regression profile (see hardware/jupiter2/qemu.conf)
   --sstc on|off            Select host Sstc support (default: CPU model)
   --zkr on|off             Override Zkr CPU extension for negative tests
   --wtm-rng on|off         Enable WTM and blank GEU eFuse MMIO
@@ -52,8 +49,8 @@ Usage: bash scripts/run-k3.sh [options]
   --console                QEMU interactive serial/monitor multiplexer (-nographic, Ctrl-A C)
   --monitor                Enable QEMU monitor on 127.0.0.1:4444
   --monitor-port N         Monitor port, implies --monitor
-  --smp N                  Hart count (default: 16)
-  --memory SIZE            Memory (default 2G)
+  --smp N                  Hart count (see hardware/jupiter2/qemu.conf)
+  --memory SIZE            Memory (see hardware/jupiter2/qemu.conf)
   --append TEXT            Override Linux kernel command line
   --help                   Show help
 
@@ -104,7 +101,6 @@ esac
 if [[ -z $PREFIX ]]; then PREFIX="$ROOT/install/$IMAGE"; fi
 PREFIX=$(realpath -m "$PREFIX")
 if [[ -z $QEMU ]]; then QEMU="$PREFIX/bin/qemu-system-riscv64"; fi
-: "${SMP:=16}"
 case "$CRYPTO" in
  ""|unavailable) :;;
  qemu-dev)

@@ -327,24 +327,9 @@ OpenSBI/SM・QEMU guest・実機の動作試験ではない。FIT tool不足時�
 115200/8N1・フロー制御なしで電源投入直後から記録する。
 Jupiter2 SBCにSDスロットはないため、SD起動を前提にしない。
 
-以下は実機Linuxで実行する。root権限が必要な読取りだけ`sudo`を使う。
-ログは個体情報を含むため、公開Gitへ追加せず、開発PCの `hardware/jupiter2/captures/<採取ID>/` に保存する。
-
-```bash
-set -e
-RECORD="$PWD/jupiter2-before-$(date +%Y%m%d-%H%M%S)"
-mkdir -m 700 "$RECORD"
-uname -a > "$RECORD/uname.txt"
-lscpu > "$RECORD/lscpu.txt"
-cat /proc/cpuinfo > "$RECORD/cpuinfo.txt"
-cat /proc/cmdline > "$RECORD/cmdline.txt"
-cat /proc/mtd > "$RECORD/proc-mtd.txt"
-lsblk -o NAME,PATH,TYPE,SIZE,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS \
-    > "$RECORD/lsblk.txt"
-findmnt > "$RECORD/findmnt.txt"
-sudo dmesg > "$RECORD/dmesg.txt"
-sudo cat /sys/firmware/fdt > "$RECORD/running.dtb"
-```
+実機Linuxで [READMEの採取手順](../README.md#22-導入前の実機情報を採取) を実行し、
+`INFO_DIR` を設定した同じ端末で続ける。ログと以下のバックアップは同じ
+`INFO_DIR` にまとめ、開発PCの `hardware/jupiter2/captures/<採取ID>/` に保存する。
 
 `/sys/firmware/fdt`がない環境は、`dtc -I fs`等で実行中DTを別途採取する。
 UEFIを使用していれば`efibootmgr -v`、GRUBなら`/etc/default/grub`、`/etc/grub.d/`、
@@ -363,10 +348,10 @@ OpenSBI区画全体と必要なNOR/GPT情報の読取りは
 
 ```bash
 set -euo pipefail
-ROLLBACK="$PWD/jupiter2-rollback-$(date +%Y%m%d-%H%M%S)"
+ROLLBACK="$INFO_DIR/jupiter2-rollback-$(date +%Y%m%d-%H%M%S)"
 mkdir -m 700 "$ROLLBACK"
 uname -r > "$ROLLBACK/original-kernel-release.txt"
-findmnt /boot > "$ROLLBACK/boot-mount.txt"
+findmnt --target /boot > "$ROLLBACK/boot-mount.txt"
 lsblk -o NAME,PATH,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS > "$ROLLBACK/storage.txt"
 sudo cp -a /boot/env_k3.txt "$ROLLBACK/env_k3.txt"
 sha256sum "$ROLLBACK/env_k3.txt" > "$ROLLBACK/env_k3.txt.sha256"
@@ -383,7 +368,7 @@ Linux設定を保存する`jupiter2-rollback-日時/`とは別に、
 
 ```bash
 set -euo pipefail
-OPENSBI_INFO="$PWD/opensbi-partition-info-$(date +%Y%m%d-%H%M%S)"
+OPENSBI_INFO="$INFO_DIR/opensbi-partition-info-$(date +%Y%m%d-%H%M%S)"
 mkdir -m 700 "$OPENSBI_INFO"
 MTD_NAME=mtd5
 test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi

@@ -1,0 +1,1 @@
+Linux cradsec-jupitor2 6.18.3-generic #1.0.5.4 SMP PREEMPT_DYNAMIC Wed Jul 15 16:27:49 CST 2026 riscv64 GNU/Linux

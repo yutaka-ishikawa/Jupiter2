@@ -417,12 +417,16 @@ def build(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for key in ('uboot-itb', 'esos-itb', 'opensbi-bin', 'fsbl', 'output'):
+    parser.add_argument('--vendor-profile', action='store_true',
+                        help='use hardware/jupiter2/vendor-fit.json and vendor inputs as defaults')
+    for key in ('uboot-itb', 'esos-itb', 'fsbl'):
+        parser.add_argument('--' + key, type=Path)
+    for key in ('opensbi-bin', 'output'):
         parser.add_argument('--' + key, type=Path, required=True)
-    parser.add_argument('--configuration', required=True, help='e.g. conf_11 (must match --board)')
+    parser.add_argument('--configuration', help='e.g. conf_11 (must match --board)')
     parser.add_argument('--esos-configuration',
                         help='explicit ESOS config, e.g. conf_dual; retains ALL its loadables')
-    parser.add_argument('--board', default='k3-pico-itx')
+    parser.add_argument('--board')
     parser.add_argument('--uboot-layout', choices=('vendor', 'reference'), default='vendor',
                         help='reference: verify embedded OpenSBI and retain loadables-first SPL layout')
     parser.add_argument('--variant', choices=('vendor', 'keystone'), required=True)
@@ -437,6 +441,21 @@ def main():
     args = parser.parse_args()
     args.output = args.output.absolute()
     try:
+        if args.vendor_profile:
+            hardware = Path(__file__).resolve().parents[1] / 'hardware/jupiter2'
+            profile = json.loads((hardware / 'vendor-fit.json').read_text())
+            args.configuration = args.configuration or profile['uboot_configuration']
+            args.esos_configuration = args.esos_configuration or profile['esos_configuration']
+            args.board = args.board or profile['board']
+            for key, filename in [('uboot_itb', 'u-boot.itb'), ('esos_itb', 'esos.itb'),
+                                  ('fsbl', 'FSBL.bin')]:
+                if getattr(args, key) is None:
+                    setattr(args, key, hardware / 'vendor' / filename)
+        for key in ('uboot_itb', 'esos_itb', 'fsbl', 'configuration'):
+            if getattr(args, key) is None:
+                parser.error(f'--{key.replace("_", "-")} is required without --vendor-profile')
+        if args.board is None:
+            args.board = 'k3-pico-itx'
         build(args)
     except (ValueError, KeyError, OSError, UnicodeError, struct.error, subprocess.CalledProcessError) as exc:
         print(f'ERROR: {exc}', file=sys.stderr)

@@ -1,0 +1,6 @@
+knl_name=vmlinuz-6.18.3-generic
+ramdisk_name=initrd.img-6.18.3-generic
+dtb_dir=spacemit/6.18.3-generic
+ramdisk_addr=0x130000000
+loglevel=8
+commonargs=setenv bootargs plymouth.prefer-fbcon plymouth.ignore-serial-consoles splash

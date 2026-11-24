@@ -1,0 +1,12 @@
+NAME      PATH           TYPE   SIZE FSTYPE UUID                                 PARTUUID                             PARTLABEL MOUNTPOINTS
+sda       /dev/sda       disk 119.2G                                                                                            
+├─sda1    /dev/sda1      part   256M vfat   78AC-6FE6                            55a2ca86-b509-4d82-a8b5-cc54585f5b8e ESP       
+├─sda2    /dev/sda2      part   256M ext4   4b87fbbb-15e6-4a52-b045-8adc7efca097 553878c8-6c02-4d21-9c99-78add5883b74 bootfs    /boot
+└─sda3    /dev/sda3      part 118.7G ext4   03d4649e-5d64-4681-ad70-1c7e6d5872f4 73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 rootfs    /
+mtdblock0 /dev/mtdblock0 disk     8M                                                                                            
+mtdblock1 /dev/mtdblock1 disk   128K                                                                                            
+mtdblock2 /dev/mtdblock2 disk   512K                                                                                            
+mtdblock3 /dev/mtdblock3 disk    64K                                                                                            
+mtdblock4 /dev/mtdblock4 disk     1M                                                                                            
+mtdblock5 /dev/mtdblock5 disk   384K                                                                                            
+mtdblock6 /dev/mtdblock6 disk   5.9M                                                                                            

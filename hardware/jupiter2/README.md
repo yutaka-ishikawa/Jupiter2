@@ -17,7 +17,7 @@
 
 手元の旧 `work/jupiter2-ram-boot/original/` にある販売元ファイルは
 `vendor/` に、実機採取済みDTBやログは対応する `captures/<採取ID>/` に移す。
-`captures/` はGitの追跡対象外。QEMUの生成DTBと比較用DTSは
+新規の `captures/` の採取資料は既定でGitの追跡対象外。QEMUの生成DTBと比較用DTSは
 `.build-k3/dtb-compare/` に置く。
 
 [DTBの採取とQEMUとの差分確認](../../doc/jupiter2-qemu-hardware-test-gaps.md#8-実機dtbを基準にqemuの再現範囲を調べる)
@@ -43,8 +43,8 @@
 python3 scripts/extract-jupiter2-vendor-dtbs.py
 ```
 
-スクリプトは `vendor/u-boot.itb` の `conf_11` と `vendor/esos.itb` の
-`conf_dual` を読み、FIT内のハッシュを検証してから、同じ `vendor/` に
+スクリプトは `vendor-fit.json` に従って `vendor/u-boot.itb` と
+`vendor/esos.itb` の構成を選び、FIT内のハッシュを検証してから、同じ `vendor/` に
 `u-boot-k3-pico-itx.dtb` と `esos-rcpu{0,1}-dtb-pico-itx.dtb` を生成する。
 入力ファイルを入れ替えたら再実行する。
 
@@ -53,6 +53,28 @@ Linuxに渡された実機の `captures/<採取ID>/running.dtb` があればそ�
 QEMUの生成DTBと比較する。ESOSの2個のDTBはRCPU用。
 QEMUの同居用DTBは、QEMUモデルで実装されているデバイスとOpenSBIドメイン定義を
 確認した入力から生成する。
+
+## ビルドとQEMUの設定
+
+| 変更するファイル | 反映先 |
+| --- | --- |
+| `qemu.conf` | `make run` と `scripts/run-k3.sh` の既定のhart数、RAM、PMPプロファイル、Sstc、WTM。CLIの指定を優先する。変更後はQEMUの起動をやり直す。 |
+| `linux.config` | `make build` のK3 Linux Kconfig追加設定。変更後は `make linux JOBS=20 && make install-linux` を実行する。 |
+| `vendor-fit.json` | U-BootとESOSのFIT構成名、ボード名、抽出するRCPUイメージ名。DTB抽出と実機RAMブートFITの選択に使う。 |
+| `vendor/` | 同じ販売元リリースの `FSBL.bin`、`fw_dynamic.itb`、`u-boot.itb`、`esos.itb`。リリースを変更する場合は一式を揃える。 |
+
+初回は `make build JOBS=20 && make install` を実行する。RAM容量・hart数など
+QEMUの起動設定だけが異なる場合は、`qemu.conf` を変更して `make run` を実行する。
+FITの入力を入れ替えた場合はDTB抽出を再実行する。実機RAMブート用FITを作る場合は
+[RAM起動手順](../../doc/jupiter2-ram-boot-procedure.md) のパッケージ生成コマンドで、
+`--fsbl`、`--uboot-itb`、`--esos-itb`、`--configuration`、
+`--esos-configuration`、`--board` を `--vendor-profile` に置き換えられる。
+OpenSBIのバイナリ、実行時確保サイズ、SPL転送上限は同手順で確認した値を渡す。
+
+採取tarとインベントリは比較資料。実機とQEMUの生成DTBを照合し、変更が
+QEMUの既存モデルで再現できることを確認する。MMIO配置や割り込み配線、
+CPU型、PMPの粒度、対応デバイス自体が異なる場合は、該当するQEMUモデルや
+ファームウェアの変更が必要になる。
 
 ## 別の実機で再現する順序
 

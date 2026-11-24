@@ -194,3 +194,19 @@ MPXYやOP-TEEの比較には、同居設定を追加した最終 `boot.dtb` も�
 MPXY設定を追加したものを `run-k3.sh --dtb` に渡す。使用したDTBのハッシュと
 UARTを保存し、LinuxのCPU列挙、OP-TEE起動、Keystone試験の結果をQEMU由来DTBでの
 基準起動と比較する。実機DTB原本とQEMU用に変更したコピーをそれぞれ保持する。
+
+### 2026-11-24のビルドとDTB照合
+
+現行ソースの `riscv64-softmmu` ビルドディレクトリで
+`ninja -C .build-k3/qemu qemu-system-riscv64` を実行し、QEMU 11.1.3を差分ビルドした。
+このホストではMesonのPythonモジュールのパスを指定し、静的GLibが要求する
+`libsysprof-capture-4.a` をリンク時に追加した。空き容量を抑えるためデバッグシンボルを除いた。
+
+`qemu.conf` の16 hart・2 GiB・均一16 PMP枠で `dumpdtb` を実行し、
+`hardware/jupiter2/captures/20261108-075700/running.dtb` と照合した。
+16 hart、24 MHzのtimebase、RAMの開始アドレス、CLINT・S-mode IMSIC・
+S-mode APLIC・UARTのアドレスと領域サイズが一致した。ルートの
+`compatible` はQEMUが `riscv-virtio`、実機が `spacemit,k3-pico-itx`。
+実機のRPMI共有メモリノードはQEMUの生成DTBにない。
+実機相当の32,736 MiBではホストのメモリ確保に失敗した。
+今回の検証範囲は差分ビルドとDTB生成・照合で、Linuxゲストは起動していない。

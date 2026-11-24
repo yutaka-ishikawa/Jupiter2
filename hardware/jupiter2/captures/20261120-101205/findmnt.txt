@@ -1,0 +1,29 @@
+TARGET                                          SOURCE      FSTYPE          OPTIONS
+/                                               /dev/sda3   ext4            rw,noatime,errors=remount-ro
+├─/sys                                          sysfs       sysfs           rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/kernel/security                        securityfs  securityfs      rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/fs/cgroup                              cgroup2     cgroup2         rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot,memory_hugetlb_accounting
+│ ├─/sys/fs/pstore                              none        pstore          rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/fs/bpf                                 bpf         bpf             rw,nosuid,nodev,noexec,relatime,mode=700
+│ ├─/sys/kernel/debug                           debugfs     debugfs         rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/kernel/tracing                         tracefs     tracefs         rw,nosuid,nodev,noexec,relatime
+│ ├─/sys/kernel/config                          configfs    configfs        rw,nosuid,nodev,noexec,relatime
+│ └─/sys/fs/fuse/connections                    fusectl     fusectl         rw,nosuid,nodev,noexec,relatime
+├─/proc                                         proc        proc            rw,nosuid,nodev,noexec,relatime
+│ └─/proc/sys/fs/binfmt_misc                    systemd-1   autofs          rw,relatime,fd=37,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=14795
+│   └─/proc/sys/fs/binfmt_misc                  binfmt_misc binfmt_misc     rw,nosuid,nodev,noexec,relatime
+├─/dev                                          udev        devtmpfs        rw,nosuid,relatime,size=16131536k,nr_inodes=4032884,mode=755,inode64
+│ ├─/dev/pts                                    devpts      devpts          rw,nosuid,noexec,relatime,gid=5,mode=600,ptmxmode=000
+│ ├─/dev/shm                                    tmpfs       tmpfs           rw,nosuid,nodev,inode64,usrquota
+│ ├─/dev/mqueue                                 mqueue      mqueue          rw,nosuid,nodev,noexec,relatime
+│ ├─/dev/hugepages                              hugetlbfs   hugetlbfs       rw,nosuid,nodev,relatime,pagesize=2M
+│ └─/dev/usb-ffs/adb                            adb         functionfs      rw,relatime
+├─/run                                          tmpfs       tmpfs           rw,nosuid,nodev,noexec,relatime,size=3282884k,mode=755,inode64
+│ ├─/run/credentials/systemd-journald.service   none        tmpfs           ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+│ ├─/run/credentials/systemd-resolved.service   none        tmpfs           ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+│ ├─/run/user/1001                              tmpfs       tmpfs           rw,nosuid,nodev,relatime,size=3282880k,nr_inodes=820720,mode=700,uid=1001,gid=1001,inode64
+│ │ └─/run/user/1001/gvfs                       gvfsd-fuse  fuse.gvfsd-fuse rw,nosuid,nodev,relatime,user_id=1001,group_id=1001
+│ ├─/run/user/105                               tmpfs       tmpfs           rw,nosuid,nodev,relatime,size=3282880k,nr_inodes=820720,mode=700,uid=105,gid=109,inode64
+│ └─/run/credentials/serial-getty@ttyS0.service none        tmpfs           ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+├─/tmp                                          tmpfs       tmpfs           rw,nosuid,nodev,size=16414412k,nr_inodes=1048576,inode64,usrquota
+└─/boot                                         /dev/sda2   ext4            rw,relatime

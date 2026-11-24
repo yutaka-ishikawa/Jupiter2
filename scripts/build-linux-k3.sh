@@ -32,6 +32,8 @@ make -C "$KERNEL_SRC" O="$OUT_DIR" k3_bianbu_defconfig
   -e NET_9P_VIRTIO \
   -e 9P_FS \
   -e VIRTIO_NET
+KCONFIG_CONFIG="$OUT_DIR/.config" bash "$KERNEL_SRC/scripts/kconfig/merge_config.sh" \
+  -m -O "$OUT_DIR" "$OUT_DIR/.config" "$ROOT/hardware/jupiter2/linux.config"
 make -C "$KERNEL_SRC" O="$OUT_DIR" olddefconfig
 make -C "$KERNEL_SRC" O="$OUT_DIR" syncconfig
 # Fail early if requested options were disabled due to unmet Kconfig dependencies.
