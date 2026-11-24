@@ -122,15 +122,18 @@ UARTの `PASS: parallel OP-TEE TA calls on all 16 CPUs` は全子プロセスが
 
 ## Keystoneの統合試験に同居試験を追加
 
-リポジトリのルートで、RV64向け `optee_client` のインストール先
-（`include/tee_client_api.h` と `lib/libteec.a` を含む）を
-`OPTEE_CLIENT_OUT` に設定して実行する。`dtc` とRV64クロスコンパイラが必要。
+リポジトリのルートで実行する。RV64向け `optee_client` の
+`include/tee_client_api.h` と `lib/libteec.a` を
+`.build-k3/optee-coexist/client/usr/` の下に用意する。
+別の場所にある場合は `make optee-coexist-test OPTEE_CLIENT_OUT=実際のパス` を使う。
+`dtc` とRV64クロスコンパイラが必要。
+[設定変数の一覧](../../doc/make-build-install.md#設定変数)
 
 ```sh
 make build JOBS=20
 make install
 make optee-coexist JOBS=20
-make optee-coexist-test OPTEE_CLIENT_OUT=/path/to/optee-client/usr
+make optee-coexist-test
 
 WORK=.build-k3/optee-coexist
 python3 verifications/crypto/run-qemu.py --all --sstc on \

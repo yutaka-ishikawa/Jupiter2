@@ -10,6 +10,7 @@ STAGE := $(abspath $(KEYSTONE_BUILD_DIR))/stage
 JOBS ?= $(shell nproc)
 KEYSTONE_SM_OPT_LEVEL ?= 2
 CROSS_COMPILE ?= riscv64-linux-gnu-
+OPTEE_CLIENT_OUT ?= $(ROOT)/.build-k3/optee-coexist/client/usr
 ROOTFS_ARCHIVE ?=
 ROOTFS_SHA256 ?=
 export CROSS_COMPILE JOBS KEYSTONE_SM_OPT_LEVEL
@@ -72,5 +73,5 @@ help:
 	@echo 'make qemu|opensbi|sm|eyrie|keystone|crypto|verifications|linux|rng|samples'
 	@echo 'make install-qemu|install-opensbi|install-eyrie|install-keystone|install-crypto|install-verifications'
 	@echo 'make optee-coexist JOBS=20   Build the OP-TEE Core with the coexistence TA'
-	@echo 'make optee-coexist-test OPTEE_CLIENT_OUT=DIR  Generate boot.dtb and coexist.cpio after install'
+	@echo 'make optee-coexist-test     Generate boot.dtb and coexist.cpio after install (OPTEE_CLIENT_OUT overrides client path)'
 	@echo 'Stop QEMU/unmount rootfs before install-keystone. See doc/make-build-install.md.'

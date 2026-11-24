@@ -26,13 +26,54 @@ installは古い成果物の鮮度まで判定しません。ソース変更後�
 | 実行コマンド | 成果物 |
 | --- | --- |
 | `make optee-coexist JOBS=20 CROSS_COMPILE=riscv64-linux-gnu-` | 検証用TAを組み込んだ `.build-k3/optee-coexist/out/core/tee.elf` |
-| `make optee-coexist-test OPTEE_CLIENT_OUT=DIR` | `.build-k3/optee-coexist/boot.dtb` と `coexist.cpio` |
+| `make optee-coexist-test` | `.build-k3/optee-coexist/boot.dtb` と `coexist.cpio` |
 
 同居試験用の2ターゲットは必要なときに明示して実行します。
 `optee-coexist-test` の前に `make build` と `make install` を済ませ、
-RV64向け `optee_client` のヘッダーと静的ライブラリがあるディレクトリを
-`OPTEE_CLIENT_OUT` に指定します。
+RV64向け `optee_client` のヘッダーと静的ライブラリを既定の場所に用意します。
+別の場所を使う場合は `OPTEE_CLIENT_OUT` を指定します。
 [ビルドとQEMUでの試験手順](../verifications/optee-coexistence/README.md#keystoneの統合試験に同居試験を追加)
+
+## 設定変数
+
+標準手順では事前の `export` は不要です。必要なツールは `PATH` に置き、
+同居試験用のRV64 `optee_client` は下記の既定のディレクトリに用意します。
+ターゲットごとに上書きする場合は `make ターゲット 変数=値` を使えます。
+下表の相対パスはリポジトリルート基準です。
+
+| ルートMakefileの変数 | 既定値 | 用途 |
+| --- | --- | --- |
+| `CROSS_COMPILE` | `riscv64-linux-gnu-` | RV64クロスツールチェーンの接頭辞。絶対パスを含む接頭辞も指定可能 |
+| `JOBS` | `nproc` の結果 | 並列ビルド数 |
+| `PREFIX` | `install/keystone` | インストール先。 `make run` と同居試験準備の入力先 |
+| `K3_BUILD_DIR` | `.build-k3` | QEMU・Linux・OpenSBIのビルド出力先 |
+| `KEYSTONE_BUILD_DIR` | `.build-keystone` | SDK、ドライバ、ステージング等の出力先 |
+| `OPTEE_CLIENT_OUT` | `.build-k3/optee-coexist/client/usr` | 同居試験に使うRV64用 `include/tee_client_api.h` と `lib/libteec.a` の親ディレクトリ |
+| `KEYSTONE_SM_OPT_LEVEL` | `2` | SMの最適化レベル。 `0`、`1`、`2`、`3`、`s`、`z` |
+| `ROOTFS_ARCHIVE` | 空 | カスタムrootfsアーカイブのパス |
+| `ROOTFS_SHA256` | 空 | カスタムrootfsアーカイブの検証用SHA-256 |
+
+下記はルートMakefileから呼ばれるプロジェクトのスクリプトが受け付ける
+追加の環境変数です。
+
+| 変数 | 既定値と用途 |
+| --- | --- |
+| `KEYSTONE_PMP_PROFILE` | `mixed`。SMのPMPプロファイル |
+| `KEYSTONE_SM_TRACE` | `0`。SMのトレースを有効にする場合は `1` |
+| `KEYSTONE_CRYPTO_SEED_FILE` | `${XDG_STATE_HOME:-$HOME/.local/state}/keystone-k3/qemu-dev.seed`。QEMU開発用の鍵生成シード |
+| `XDG_STATE_HOME` | 未設定時は `$HOME/.local/state`。開発用シードの既定保存先に使用 |
+| `CFLAGS`、`CXXFLAGS` | 追加指定なし。SDK・EyrieのC/C++ビルドに渡す追加フラグ |
+
+同居試験準備スクリプトを直接呼ぶ場合、`KERNEL_OUT` でLinuxのビルド出力
+（既定は `.build-k3/linux`）を指定できます。Makeターゲットは
+`K3_BUILD_DIR/linux` を渡します。Coreビルドスクリプトを直接呼ぶ場合の
+`JOBS` の既定は `20` です。同居用の3成果物は `.build-k3/optee-coexist/`
+の下に生成します。
+
+単体ビルドスクリプトには、Linuxソース・出力先の `KERNEL_SRC`・`OUT_DIR` と、
+SMビルドの `KEYSTONE_RNG_BACKEND`・`KEYSTONE_CRYPTO_PROVIDER` もあります。
+ルートMakefileはLinuxのソースと出力先を指定し、ファームウェアの設定は
+`opensbi`、`rng`、`crypto` の各ターゲットで選びます。
 
 ## 個別のbuildとinstall
 
