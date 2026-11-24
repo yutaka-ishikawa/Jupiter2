@@ -31,10 +31,10 @@ OpenSBIのベースがMilk-Vと同じK3ブランチであることはユーザ�
 | `dmesg.txt` | Linux起動、SBI機能検出、タイマー、割り込み、予約メモリ、NORパーティション。 |
 | `iomem.txt` | Linuxが認識しているアドレス範囲。 |
 
-アーカイブのSHA-256：
+登録した[採取アーカイブ](jupiter2-linux-capture-20261108-075700.tar.gz)のSHA-256：
 
 ```text
-d6185ab4ebbf5e7016e803c71f8dc48e3c0e74be11276a7901940256b7fd2dd3
+bda3228d2f471698ea9d4fa42e2ece8dbb6253813dc8a9baed85614e1cf6cbfa
 ```
 
 DTBのSHA-256：
@@ -44,22 +44,6 @@ DTBのSHA-256：
 ```
 
 将来のチャットでも参照できるよう、主要な実機値と各入力ファイルのハッシュを[機械可読のインベントリ](jupiter2-hardware-inventory.json)にも保存した。元のログ・DTBにはボードの個体情報やブート媒体の識別子等が含まれるため、それらの全文はこの文書へ転載していない。以下の抜粋とインベントリには動作条件の照合に必要な値を残した。
-
-## 2026-11-24の再採取
-
-[採取tar](jupiter2-linux-capture-20261124-165032.tar.gz) のSHA-256は
-`ef9899d17176a9003e815d3fd8e2e43417450a01fc9c901ccea93357c75f1b9f`。
-同梱の `SHA256SUMS` で6ファイルを検証した。
-
-- 前回との照合では、`cpuinfo.txt` と `lscpu.txt` がバイト単位で一致した。
-  DTBのボード識別子、16 hart、24 MHzのtimebase、RAMの範囲、
-  CLINT・S-mode IMSIC・S-mode APLIC・UART・RPMI共有領域のアドレスとサイズも一致した。
-  Linuxが検出したSBI仕様と実装バージョンも同じだった。
-- 今回のカーネルは `6.18.3 #2`。前回は `6.18.3-generic #1.0.5.4`。
-  `running.dtb`、`iomem.txt`、`dmesg.txt`、`uname.txt` のハッシュは異なる。
-  インベントリと下記の観測値は2026-11-08の採取に対応する。
-- この照合の対象は2回の実機採取。販売元の起動ファイル一式とのバイナリ照合や
-  QEMUの起動試験は実施していない。
 
 ## 確認できた実機構成
 

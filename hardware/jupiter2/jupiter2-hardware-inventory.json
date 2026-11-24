@@ -2,8 +2,8 @@
   "review_date_jst": "2026-11-08",
   "repository_review_commit": "4011d1c9d",
   "evidence_archive": {
-    "name": "jupiter2-info.tar.gz",
-    "sha256": "d6185ab4ebbf5e7016e803c71f8dc48e3c0e74be11276a7901940256b7fd2dd3"
+    "name": "jupiter2-linux-capture-20261108-075700.tar.gz",
+    "sha256": "bda3228d2f471698ea9d4fa42e2ece8dbb6253813dc8a9baed85614e1cf6cbfa"
   },
   "source_sha256": {
     "running.dtb": "19151092f33a1a0b340c21ba3aa88d6494e6726ebb9f30f802db758f38f006a8",
