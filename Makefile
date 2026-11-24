@@ -17,7 +17,7 @@ K3_ARGS = --prefix "$(STAGE)" --build-dir "$(K3_BUILD_DIR)" --jobs "$(JOBS)"
 SDK_ARGS = --build-dir "$(KEYSTONE_BUILD_DIR)" --jobs "$(JOBS)"
 VERIFY_ARGS = KEYSTONE_BUILD_DIR="$(KEYSTONE_BUILD_DIR)" KERNEL_OUT="$(K3_BUILD_DIR)/linux"
 COMPONENTS := qemu opensbi linux eyrie keystone rng crypto verifications samples
-.PHONY: all build install build-install $(COMPONENTS) sm sdk firmware guest erie openSBI install-erie install-openSBI run help optee-coexist-test $(addprefix install-,$(COMPONENTS))
+.PHONY: all build install build-install $(COMPONENTS) sm sdk firmware guest erie openSBI install-erie install-openSBI run help optee-coexist optee-coexist-test $(addprefix install-,$(COMPONENTS))
 all: build
 build: $(COMPONENTS)
 build-install: build install
@@ -57,6 +57,8 @@ samples: eyrie
 install: $(addprefix install-,$(COMPONENTS))
 $(addprefix install-,$(COMPONENTS)):
 	bash "$(ROOT)/scripts/install-built-keystone.sh" "$(@:install-%=%)" "$(STAGE)" "$(PREFIX)" "$(KEYSTONE_BUILD_DIR)" "$(ROOTFS_ARCHIVE)" "$(ROOTFS_SHA256)"
+optee-coexist:
+	bash "$(ROOT)/scripts/build-k3-optee-coexist.sh"
 optee-coexist-test:
 	PREFIX="$(abspath $(PREFIX))" KEYSTONE_BUILD_DIR="$(abspath $(KEYSTONE_BUILD_DIR))" \
 		KERNEL_OUT="$(abspath $(K3_BUILD_DIR))/linux" OPTEE_CLIENT_OUT="$(OPTEE_CLIENT_OUT)" \
@@ -69,5 +71,6 @@ help:
 	@echo 'make build-install JOBS=4    Build then install in one command'
 	@echo 'make qemu|opensbi|sm|eyrie|keystone|crypto|verifications|linux|rng|samples'
 	@echo 'make install-qemu|install-opensbi|install-eyrie|install-keystone|install-crypto|install-verifications'
+	@echo 'make optee-coexist JOBS=20   Build the OP-TEE Core with the coexistence TA'
 	@echo 'make optee-coexist-test OPTEE_CLIENT_OUT=DIR  Generate boot.dtb and coexist.cpio after install'
 	@echo 'Stop QEMU/unmount rootfs before install-keystone. See doc/make-build-install.md.'

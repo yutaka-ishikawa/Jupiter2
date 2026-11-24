@@ -21,6 +21,19 @@ make build-install JOBS=4
 成果物がなければエラーになるので、先に必要なbuildを実行してください。
 installは古い成果物の鮮度まで判定しません。ソース変更後はbuild→installの順に使います。
 
+## OP-TEE・Keystone同居試験のビルド
+
+| 実行コマンド | 成果物 |
+| --- | --- |
+| `make optee-coexist JOBS=20 CROSS_COMPILE=riscv64-linux-gnu-` | 検証用TAを組み込んだ `.build-k3/optee-coexist/out/core/tee.elf` |
+| `make optee-coexist-test OPTEE_CLIENT_OUT=DIR` | `.build-k3/optee-coexist/boot.dtb` と `coexist.cpio` |
+
+同居試験用の2ターゲットは必要なときに明示して実行します。
+`optee-coexist-test` の前に `make build` と `make install` を済ませ、
+RV64向け `optee_client` のヘッダーと静的ライブラリがあるディレクトリを
+`OPTEE_CLIENT_OUT` に指定します。
+[ビルドとQEMUでの試験手順](../verifications/optee-coexistence/README.md#keystoneの統合試験に同居試験を追加)
+
 ## 個別のbuildとinstall
 
 | コンポーネント | buildコマンド | installコマンド | 内容 |

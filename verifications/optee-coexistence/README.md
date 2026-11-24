@@ -11,7 +11,7 @@
 ビルド環境にはRV64クロスコンパイラとPythonの `pyelftools` が必要。
 
 ```sh
-JOBS=20 CROSS_COMPILE=riscv64-linux-gnu- bash scripts/build-k3-optee-coexist.sh
+make optee-coexist JOBS=20 CROSS_COMPILE=riscv64-linux-gnu-
 ```
 
 出力は `.build-k3/optee-coexist/out/core/tee.elf`。
@@ -129,7 +129,7 @@ UARTの `PASS: parallel OP-TEE TA calls on all 16 CPUs` は全子プロセスが
 ```sh
 make build JOBS=20
 make install
-JOBS=20 bash scripts/build-k3-optee-coexist.sh
+make optee-coexist JOBS=20
 make optee-coexist-test OPTEE_CLIENT_OUT=/path/to/optee-client/usr
 
 WORK=.build-k3/optee-coexist
