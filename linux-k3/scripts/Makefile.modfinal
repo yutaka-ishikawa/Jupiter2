@@ -51,9 +51,14 @@ if_changed_except = $(if $(call newer_prereqs_except,$(2))$(cmd-check),      \
 	$(cmd);                                                              \
 	printf '%s\n' 'savedcmd_$@ := $(make-cmd)' > $(dot-target).cmd, @:)
 
-# Re-generate module BTFs if either module's .ko or vmlinux changed
-%.ko: %.o %.mod.o .module-common.o $(objtree)/scripts/module.lds $(and $(CONFIG_DEBUG_INFO_BTF_MODULES),$(KBUILD_BUILTIN),$(objtree)/vmlinux) FORCE
-	+$(call if_changed_except,ld_ko_o,$(objtree)/vmlinux)
+# External builds clear KBUILD_BUILTIN but still use vmlinux as the split BTF base.
+ifdef CONFIG_DEBUG_INFO_BTF_MODULES
+module-btf-base := $(if $(KBUILD_BUILTIN),$(objtree)/vmlinux,$(wildcard $(objtree)/vmlinux))
+endif
+
+# Relink external modules before replacing BTF generated against an old base.
+%.ko: %.o %.mod.o .module-common.o $(objtree)/scripts/module.lds $(module-btf-base) FORCE
+	+$(call if_changed_except,ld_ko_o,$(if $(KBUILD_EXTMOD),,$(objtree)/vmlinux))
 ifdef CONFIG_DEBUG_INFO_BTF_MODULES
 	+$(if $(newer-prereqs),$(call cmd,btf_ko))
 endif

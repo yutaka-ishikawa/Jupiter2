@@ -169,3 +169,18 @@ python3 scripts/tests/test-keystone-native-entry.py
 両方の結果を残すには `--logs results/sstc-on` / `--logs results/sstc-off` のように分ける。
 rootからの完全なコマンドは [共存手順](../../doc/keystone-sstc-coexistence.md) を参照。
 `--all` はhost timer profileとSstc確認表示も検査する。
+
+### 試験モジュールのBTF検証で失敗する場合
+
+`failed to validate module [keystone_sbi_verify] BTF: -22` は、ゲストが
+試験モジュールのBTFを拒否したことを示す。`.build-k3/linux/vmlinux` と同じ
+ビルドの `Image` をインストールし、古い試験モジュールを再リンクする。
+
+```sh
+make install-linux
+rm -f verifications/{sbi-errors/kernel/keystone_sbi_verify,edgecall/kernel/edgecall_pmp_probe,sbi-4000/kernel/probe,robustness/kernel/probe}.ko
+make -C verifications kernel-modules KERNEL_OUT="$PWD/.build-k3/linux"
+```
+
+`K3_BUILD_DIR` を変更している場合は、`make install-linux` と `KERNEL_OUT`
+に対応する同じ出力ディレクトリを指定する。
