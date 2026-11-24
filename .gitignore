@@ -11,6 +11,5 @@
 /install/
 /.build-keystone/
 
-# Local Jupiter2 board captures and vendor firmware inputs
+# Local Jupiter2 board captures
 /hardware/jupiter2/captures/
-/hardware/jupiter2/vendor/
