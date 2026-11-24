@@ -7,6 +7,16 @@
 
 ## ビルド
 
+検証用TAを組み込んだOP-TEE Coreは、リポジトリのルートで次のようにビルドする。
+ビルド環境にはRV64クロスコンパイラとPythonの `pyelftools` が必要。
+
+```sh
+JOBS=20 CROSS_COMPILE=riscv64-linux-gnu- bash scripts/build-k3-optee-coexist.sh
+```
+
+出力は `.build-k3/optee-coexist/out/core/tee.elf`。
+`.build-k3/optee-coexist/optee_os` が存在する場合は、指定コミットを確認して再利用する。
+
 現行Jupiter2のKeystone SDKとRV64向けOP-TEE TA dev kitを用意する。
 `OPTEE_CLIENT_OUT` はRV64向けの `include/tee_client_api.h` と
 `lib/libteec.so` を含むディレクトリ。
