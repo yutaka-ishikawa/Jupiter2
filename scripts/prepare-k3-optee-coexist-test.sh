@@ -8,13 +8,12 @@ PREFIX="${PREFIX:-$ROOT/install/keystone}"
 KERNEL_OUT="${KERNEL_OUT:-$ROOT/.build-k3/linux}"
 KEYSTONE_BUILD_DIR="${KEYSTONE_BUILD_DIR:-$ROOT/.build-keystone}"
 CROSS_COMPILE="${CROSS_COMPILE:-riscv64-linux-gnu-}"
-OPTEE_CLIENT_OUT="${OPTEE_CLIENT_OUT:-$WORK/client/usr}"
-OPTEE_CLIENT_OUT="$(realpath -m "$OPTEE_CLIENT_OUT")"
+CLIENT_DEFAULT="$WORK/client/usr"
+OPTEE_CLIENT_OUT="${OPTEE_CLIENT_OUT:-$CLIENT_DEFAULT}"
 runtime="$PREFIX/runtime/hello-native"
 driver="$KEYSTONE_BUILD_DIR/driver/keystone-driver.ko"
 sample="$ROOT/samples/hello-native/build/hello-native"
-for input in "$driver" "$sample" "$runtime/eyrie-rt" "$runtime/loader.bin" \
-  "$OPTEE_CLIENT_OUT/lib/libteec.a" "$OPTEE_CLIENT_OUT/include/tee_client_api.h"; do
+for input in "$driver" "$sample" "$runtime/eyrie-rt" "$runtime/loader.bin"; do
   if [[ ! -s "$input" ]]; then
     printf 'Missing coexistence build input: %s\n' "$input" >&2
     exit 1
@@ -23,6 +22,14 @@ done
 
 cmp "$KERNEL_OUT/arch/riscv/boot/Image" "$PREFIX/boot/k3/Image"
 mkdir -p "$WORK"
+
+if [[ ! -s "$OPTEE_CLIENT_OUT/lib/libteec.a" ||
+      ! -s "$OPTEE_CLIENT_OUT/include/tee_client_api.h" ]]; then
+  printf 'Missing RV64 OP-TEE client in %s. Run make optee-coexist first.\n' \
+    "$OPTEE_CLIENT_OUT" >&2
+  exit 1
+fi
+OPTEE_CLIENT_OUT="$(realpath "$OPTEE_CLIENT_OUT")"
 tmp="$(mktemp -d "$WORK/test.XXXXXX")"
 trap 'rm -rf -- "$tmp"' EXIT
 make -C "$VERIFY" "$tmp/optee-coexistence" OUT="$tmp" \

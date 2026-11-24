@@ -14,7 +14,8 @@
 make optee-coexist JOBS=20 CROSS_COMPILE=riscv64-linux-gnu-
 ```
 
-出力は `.build-k3/optee-coexist/out/core/tee.elf`。
+出力は `.build-k3/optee-coexist/out/core/tee.elf` と、
+`.build-k3/optee-coexist/client/usr/` のRV64用 `libteec.a` およびヘッダー。
 `.build-k3/optee-coexist/optee_os` が存在する場合は、指定コミットを確認して再利用する。
 
 現行Jupiter2のKeystone SDKとRV64向けOP-TEE TA dev kitを用意する。
@@ -122,9 +123,10 @@ UARTの `PASS: parallel OP-TEE TA calls on all 16 CPUs` は全子プロセスが
 
 ## Keystoneの統合試験に同居試験を追加
 
-リポジトリのルートで実行する。RV64向け `optee_client` の
-`include/tee_client_api.h` と `lib/libteec.a` を
-`.build-k3/optee-coexist/client/usr/` の下に用意する。
+リポジトリのルートで実行する。既定の
+`.build-k3/optee-coexist/client/usr/` にRV64向け `libteec.a` やヘッダーが
+なければ、`make optee-coexist` が固定コミットの `optee_client` を取得してビルドする。
+初回取得にはGitHubへのアクセスが必要。
 別の場所にある場合は `make optee-coexist-test OPTEE_CLIENT_OUT=実際のパス` を使う。
 `dtc` とRV64クロスコンパイラが必要。
 [設定変数の一覧](../../doc/make-build-install.md#設定変数)

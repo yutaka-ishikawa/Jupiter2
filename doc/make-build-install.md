@@ -25,19 +25,20 @@ installは古い成果物の鮮度まで判定しません。ソース変更後�
 
 | 実行コマンド | 成果物 |
 | --- | --- |
-| `make optee-coexist JOBS=20 CROSS_COMPILE=riscv64-linux-gnu-` | 検証用TAを組み込んだ `.build-k3/optee-coexist/out/core/tee.elf` |
+| `make optee-coexist JOBS=20 CROSS_COMPILE=riscv64-linux-gnu-` | 検証用TA入りの `.build-k3/optee-coexist/out/core/tee.elf` とRV64用 `optee_client` |
 | `make optee-coexist-test` | `.build-k3/optee-coexist/boot.dtb` と `coexist.cpio` |
 
 同居試験用の2ターゲットは必要なときに明示して実行します。
 `optee-coexist-test` の前に `make build` と `make install` を済ませ、
-RV64向け `optee_client` のヘッダーと静的ライブラリを既定の場所に用意します。
+先に `make optee-coexist` でRV64向け `optee_client` を用意します。
+既定の場所に成果物がなければ、`optee-coexist` が取得・ビルドします。
 別の場所を使う場合は `OPTEE_CLIENT_OUT` を指定します。
 [ビルドとQEMUでの試験手順](../verifications/optee-coexistence/README.md#keystoneの統合試験に同居試験を追加)
 
 ## 設定変数
 
 標準手順では事前の `export` は不要です。必要なツールは `PATH` に置き、
-同居試験用のRV64 `optee_client` は下記の既定のディレクトリに用意します。
+同居試験用のRV64 `optee_client` は、必要に応じて既定のディレクトリに生成します。
 ターゲットごとに上書きする場合は `make ターゲット 変数=値` を使えます。
 下表の相対パスはリポジトリルート基準です。
 

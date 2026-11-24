@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 WORK="$ROOT/.build-k3/optee-coexist"
 CROSS="${CROSS_COMPILE:-riscv64-linux-gnu-}"
 JOBS="${JOBS:-20}"
+CLIENT_DEFAULT="$WORK/client/usr"
+OPTEE_CLIENT_OUT="${OPTEE_CLIENT_OUT:-$CLIENT_DEFAULT}"
 OPTEE="$WORK/optee_os"
 OUT="$WORK/out"
 VERIFY="$ROOT/verifications/optee-coexistence"
@@ -52,4 +54,27 @@ make -C "$OPTEE" -j"$JOBS" "${OPTEE_ARGS[@]}" CFG_EARLY_TA=y \
   EARLY_TA_PATHS="$VERIFY/build/ta/$UUID.stripped.elf"
 
 test -s "$OUT/core/tee.elf"
+if [[ ! -s "$OPTEE_CLIENT_OUT/lib/libteec.a" ||
+      ! -s "$OPTEE_CLIENT_OUT/include/tee_client_api.h" ]]; then
+  if [[ "$(realpath -m "$OPTEE_CLIENT_OUT")" != "$(realpath -m "$CLIENT_DEFAULT")" ]]; then
+    printf 'Missing RV64 libteec.a or tee_client_api.h in %s\n' "$OPTEE_CLIENT_OUT" >&2
+    exit 1
+  fi
+  client_source="$WORK/optee_client"
+  client_commit=9f4414f62dfc5692fd39f760515ce2d344d07b6d
+  if [[ ! -e "$client_source" ]]; then
+    git clone https://github.com/OP-TEE/optee_client.git "$client_source"
+    git -C "$client_source" checkout --detach "$client_commit"
+  fi
+  if [[ "$(git -C "$client_source" rev-parse --verify HEAD)" != "$client_commit" ]]; then
+    printf 'OP-TEE client checkout must be at %s: %s\n' "$client_commit" "$client_source" >&2
+    exit 1
+  fi
+  make -C "$client_source" -j"$JOBS" CROSS_COMPILE="$CROSS" \
+    O="$WORK/client-build" build-libteec
+  mkdir -p "$OPTEE_CLIENT_OUT/include" "$OPTEE_CLIENT_OUT/lib"
+  install -m 0644 "$client_source"/libteec/include/*.h "$OPTEE_CLIENT_OUT/include/"
+  install -m 0644 "$WORK/client-build/libteec/libteec.a" "$OPTEE_CLIENT_OUT/lib/"
+fi
+printf 'OP-TEE client: %s\n' "$OPTEE_CLIENT_OUT"
 printf '生成完了: %s\n' "$OUT/core/tee.elf"

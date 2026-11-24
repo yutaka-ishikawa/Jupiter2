@@ -59,7 +59,7 @@ install: $(addprefix install-,$(COMPONENTS))
 $(addprefix install-,$(COMPONENTS)):
 	bash "$(ROOT)/scripts/install-built-keystone.sh" "$(@:install-%=%)" "$(STAGE)" "$(PREFIX)" "$(KEYSTONE_BUILD_DIR)" "$(ROOTFS_ARCHIVE)" "$(ROOTFS_SHA256)"
 optee-coexist:
-	bash "$(ROOT)/scripts/build-k3-optee-coexist.sh"
+	OPTEE_CLIENT_OUT="$(OPTEE_CLIENT_OUT)" bash "$(ROOT)/scripts/build-k3-optee-coexist.sh"
 optee-coexist-test:
 	PREFIX="$(abspath $(PREFIX))" KEYSTONE_BUILD_DIR="$(abspath $(KEYSTONE_BUILD_DIR))" \
 		KERNEL_OUT="$(abspath $(K3_BUILD_DIR))/linux" OPTEE_CLIENT_OUT="$(OPTEE_CLIENT_OUT)" \
@@ -72,6 +72,6 @@ help:
 	@echo 'make build-install JOBS=4    Build then install in one command'
 	@echo 'make qemu|opensbi|sm|eyrie|keystone|crypto|verifications|linux|rng|samples'
 	@echo 'make install-qemu|install-opensbi|install-eyrie|install-keystone|install-crypto|install-verifications'
-	@echo 'make optee-coexist JOBS=20   Build the OP-TEE Core with the coexistence TA'
+	@echo 'make optee-coexist JOBS=20   Build the OP-TEE Core, coexistence TA and RV64 libteec'
 	@echo 'make optee-coexist-test     Generate boot.dtb and coexist.cpio after install (OPTEE_CLIENT_OUT overrides client path)'
 	@echo 'Stop QEMU/unmount rootfs before install-keystone. See doc/make-build-install.md.'
