@@ -130,7 +130,7 @@ UARTの `PASS: parallel OP-TEE TA calls on all 16 CPUs` は全子プロセスが
 make build JOBS=20
 make install
 JOBS=20 bash scripts/build-k3-optee-coexist.sh
-OPTEE_CLIENT_OUT=/path/to/optee-client/usr bash scripts/prepare-k3-optee-coexist-test.sh
+make optee-coexist-test OPTEE_CLIENT_OUT=/path/to/optee-client/usr
 
 WORK=.build-k3/optee-coexist
 python3 verifications/crypto/run-qemu.py --all --sstc on \
