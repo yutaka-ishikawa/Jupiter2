@@ -119,3 +119,29 @@ OP-TEEは `CFG_TEE_CORE_NB_CORE=16 CFG_NUM_THREADS=16` とし、検証用TAを
 各子はCPUへ固定し、異なる入力でTA応答を検査する。
 UARTの `PASS: parallel OP-TEE TA calls on all 16 CPUs` は全子プロセスが
 成功したときに出力される。OP-TEEのログと混在して個別の行が分割される場合がある。
+
+## Keystoneの統合試験に同居試験を追加
+
+通常のビルド・インストール後、同居用のOP-TEE Core、DTB、試験用initramfsを
+明示して実行する。
+
+```sh
+make build JOBS=20
+make install
+python3 verifications/crypto/run-qemu.py --all --sstc on \
+    --optee-coexistence /path/to/tee.elf /path/to/boot.dtb /path/to/coexist.cpio
+```
+
+同居試験は、インストール済みのQEMU・OpenSBI＋Keystone・Linuxを使って、
+16 hart、2 GiB、WTM有効で別ゲストを起動する。`boot.dtb` はこの構成に
+対応した同居用DTBを使う。試験用TAをCoreの `EARLY_TA_PATHS` に入れるか、
+ゲストでtee-supplicantが読み込めるよう配置する。試験用initramfsの `/init` は、上記の同居ゲスト試験
+（ドライバ、TA、必要に応じてtee-supplicant、同居試験バイナリとEnclave一式）
+を実行し、成功後にゲストを電源断する構成を用意する。
+カーネルモジュールはインストール済みLinuxと同じビルドのものを使う。
+
+合格にはLinuxが16 CPUを起動し、`PASS: 16 enclave runs, 33 TA calls including OCALL`
+を出力して正常に電源断することが必要。結果は
+`verifications/crypto/results/manifest.json` と `optee-coexistence.log` に保存する。
+この試験はOP-TEEのTA呼出しとKeystoneの同居を対象とする。
+fTPM、IMA、全16 CPUでのTA並行呼出しにはそれぞれの試験を使う。

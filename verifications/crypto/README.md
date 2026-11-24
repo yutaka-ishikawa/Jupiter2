@@ -73,6 +73,7 @@ python3 verifications/crypto/run-qemu.py --all
 
 同じ開発identityで2回cold bootし、続いて通常unavailable版を起動します。
 `--all` は3 bootの後に既存の3001乱数matrix（7ケース）も実行します。
+OP-TEEのTA呼出しも検証する場合は、[同居試験の追加手順](../optee-coexistence/README.md#keystoneの統合試験に同居試験を追加)を参照してください。
 raw rootfsに一時qcow2を重ね、終了後にoverlayを破棄します。
 `results/manifest.json` と各serialログへ結果を保存します。
 失敗時は理由とログ末尾を表示します。実行が遅い環境は `--timeout 600` を指定できます。

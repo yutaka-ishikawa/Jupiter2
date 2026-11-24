@@ -103,6 +103,50 @@ def run(args, name, provider):
     return record
 
 
+def run_optee(args):
+    tee, dtb, initrd = (path.resolve() for path in args.optee_coexistence)
+    qemu = args.prefix / 'bin/qemu-system-riscv64'
+    bios = args.prefix / 'firmware/k3/fw_dynamic.bin'
+    kernel = args.prefix / 'boot/k3/Image'
+    log = args.logs / 'optee-coexistence.log'
+    record = {'case': 'optee-coexistence', 'sstc': args.sstc,
+              'pass': False, 'log': str(log)}
+    command = [
+        str(qemu), '-accel', 'tcg,thread=multi', '-M', 'jupiter2,wtm-rng=on',
+        '-cpu', 'rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,'
+                f'pmp-granularity=16,sstc={args.sstc}',
+        '-smp', '16', '-m', '2G', '-display', 'none', '-monitor', 'none',
+        '-serial', 'stdio', '-bios', str(bios), '-kernel', str(kernel),
+        '-dtb', str(dtb), '-initrd', str(initrd),
+        '-device', f'loader,file={str(tee).replace(",", ",,")}',
+        '-append', 'console=ttyS0,115200 earlycon=sbi keep_bootcon '
+                   'printk.devkmsg=on rdinit=/init cma=512M@4G-16G',
+    ]
+    record['command'] = command
+    markers = (
+        b'smp: Brought up 1 node, 16 CPUs',
+        b'PASS: 16 enclave runs, 33 TA calls including OCALL',
+        b'reboot: Power down',
+    )
+    try:
+        with log.open('wb') as stream:
+            for path in (qemu, bios, kernel, tee, dtb, initrd):
+                if not path.is_file() or not path.stat().st_size:
+                    raise FileNotFoundError(f'Missing OP-TEE test input: {path}')
+            process = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=stream,
+                                     stderr=subprocess.STDOUT, timeout=args.timeout)
+        output = log.read_bytes()
+        record['qemu_exit'] = process.returncode
+        missing = [marker.decode() for marker in markers if marker not in output]
+        if process.returncode or missing:
+            record['error'] = f'QEMU exit {process.returncode}; missing markers: {missing}'
+        else:
+            record['pass'] = True
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        record['error'] = str(exc)
+    return record
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prefix', type=Path, default=ROOT / 'install/keystone')
@@ -111,6 +155,9 @@ def main():
     parser.add_argument('--timeout', type=int, default=300)
     parser.add_argument('--sstc', choices=['on', 'off'], default='on')
     parser.add_argument('--all', action='store_true', help='Run the existing guest suite each boot and the seven-case RNG matrix')
+    parser.add_argument('--optee-coexistence', type=Path, nargs=3,
+                        metavar=('TEE_ELF', 'BOOT_DTB', 'INITRAMFS'),
+                        help='also run the 16-hart OP-TEE/Keystone guest integration')
     args = parser.parse_args()
     # Guest metadata paths use the repository's standard installation.
     if args.prefix.resolve() != (ROOT / 'install/keystone').resolve():
@@ -147,6 +194,12 @@ def main():
                                  '--logs', str(rng_logs), '--timeout', str(args.timeout), '--sstc', args.sstc])
         records.append({'case': 'rng-matrix-regression', 'pass': result.returncode == 0,
                         'log': str(rng_logs / 'manifest.json')})
+        (args.logs / 'manifest.json').write_text(json.dumps(records, indent=2) + '\n')
+    if args.optee_coexistence:
+        result = run_optee(args)
+        records.append(result)
+        print('PASS' if result['pass'] else 'FAIL', result['case'],
+              result.get('error', ''), result['log'], flush=True)
         (args.logs / 'manifest.json').write_text(json.dumps(records, indent=2) + '\n')
     return 0 if all(record['pass'] for record in records) else 1
 
