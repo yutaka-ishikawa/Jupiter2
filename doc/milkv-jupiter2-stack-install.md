@@ -37,7 +37,7 @@ PMP条件を確定するまで書き込まない。以下の「停止条件」�
 
 ## 2. 書き込み前の停止条件
 
-[実機適合性調査](jupiter2-hardware-compatibility.md)と
+[実機適合性調査](../hardware/jupiter2/jupiter2-hardware-compatibility.md)と
 [EDK2維持のOpenSBI置換手順](milkv-jupiter2-opensbi-replacement.md)を先に確認する。
 
 | 条件 | 必要な確認 |
@@ -328,7 +328,7 @@ OpenSBI/SM・QEMU guest・実機の動作試験ではない。FIT tool不足時�
 Jupiter2 SBCにSDスロットはないため、SD起動を前提にしない。
 
 以下は実機Linuxで実行する。root権限が必要な読取りだけ`sudo`を使う。
-ログは個体情報を含むため、公開Gitへ追加せず作業用PCにも保存する。
+ログは個体情報を含むため、公開Gitへ追加せず、開発PCの `hardware/jupiter2/captures/<採取ID>/` に保存する。
 
 ```bash
 set -e
@@ -994,7 +994,7 @@ buildログ、UARTログ、case別結果を一つの導入記録にまとめる�
 
 ## 関連資料
 
-- [実機情報とfirmware適合性](jupiter2-hardware-compatibility.md)
+- [実機情報とfirmware適合性](../hardware/jupiter2/jupiter2-hardware-compatibility.md)
 - [EDK2を維持したOpenSBI置換・復旧](milkv-jupiter2-opensbi-replacement.md)
 - [buildとinstallの分離](make-build-install.md)
 - [SPI NOR読取り調査](jupiter2-spi-nor-inspection.md)

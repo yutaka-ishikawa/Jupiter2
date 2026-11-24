@@ -182,9 +182,9 @@ SPL_DOWNLOAD_BYTES=0x20000000
 KEYSTONE_SBI_RESERVE_BYTES=0x00100000
 
 python3 scripts/build-jupiter2-ram-boot-image.py \
-  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
-  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --fsbl hardware/jupiter2/vendor/FSBL.bin \
+  --uboot-itb hardware/jupiter2/vendor/u-boot.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
   --configuration conf_11 \
   --esos-configuration conf_dual \
@@ -458,9 +458,9 @@ KEYSTONE_SM_TRACE=0 make opensbi JOBS=4 \
   2>&1 | tee work/jupiter2-pmp-capacity-retest/build.log
 
 python3 scripts/build-jupiter2-ram-boot-image.py \
-  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
-  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --fsbl hardware/jupiter2/vendor/FSBL.bin \
+  --uboot-itb hardware/jupiter2/vendor/u-boot.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
   --configuration conf_11 \
   --esos-configuration conf_dual \

@@ -86,7 +86,7 @@ OpenSBIにはDTBと、次に実行するU-Bootのアドレス・実行モード�
 
 ## 5. 開発PCでの準備と成果物の配置
 
-**本書のbuild-jupiter2-ram-boot-image.pyは開発PCで実行する。Jupiter2実機では実行しない。** publicリポジトリ、入力ファイルを置くwork/jupiter2-ram-boot/original、生成先も開発PC上のディレクトリである。
+**本書のbuild-jupiter2-ram-boot-image.pyは開発PCで実行する。Jupiter2実機では実行しない。** publicリポジトリ、入力ファイルを置くhardware/jupiter2/vendor、生成先も開発PC上のディレクトリである。
 
 | 操作 | 実行する場所 |
 | --- | --- |
@@ -139,11 +139,11 @@ fw_dynamic.binは統合FITへ格納する実行バイナリーの候補、fw_dyn
 
 今回FDLからRAMへ転送してDDR初期化を確認した、実機に対応する販売元FSBL.binを使用する。入手元は、そのファイルを取り出した販売元OS／ファームウェア配布パッケージである。配布物ではfactory/FSBL.bin等に置かれるが、実際の収録場所を確認する。
 
-開発PCのwork/jupiter2-ram-boot/original/FSBL.binへコピーし、配布パッケージ名・版・入手URL・SHA-256を記録する。別ボード向けFSBLや、単に最新版という理由で選んだFSBLへ差し替えない。RAM起動用の改修版FSBLが必要と判明した場合は、第6章で確定したビルド出力を使う。
+開発PCのhardware/jupiter2/vendor/FSBL.binへコピーし、配布パッケージ名・版・入手URL・SHA-256を記録する。別ボード向けFSBLや、単に最新版という理由で選んだFSBLへ差し替えない。RAM起動用の改修版FSBLが必要と判明した場合は、第6章で確定したビルド出力を使う。
 
 #### --uboot-itb：販売元のu-boot.itbを用意する
 
-今回FSBLの後にstageしてU-Bootの起動を確認した、販売元配布パッケージ内のu-boot.itbを使用する。開発PCのwork/jupiter2-ram-boot/original/u-boot.itbへコピーする。
+今回FSBLの後にstageしてU-Bootの起動を確認した、販売元配布パッケージ内のu-boot.itbを使用する。開発PCのhardware/jupiter2/vendor/u-boot.itbへコピーする。
 
 提供されたdumpimage一覧では、このFITにU-Boot本体と複数のDTBが入っており、conf_11がk3-pico-itxを参照している。スクリプトへはFIT全体を渡す。U-Boot本体を事前にBINへ抽出して渡す必要はない。ただし、この販売元バイナリーがOpenSBI経由のS-mode起動に適合するかは第6章で確認する。
 
@@ -153,7 +153,7 @@ conf_11は実機からファイルとして取り出すものではなく、**--
 
 ```bash
 # 開発PCのターミナルで、publicリポジトリのルートから実行する
-dumpimage -l work/jupiter2-ram-boot/original/u-boot.itb
+dumpimage -l hardware/jupiter2/vendor/u-boot.itb
 ```
 
 今回提供された販売元FITの一覧には、次の表示があった。
@@ -178,12 +178,12 @@ dumpimage -l work/jupiter2-ram-boot/original/u-boot.itb
 
 #### --esos-itb：同じ販売元構成に対応するesos.itbを用意する
 
-販売元OS／ファームウェア配布パッケージのesos.itbを使用し、開発PCのwork/jupiter2-ram-boot/original/esos.itbへコピーする。ESOSが別パッケージで配布されている場合は、使用する販売元SDK／OSに対応する版を取り出す。公開ガイドにある別版のダウンロードURLを無条件に流用しない。
+販売元OS／ファームウェア配布パッケージのesos.itbを使用し、開発PCのhardware/jupiter2/vendor/esos.itbへコピーする。ESOSが別パッケージで配布されている場合は、使用する販売元SDK／OSに対応する版を取り出す。公開ガイドにある別版のダウンロードURLを無条件に流用しない。
 
 開発PCで次を実行し、ESOSの構成名とloadablesを確認する。今回の販売元ESOSは、ボード別ではなく全ボード共通のconf_dual構成である。
 
 ```bash
-dumpimage -l work/jupiter2-ram-boot/original/esos.itb
+dumpimage -l hardware/jupiter2/vendor/esos.itb
 ```
 
 今回提供された2026-04-30版の一覧は次の構成である。
@@ -209,9 +209,9 @@ Configuration 0 (conf_dual)
 
 #### --opensbi-bin：配布fw_dynamic.itbからfw_dynamic.binを抽出する
 
-販売元はfw_dynamic.binを単体配布していなくてもよい。販売元配布パッケージのfw_dynamic.itbを開発PCのwork/jupiter2-ram-boot/original/fw_dynamic.itbへコピーし、第7.1節の「販売元がfw_dynamic.itbだけを配布している場合」の手順で中のOpenSBIを抽出する。
+販売元はfw_dynamic.binを単体配布していなくてもよい。販売元配布パッケージのfw_dynamic.itbを開発PCのhardware/jupiter2/vendor/fw_dynamic.itbへコピーし、第7.1節の「販売元がfw_dynamic.itbだけを配布している場合」の手順で中のOpenSBIを抽出する。
 
-抽出先work/jupiter2-ram-boot/original/fw_dynamic.binを--opensbi-binへ指定する。SM版を作る場合だけ、この引数を本リポジトリでビルドしたOpenSBI＋SMのfw_dynamic.binへ変更する。入力ITBの改名や、ELFの指定ではない。
+抽出先hardware/jupiter2/vendor/fw_dynamic.binを--opensbi-binへ指定する。SM版を作る場合だけ、この引数を本リポジトリでビルドしたOpenSBI＋SMのfw_dynamic.binへ変更する。入力ITBの改名や、ELFの指定ではない。
 
 ## 6. 段階A：ソース差分と互換性を確認する
 
@@ -263,10 +263,10 @@ ESOSの全loadablesをハッシュ検査後に取り込み、元のimage名と�
 
 **販売元のfw_dynamic.binを別途入手する必要はない。配布されているfw_dynamic.itbからOpenSBIのBINを抽出して使用する。** 以下はすべて開発PCでのファイル操作であり、実機への転送・書込みは行わない。
 
-まず、対応する販売元のfw_dynamic.itbをwork/jupiter2-ram-boot/original/fw_dynamic.itbとして配置し、リポジトリのルートで内容を確認する。
+まず、対応する販売元のfw_dynamic.itbをhardware/jupiter2/vendor/fw_dynamic.itbとして配置し、リポジトリのルートで内容を確認する。
 
 ```bash
-dumpimage -l work/jupiter2-ram-boot/original/fw_dynamic.itb
+dumpimage -l hardware/jupiter2/vendor/fw_dynamic.itb
 ```
 
 Image 0がOpenSBIのfirmwareで、Compressionがuncompressedであることを確認した場合、次で格納データを取り出す。**-p 0はImage 0を意味する。** 実際のOpenSBIが別のImage番号なら、その番号を指定する。fw_dynamic.itbの名前だけで中身や番号を決めない。
@@ -274,8 +274,8 @@ Image 0がOpenSBIのfirmwareで、Compressionがuncompressedであることを�
 ```bash
 # 開発PCのターミナルで、publicリポジトリのルートから実行する
 dumpimage -T flat_dt -p 0 \
-  -o work/jupiter2-ram-boot/original/fw_dynamic.bin \
-  work/jupiter2-ram-boot/original/fw_dynamic.itb
+  -o hardware/jupiter2/vendor/fw_dynamic.bin \
+  hardware/jupiter2/vendor/fw_dynamic.itb
 ```
 
 -T flat_dtはFITのコンテナー形式を指定し、-oには抽出する生BINの保存先を指定する。単に拡張子を変更する操作ではない。Imageのload／entryも一覧で確認し、本スクリプトのOpenSBIロード先（既定0x100000000）と合うことを確認する。異なる場合は段階Aで配置を見直し、必要に応じて--opensbi-loadへ確認したアドレスを指定する。圧縮されている場合は、この抽出例をそのまま使わず、展開方法を確認する。
@@ -285,8 +285,8 @@ dumpimage -T flat_dt -p 0 \
 ```bash
 mkdir -p work/jupiter2-ram-boot/records
 sha256sum \
-  work/jupiter2-ram-boot/original/fw_dynamic.itb \
-  work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  hardware/jupiter2/vendor/fw_dynamic.itb \
+  hardware/jupiter2/vendor/fw_dynamic.bin \
   > work/jupiter2-ram-boot/records/vendor-opensbi-files.sha256
 ```
 
@@ -310,7 +310,7 @@ sha256sum \
 
 ```bash
 sudo fastboot devices
-sudo fastboot stage work/jupiter2-ram-boot/original/FSBL.bin
+sudo fastboot stage hardware/jupiter2/vendor/FSBL.bin
 sudo fastboot continue
 ```
 
@@ -411,10 +411,10 @@ SPL_DOWNLOAD_BYTES=0x20000000
 VENDOR_SBI_RESERVE_BYTES=0x00100000
 
 python3 scripts/build-jupiter2-ram-boot-image.py \
-  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
-  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
-  --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  --fsbl hardware/jupiter2/vendor/FSBL.bin \
+  --uboot-itb hardware/jupiter2/vendor/u-boot.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
+  --opensbi-bin hardware/jupiter2/vendor/fw_dynamic.bin \
   --configuration conf_11 \
   --esos-configuration conf_dual \
   --board k3-pico-itx \
@@ -478,7 +478,7 @@ python3 scripts/tests/jupiter2-ram-boot/test_fit_packaging.py
 まずoriginalへ、対応を確認した販売元ファイルを配置する。OpenSBIは公開されているfw_dynamic.itbを置き、第7.1節の抽出手順でfw_dynamic.binを作成する。
 
 ```text
-work/jupiter2-ram-boot/original/
+hardware/jupiter2/vendor/
 ├── FSBL.bin
 ├── u-boot.itb
 ├── esos.itb
@@ -491,10 +491,10 @@ fw_dynamic.binは販売元OpenSBIの生BINであり、上記の抽出で用意�
 ```bash
 # 開発PCのターミナルで、publicリポジトリのルートから実行する
 python3 scripts/build-jupiter2-ram-boot-image.py \
-  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
-  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
-  --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
+  --fsbl hardware/jupiter2/vendor/FSBL.bin \
+  --uboot-itb hardware/jupiter2/vendor/u-boot.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
+  --opensbi-bin hardware/jupiter2/vendor/fw_dynamic.bin \
   --configuration conf_11 \
   --esos-configuration conf_dual \
   --board k3-pico-itx \
@@ -524,9 +524,9 @@ dumpimage -l work/jupiter2-ram-boot/vendor-release/images/ram-boot-vendor.itb
 ```bash
 # 開発PCのターミナルで、publicリポジトリのルートから実行する
 python3 scripts/build-jupiter2-ram-boot-image.py \
-  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
-  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --fsbl hardware/jupiter2/vendor/FSBL.bin \
+  --uboot-itb hardware/jupiter2/vendor/u-boot.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
   --configuration conf_11 \
   --esos-configuration conf_dual \
@@ -622,9 +622,9 @@ dtb_dirは既存DTBを継続利用する場合の例であり、6.18.3というm
 read -r -p '確認済みSM版OpenSBI実行時領域(bytes): ' KEYSTONE_SBI_RESERVE_BYTES
 
 python3 scripts/build-jupiter2-ram-boot-image.py \
-  --fsbl work/jupiter2-ram-boot/original/FSBL.bin \
-  --uboot-itb work/jupiter2-ram-boot/original/u-boot.itb \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --fsbl hardware/jupiter2/vendor/FSBL.bin \
+  --uboot-itb hardware/jupiter2/vendor/u-boot.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
   --configuration conf_11 \
   --esos-configuration conf_dual \

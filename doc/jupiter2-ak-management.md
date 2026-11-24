@@ -498,8 +498,8 @@ HUK元bankが非ゼロという結果だけで製品の秘密保持をPASSにし
 
 ## 11. 関連資料
 
-- [実機構成の既存調査](jupiter2-hardware-compatibility.md)
-- [実機inventory](jupiter2-hardware-inventory.json)
+- [実機構成の既存調査](../hardware/jupiter2/jupiter2-hardware-compatibility.md)
+- [実機inventory](../hardware/jupiter2/jupiter2-hardware-inventory.json)
 - [SPI NOR取得・解析手順](jupiter2-spi-nor-inspection.md)
 - [storage／eFuse ARCN調査](jupiter2-persistent-storage-investigation.md)
 - [WTM RNG調査](jupiter2-security-engine-rng.md)

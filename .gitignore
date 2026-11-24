@@ -10,3 +10,7 @@
 # Separate Bianbu and Keystone installations and Buildroot outputs
 /install/
 /.build-keystone/
+
+# Local Jupiter2 board captures and vendor firmware inputs
+/hardware/jupiter2/captures/
+/hardware/jupiter2/vendor/

@@ -24,7 +24,7 @@ eMMC搭載やRPMB利用可能性を示す実機試験結果ではない。
 
 ## 2. 以前提供された実機ログ
 
-根拠：[hardware inventory](jupiter2-hardware-inventory.json)でhashを管理している
+根拠：[hardware inventory](../hardware/jupiter2/jupiter2-hardware-inventory.json)でhashを管理している
 `jupiter2-info.tar.gz`の`dmesg.txt`と`running.dtb`。
 ログを再読した結果であり、今回実機を動かして採取したものではない。
 

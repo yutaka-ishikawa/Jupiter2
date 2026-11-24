@@ -102,7 +102,7 @@ SM_OUT="$WORK/ram-boot-sm-$(date +%Y%m%d-%H%M%S)"
 
 python3 scripts/build-jupiter2-reference-ram-boot.py \
   --opensbi-bin "$SM_BIN" \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --esos-configuration conf_dual \
   --variant keystone \
   --opensbi-reserve-bytes 0x00100000 \

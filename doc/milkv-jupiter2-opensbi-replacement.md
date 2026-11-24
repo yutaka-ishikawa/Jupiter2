@@ -17,7 +17,7 @@ FedoraのK3 Pico-ITX資料は、SpacemiT K3 Pico-ITXとMilk-V Jupiter 2を同一
 
 ## このリポジトリのKeystone版に関する先決条件
 
-[既存の実機適合性調査](jupiter2-hardware-compatibility.md)では、照合時のKeystone入り `fw_dynamic.bin` は532,320バイトで、実機NOR領域393,216バイトを超えている。**その成果物は本書のNOR単独置換手順に使用できない。** FIT化するとさらに大きくなる。現在のビルドを再計測し、サイズ削減等が完了するまでは第7章・第8章の書き込みへ進まない。領域拡張や圧縮の有効化は、隣接配置・FSBLの対応を含む別作業である。
+[既存の実機適合性調査](../hardware/jupiter2/jupiter2-hardware-compatibility.md)では、照合時のKeystone入り `fw_dynamic.bin` は532,320バイトで、実機NOR領域393,216バイトを超えている。**その成果物は本書のNOR単独置換手順に使用できない。** FIT化するとさらに大きくなる。現在のビルドを再計測し、サイズ削減等が完了するまでは第7章・第8章の書き込みへ進まない。領域拡張や圧縮の有効化は、隣接配置・FSBLの対応を含む別作業である。
 
 また、同調査にあるOpenSBI入力DT、K3 override、X100/A100のPMP、Sstc、IPI、RPMIの未確認事項は残る。本書の配布物解析でロード形式を補足しても、それらの実機互換性を確認したことにはならない。
 

@@ -191,7 +191,7 @@ compatible = "spacemit,k3-pico-itx";
 
 工場出荷側のLinuxはSstcを利用している。現在はLinuxのSstcを維持し、
 enclave/Eyrie実行中だけstimecmpを退避してSTCEを無効化、SM用MTIMERを設定する
-[共存方式](keystone-sstc-coexistence.md) に変更した。ISA情報からsstcを削除しない。
+[共存方式](../../doc/keystone-sstc-coexistence.md) に変更した。ISA情報からsstcを削除しない。
 実機でもSM用のMTIMERドライバ・DT・周波数・割込み配線の確認が必要で、共存動作は未確認。
 
 Keystone構成ではhart STOP/SUSPENDを拒否するため、工場出荷側と同じCPU hotplug・
@@ -226,18 +226,18 @@ Keystone構成ではhart STOP/SUSPENDを拒否するため、工場出荷側と�
 ## 関連ソースと既存の調査記録
 
 - [実機インベントリ](jupiter2-hardware-inventory.json)
-- [QEMU Jupiter2モデル](../qemu/hw/riscv/jupiter2.c)
-- [QEMU定数](../qemu/include/hw/riscv/jupiter2.h)
-- [OpenSBI platformの選択](../opensbi/platform/generic/platform.c)
-- [OpenSBI K3 override](../opensbi/platform/generic/spacemit/spacemit_k3.c)
-- [実機向けFITテンプレート](../opensbi/platform/generic/spacemit/fw_dynamic.its)
-- [Keystoneのビルド定数](../keystone/sm/tools/k3_rv64_compile_audit.py)
-- [Keystoneプラットフォーム定数](../keystone/sm/src/platform/spacemit_k3/platform.h)
-- [PMP情報の検査](../opensbi/include/sbi/k3_pmp_partition_evidence.h)
-- [Eyrie入口の修正](keystone-eyrie-entry-build-id.md)
-- [システム終了の修正](keystone-system-reset.md)
+- [QEMU Jupiter2モデル](../../qemu/hw/riscv/jupiter2.c)
+- [QEMU定数](../../qemu/include/hw/riscv/jupiter2.h)
+- [OpenSBI platformの選択](../../opensbi/platform/generic/platform.c)
+- [OpenSBI K3 override](../../opensbi/platform/generic/spacemit/spacemit_k3.c)
+- [実機向けFITテンプレート](../../opensbi/platform/generic/spacemit/fw_dynamic.its)
+- [Keystoneのビルド定数](../../keystone/sm/tools/k3_rv64_compile_audit.py)
+- [Keystoneプラットフォーム定数](../../keystone/sm/src/platform/spacemit_k3/platform.h)
+- [PMP情報の検査](../../opensbi/include/sbi/k3_pmp_partition_evidence.h)
+- [Eyrie入口の修正](../../doc/keystone-eyrie-entry-build-id.md)
+- [システム終了の修正](../../doc/keystone-system-reset.md)
 
 ## Zkr乱数拡張の追加調査
 
 公式資料・K3 CPU定義・実機情報からZkrの利用可能性は確認できていない。
-[調査結果と実機での確定方法](jupiter2-zkr-investigation.md)を参照。
+[調査結果と実機での確定方法](../../doc/jupiter2-zkr-investigation.md)を参照。

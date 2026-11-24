@@ -63,7 +63,7 @@ sudo dmesg > "$INFO_DIR/dmesg.txt"
 ```
 
 Jupiter2はX100とA100の混成です。CPUの種類やLinuxのonline数だけでPMPの能力を推定せず、
-ファームウェアのHart別ログも確認します。既知の構成は[実機調査](doc/jupiter2-hardware-compatibility.md)、
+ファームウェアのHart別ログも確認します。既知の構成は[実機調査](hardware/jupiter2/jupiter2-hardware-compatibility.md)、
 PMPの16/32個混在は[対応計画と結果](doc/jupiter2-heterogeneous-pmp-plan.md)を参照してください。
 
 ### 2.3 起動設定・DTB・ストレージ構成の取得
@@ -95,7 +95,7 @@ DTB、機器識別子、起動媒体の情報は手元の記録として管理�
 
 ### 2.5 取得情報・バックアップを開発PCへ保存
 
-**作成後は、記録・バックアップのディレクトリ全体を実機外の作業PCにもコピーしてください。**
+**作成後は、記録・バックアップのディレクトリ全体を実機外の開発PCの `hardware/jupiter2/captures/<採取ID>/` にコピーしてください。**
 実機が起動しなくなった場合にも取り出せる場所へ保存します。
 ここまでで元の起動構成と復旧に必要な情報をそろえてから、deployへ進みます。
 
@@ -369,7 +369,7 @@ buildとinstallには同じ`K3_BUILD_DIR`、`KEYSTONE_BUILD_DIR`、`PREFIX`を�
 | --- | --- |
 | ビルド全般・出力・install・変数 | [makeによるビルドと配置](doc/make-build-install.md) |
 | UART接続・PC端末設定 | [UART接続手順](doc/milkv-jupiter2-uart.md) |
-| 実機情報・CPU/メモリーの記録 | [実機調査](doc/jupiter2-hardware-compatibility.md)、[インベントリ](doc/jupiter2-hardware-inventory.json) |
+| 実機情報・CPU/メモリーの記録 | [実機調査](hardware/jupiter2/jupiter2-hardware-compatibility.md)、[インベントリ](hardware/jupiter2/jupiter2-hardware-inventory.json) |
 | バックアップ・Linux配置・NOR更新・復旧 | [実機導入手順](doc/milkv-jupiter2-stack-install.md)、[OpenSBI置換調査](doc/milkv-jupiter2-opensbi-replacement.md) |
 | RAM起動の操作・イメージ作成 | [RAM起動ガイド](doc/jupiter2-ram-boot-guide.md)、[準備・判断手順](doc/jupiter2-ram-boot-procedure.md) |
 | 参照FSBL/ESOS/RPMIの整合 | [開発記録](doc/jupiter2-reference-ram-boot-development.md)、[試験手順](doc/jupiter2-reference-ram-boot-tests.md) |

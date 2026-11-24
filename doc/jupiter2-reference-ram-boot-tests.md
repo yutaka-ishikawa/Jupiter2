@@ -159,8 +159,8 @@ git pull --ff-only
 OUT="$PWD/work/jupiter2-ram-boot/reference-vendor-diag-$(date +%Y%m%d-%H%M%S)"
 
 python3 scripts/build-jupiter2-reference-ram-boot.py \
-  --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --opensbi-bin hardware/jupiter2/vendor/fw_dynamic.bin \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --esos-configuration conf_dual \
   --variant vendor \
   --opensbi-reserve-bytes "$VENDOR_SBI_RESERVE_BYTES" \
@@ -219,11 +219,11 @@ dumpimage一覧が異なる場合はその番号と圧縮方式に合わせる�
 ```bash
 CHECK="work/jupiter2-ram-boot/records/esos-entry-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$CHECK"
-dumpimage -l work/jupiter2-ram-boot/original/esos.itb > "$CHECK/esos-list.txt"
+dumpimage -l hardware/jupiter2/vendor/esos.itb > "$CHECK/esos-list.txt"
 cat "$CHECK/esos-list.txt"
 # Image 26がrcpu1-fw、Compressionがlzoであることを確認して次を実行する。
 dumpimage -T flat_dt -p 26 -o "$CHECK/rcpu1-fw.lzo" \
-  work/jupiter2-ram-boot/original/esos.itb
+  hardware/jupiter2/vendor/esos.itb
 lzop -d -c "$CHECK/rcpu1-fw.lzo" > "$CHECK/rcpu1-fw.elf"
 readelf -h -lW "$CHECK/rcpu1-fw.elf" | tee "$CHECK/rcpu1-readelf.txt"
 ```

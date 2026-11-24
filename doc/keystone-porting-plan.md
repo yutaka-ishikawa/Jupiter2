@@ -191,8 +191,8 @@ PAGE_CRYPTOには利用可能な乱数profileと鍵・counter管理が必要。
 
 ### H0：Jupiter2実機の起動条件を確定
 
-既提供の [実機資料](jupiter2-hardware-compatibility.md) と
-[インベントリ](jupiter2-hardware-inventory.json) を再利用する。
+既提供の [実機資料](../hardware/jupiter2/jupiter2-hardware-compatibility.md) と
+[インベントリ](../hardware/jupiter2/jupiter2-hardware-inventory.json) を再利用する。
 追加で必要なものはOpenSBI以前からの起動ログ、OpenSBI入力DTB、実際のvendor commit・
 defconfig・build方法、FSBL/FITのロード仕様、M-modeでのPMP/PMACFG等の値。
 
@@ -251,7 +251,7 @@ QEMU: N0 回帰拡充 → N1 サンプル統合 → N2 multimem → N3 paging
 - [3002/3003共通計画](keystone-sbi-3002-3003-joint-plan.md)／[実装記録](keystone-sbi-3002-3003-implementation.md)
 - [累積修正](keystone-cumulative-changes.md)／[不具合報告書](keystone-bug-report.md)
 - [verificationとソース配置](../verifications/README.md)／[build/install](make-build-install.md)
-- [実機適合性](jupiter2-hardware-compatibility.md)／[WTM調査](jupiter2-security-engine-rng.md)
+- [実機適合性](../hardware/jupiter2/jupiter2-hardware-compatibility.md)／[WTM調査](jupiter2-security-engine-rng.md)
 
 ### SBI 3004の追加ログ対応
 

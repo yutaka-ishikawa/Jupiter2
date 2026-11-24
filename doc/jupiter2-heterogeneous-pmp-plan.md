@@ -14,7 +14,7 @@
 | 0〜7 | X100 | 16 | root PMP設定と各HartのSM初期化が成功 |
 | 8〜15 | A100 | 32 | PMP設定が `-2` を返し、Linux CPU起動に失敗 |
 
-CPU種別は[実機互換性調査](jupiter2-hardware-compatibility.md)と提供DTの定義による。
+CPU種別は[実機互換性調査](../hardware/jupiter2/jupiter2-hardware-compatibility.md)と提供DTの定義による。
 PMP数は今回のOpenSBIのHart別検出結果による。
 
 ```text

@@ -49,8 +49,8 @@ VENDOR_SBI_RESERVE_BYTES=0x00100000
 OUT="$PWD/work/jupiter2-ram-boot/reference-vendor-$(date +%Y%m%d-%H%M%S)"
 
 python3 scripts/build-jupiter2-reference-ram-boot.py \
-  --opensbi-bin work/jupiter2-ram-boot/original/fw_dynamic.bin \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --opensbi-bin hardware/jupiter2/vendor/fw_dynamic.bin \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --esos-configuration conf_dual \
   --variant vendor \
   --opensbi-reserve-bytes "$VENDOR_SBI_RESERVE_BYTES" \

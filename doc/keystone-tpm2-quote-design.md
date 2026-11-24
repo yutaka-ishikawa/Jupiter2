@@ -606,7 +606,7 @@ counter／Clockの永続性・rollback要件は、AK固定の仮定によって�
 
 ### 9.1 現時点で分かっていること
 
-[既存ハードウェア調査](jupiter2-hardware-compatibility.md)と
+[既存ハードウェア調査](../hardware/jupiter2/jupiter2-hardware-compatibility.md)と
 [WTM/OP-TEE調査](jupiter2-security-engine-rng.md)で、K3向けWTM RNGのベンダーdriver、
 OP-TEE platform、TE200等の関連定義を確認している。
 公式K3 datasheetにはeFuseと256-bit NV Counterの記載がある（第9.11節）。

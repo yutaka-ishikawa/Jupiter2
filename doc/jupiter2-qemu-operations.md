@@ -265,6 +265,8 @@ source、保存したrootfs、install済みファイルの削除とは別です�
 
 ## 8. 現在の確認範囲
 
+実機から取得したDTBを基準にする場合は、[実機DTBとQEMUの照合手順](jupiter2-qemu-hardware-test-gaps.md#8-実機dtbを基準にqemuの再現範囲を調べる)を参照。
+
 以前のsample実行結果は[samples/results.md](../samples/results.md)、
 KSB-073修正前後の実Linuxでの二種8回の結果は[比較試験](jupiter2-utm-host-access-issue.md)を参照してください。
 このページの操作例を掲載したこと自体は、全profile・全sample・全verificationを再実行したという意味ではありません。

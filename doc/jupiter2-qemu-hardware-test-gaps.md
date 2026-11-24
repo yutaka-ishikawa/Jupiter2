@@ -2,7 +2,7 @@
 
 更新：2026年11月21日。今回の実機試験で分かった条件を、QEMUモデルの変更と試験条件の追加に分けて整理する。
 QEMUの現在のモデルは `virt` を基にした部分モデルであり、実機の起動チェーン全体を再現していない。
-この制約は[実機互換性調査](jupiter2-hardware-compatibility.md)でも記録していたが、
+この制約は[実機互換性調査](../hardware/jupiter2/jupiter2-hardware-compatibility.md)でも記録していたが、
 Keystoneの検証に必要な実機条件を回帰試験へ取り込む作業が不足していた（KSB-072）。
 
 ## 1. 今回の問題をQEMUで検出できなかった理由
@@ -119,3 +119,78 @@ KSB-073では実機と同じ提供sampleを実Linux guestで実行した。
 修正後は両PMP構成×Linux CPU3/8×hello/nativeの計8回すべて正常終了した。
 [入力hash・修正箇所・UARTと比較結果](jupiter2-utm-host-access-issue.md#6-実qemuでのsample回帰試験結果)を参照する。
 これは全sample suiteや実機domain fixture等の未実装項目が解消したことを意味しない。
+
+## 8. 実機DTBを基準にQEMUの再現範囲を調べる
+
+### 実機の起動DTBを取得する
+
+Jupiter2実機のLinuxで、起動時に渡されたFDTを保存する。
+
+```bash
+sudo cat /sys/firmware/fdt > running.dtb
+uname -r
+sha256sum running.dtb
+```
+
+開発PCの `hardware/jupiter2/captures/<採取ID>/running.dtb` にコピーする。
+採取IDの付け方と保存する資料は [実機資料ディレクトリ](../hardware/jupiter2/README.md) を参照。
+起動方式、Linux・OpenSBIの版、搭載RAM、U-Bootで選んだDTB名も記録する。
+`/sys/firmware/fdt` が利用できない場合は、U-Bootが実際に読み込んだ
+DTBファイルをコピーする。採取元を「起動後にLinuxから取得」または
+「U-Bootの入力ファイル」と明記し、ブートローダーによるfixupの差を区別する。
+実機のロード元は [RAM起動ガイド](jupiter2-ram-boot-guide.md) を参照。
+
+QEMUとの照合に進む前に、採取した実機と `hardware/jupiter2/` の
+参照資料が同じボード・起動構成を示すことを確認する。
+確認項目は [使用する実機との照合](../hardware/jupiter2/README.md#使用する実機との照合) を参照する。
+
+### 同じ検査プロファイルでQEMUのDTBを得る
+
+以下はOP-TEE同居試験の16 hart・2 GiB・WTM RNG有効・均一16 PMP枠の例。
+開発PCのリポジトリ直下で実行する。DTBの確認には `device-tree-compiler` が必要。
+
+```bash
+CAPTURE_ID=20261124-01  # 実際の採取IDに置き換える
+BOARD="$PWD/hardware/jupiter2/captures/$CAPTURE_ID"
+WORK="$PWD/.build-k3/dtb-compare/$CAPTURE_ID"
+mkdir -p "$WORK"
+QEMU="$PWD/install/keystone/bin/qemu-system-riscv64"
+"$QEMU" --version
+"$QEMU" \
+  -M "jupiter2,wtm-rng=on,dumpdtb=$WORK/qemu-base.dtb" \
+  -cpu rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16 \
+  -smp 16 -m 2G -bios none -display none
+
+sha256sum "$BOARD/running.dtb" "$WORK/qemu-base.dtb"
+dtc -I dtb -O dts -s -o "$WORK/running.dts" "$BOARD/running.dtb"
+dtc -I dtb -O dts -s -o "$WORK/qemu-base.dts" "$WORK/qemu-base.dtb"
+fdtget -l "$BOARD/running.dtb" /cpus
+fdtget -l "$WORK/qemu-base.dtb" /cpus
+diff -u "$WORK/running.dts" "$WORK/qemu-base.dts"
+```
+
+`diff` の終了値1は差分ありを表す。phandleは参照先のノードで照合する。
+実機のLinux起動時DTBとQEMUの素のDTBを比べる場合は、
+`/chosen`、initrd、予約メモリなどのうち起動段階で追加された差を別に記録する。
+MPXYやOP-TEEの比較には、同居設定を追加した最終 `boot.dtb` も並べて確認する。
+
+| 検査対象 | 照合する内容 |
+| --- | --- |
+| CPU・PMP | 有効なhart ID、ISA、割り込みコントローラとの接続。PMP個数と粒度はDTBだけで判定せず、QMPの設定と実機OpenSBIのUART結果を照合する。 |
+| RAM・予約 | `/memory` の各区間、`/reserved-memory` とFDTの予約リスト、OP-TEE Core・共有領域・起動DTBの範囲。実機とQEMUのRAM容量差も記録する。 |
+| 割り込み・周辺機器 | UART、IMSIC/APLIC、タイマー、WTM、eFuse、PMU、UFSなどの `compatible`、`reg`、割り込みとクロックの接続。親バスの `ranges` で物理アドレスへ換算する。 |
+| 同居設定 | 最終DTBのOpenSBIドメイン、開始アドレス、OP-TEE private／共有メモリの権限、MPXYチャネルとhartの対応。 |
+
+各対象について「DT記述が一致」「試験プロファイル由来の差」「QEMUモデルの差」
+「未確認」と、起動・試験への影響を記録する。DTの一致とデバイスの動作確認は
+別々に記録する。
+
+### 実機DTBを土台にQEMU起動を試す
+
+比較後、実機DTBのコピーでQEMUが提供するCPU、メモリ、割り込み、シリアル、
+起動ディスクと整合することを確認する。試験に必要な機器がQEMUで未実装なら、
+その機器に依存する試験を未検証と記録する。コピーにOpenSBIドメインを設定し、
+[同居DTB生成手順](jupiter2-optee-ftpm-porting-plan.md)に従って予約メモリと
+MPXY設定を追加したものを `run-k3.sh --dtb` に渡す。使用したDTBのハッシュと
+UARTを保存し、LinuxのCPU列挙、OP-TEE起動、Keystone試験の結果をQEMU由来DTBでの
+基準起動と比較する。実機DTB原本とQEMU用に変更したコピーをそれぞれ保持する。

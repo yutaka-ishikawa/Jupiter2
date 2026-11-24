@@ -317,4 +317,4 @@ Jupiter2上での実ビルド、モデル取得・推論実行、tokens/sの測�
 - [SpacemiT IME命令検出（固定commit）](https://github.com/ggml-org/llama.cpp/blob/3b4d6ab3f79651935fba1dd93732f29022a7f5f5/ggml/src/ggml-cpu/cmake/FindSMTIME.cmake)
 - [Qwen公式GGUF repository（固定revision）](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/tree/7dabda4d13d513e3e842b20f0d435c732f172cbe)
 - [モデルのファイル情報API](https://huggingface.co/api/models/Qwen/Qwen2.5-3B-Instruct-GGUF/revision/7dabda4d13d513e3e842b20f0d435c732f172cbe?blobs=true)
-- [Jupiter2実機記録](jupiter2-hardware-compatibility.md)
+- [Jupiter2実機記録](../hardware/jupiter2/jupiter2-hardware-compatibility.md)

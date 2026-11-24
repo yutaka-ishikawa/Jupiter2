@@ -26,7 +26,7 @@ QEMUで `zkr=true` を指定すれば使えることや、OpenSBIがZkrのコー
 | 第三者のK3/X100/A100実機ログ | 別ボードK3-CoM260の各hart ISAにもzkrなし。 | 補助資料。Jupiter2の実測値の代用にはしない。 |
 
 提供済み情報の要約・元ファイルhashは
-[実機inventory](jupiter2-hardware-inventory.json) を参照。
+[実機inventory](../hardware/jupiter2/jupiter2-hardware-inventory.json) を参照。
 CPU定義は [k3-cpus.dtsi](../linux-k3/arch/riscv/boot/dts/spacemit/k3-cpus.dtsi)。
 
 `Zkt` は実行時間に関する拡張で、乱数を提供する `Zkr` とは別。

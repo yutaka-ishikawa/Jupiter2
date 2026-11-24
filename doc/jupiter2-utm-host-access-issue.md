@@ -81,7 +81,7 @@ make firmware JOBS=20
 
 python3 scripts/build-jupiter2-reference-ram-boot.py \
   --opensbi-bin .build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.bin \
-  --esos-itb work/jupiter2-ram-boot/original/esos.itb \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
   --esos-configuration conf_dual \
   --variant keystone \
   --opensbi-reserve-bytes 0x00100000 \
