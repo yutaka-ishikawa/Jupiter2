@@ -111,6 +111,7 @@
 | KSB-085 | 並行CREATE／DESTROY時に全hart PMP更新が失敗する | ローカル切替のゲート競合でhartが停止。固定回数のACKポーリングでも早期打ち切り | PMP状態の確認とACK待ちを修正 |
 | KSB-086 | fTPM同居QEMUでEnclaveのCREATEが間欠的に失敗する | PMP ACK待ちとRFENCE待ちが競合 | ACK待ちでローカルのRFENCEを処理。修正後の16 hart同時実行試験は5回合格 |
 | KSB-087 | fTPMの永続化失敗時にNV_Writeが成功を返す | 採用したfTPM TAの既存実装でNV書き戻し失敗がTPM結果に伝わらない | 16 hart QEMUで確認。未修正 |
+| KSB-088 | OP-TEE同居試験が入力DTB不足で起動できない | 同居用DTBとinitramfsの生成経路が未登録 | 生成スクリプトと入力DTSを追加 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1615,3 +1616,20 @@ UART抜粋は、[初回の3試行](evidence/jupiter2-ksb086/01-initial-uart.log)
   以後の書き戻しも止まる。修正と再試験は未実施。
 - [試験条件と結果](jupiter2-ftpm-ta-test.md#tpmコマンドと障害復旧)。
   [UARTログ抜粋](evidence/jupiter2-ftpm-recovery/uart.txt)。
+
+### KSB-088: OP-TEE同居試験の入力ファイルが揃わない
+
+- 症状。Keystone統合試験後、ランナーは `Missing OP-TEE test input:
+  .build-k3/optee-coexist/boot.dtb` を報告した。同居ゲストは起動していない。
+- 原因。Coreビルドは `tee.elf` までを生成する。DTBとinitramfsは試験環境で
+  個別に用意され、リポジトリから作る手順と入力ソースが揃っていなかった。
+  このログからOpenSBIのドメイン切替やTAの実行失敗は観測されていない。
+- 対処。試験で使ったQEMU向け同居DTBの構成をDTSとして保存し、検証用の
+  `/init` とともに、DTBとinitramfsを生成するスクリプトを追加した。
+  採取済み実機DTBはQEMU構成の比較資料として扱う。
+  [生成・試験手順](../verifications/optee-coexistence/README.md#keystoneの統合試験に同居試験を追加)
+- 検証。新しいスクリプトで生成した2ファイル、検証用TA入りの既存Core、
+  対応するLinuxとKeystoneドライバで、Sstc有効の同居ゲストを起動した。
+  Linuxの16 CPU起動、Enclave実行16回、OCALL中を含むTA呼び出し33回、
+  正常な電源断とQEMU終了コード0を確認した。
+  利用者の環境での全試験と、今回のログにあるWTM乱数ケースは未再検証。

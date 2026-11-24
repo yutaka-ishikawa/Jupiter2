@@ -122,23 +122,25 @@ UARTの `PASS: parallel OP-TEE TA calls on all 16 CPUs` は全子プロセスが
 
 ## Keystoneの統合試験に同居試験を追加
 
-通常のビルド・インストール後、同居用のOP-TEE Core、DTB、試験用initramfsを
-明示して実行する。
+リポジトリのルートで、RV64向け `optee_client` のインストール先
+（`include/tee_client_api.h` と `lib/libteec.a` を含む）を
+`OPTEE_CLIENT_OUT` に設定して実行する。`dtc` とRV64クロスコンパイラが必要。
 
 ```sh
 make build JOBS=20
 make install
+JOBS=20 bash scripts/build-k3-optee-coexist.sh
+OPTEE_CLIENT_OUT=/path/to/optee-client/usr bash scripts/prepare-k3-optee-coexist-test.sh
+
+WORK=.build-k3/optee-coexist
 python3 verifications/crypto/run-qemu.py --all --sstc on \
-    --optee-coexistence /path/to/tee.elf /path/to/boot.dtb /path/to/coexist.cpio
+    --optee-coexistence "$WORK/out/core/tee.elf" "$WORK/boot.dtb" "$WORK/coexist.cpio"
 ```
 
-同居試験は、インストール済みのQEMU・OpenSBI＋Keystone・Linuxを使って、
-16 hart、2 GiB、WTM有効で別ゲストを起動する。`boot.dtb` はこの構成に
-対応した同居用DTBを使う。試験用TAをCoreの `EARLY_TA_PATHS` に入れるか、
-ゲストでtee-supplicantが読み込めるよう配置する。試験用initramfsの `/init` は、上記の同居ゲスト試験
-（ドライバ、TA、必要に応じてtee-supplicant、同居試験バイナリとEnclave一式）
-を実行し、成功後にゲストを電源断する構成を用意する。
-カーネルモジュールはインストール済みLinuxと同じビルドのものを使う。
+準備スクリプトは [同居用DTS](boot.dts) から `boot.dtb` をコンパイルし、
+起動するLinuxと同じビルドのKeystoneドライバ、検証バイナリ、Enclave一式、
+`/init` を `coexist.cpio` にまとめる。Coreのビルドスクリプトは検証用TAを
+Coreに組み込む。試験は16 hart、2 GiB、WTM有効の別QEMUゲストで実行する。
 
 合格にはLinuxが16 CPUを起動し、`PASS: 16 enclave runs, 33 TA calls including OCALL`
 を出力して正常に電源断することが必要。結果は
