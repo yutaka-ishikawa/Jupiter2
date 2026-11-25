@@ -7,6 +7,10 @@
 	compatible = "riscv-virtio";
 	model = "riscv-virtio,qemu";
 
+	tpm {
+		compatible = "microsoft,ftpm";
+	};
+
 	firmware {
 
 		optee {

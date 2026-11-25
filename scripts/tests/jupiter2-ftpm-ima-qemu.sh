@@ -50,6 +50,12 @@ for mode in early late; do
         early) args="$bootargs ima_test_ftpm=1" ;;
         late) args="$bootargs -- late" ;;
     esac
+    # Supply fresh entropy for the test guest's early userspace helper.
+    # QEMU's custom DTB path does not add a missing rng-seed property.
+    test_dtb="$OUT/$mode.dtb"
+    cp -- "$BOOT_DTB" "$test_dtb"
+    read -r -a seed_cells <<< "$(od -An -v -tx4 -N32 -w32 /dev/urandom)"
+    fdtput -t x "$test_dtb" /chosen rng-seed "${seed_cells[@]}"
     log="$OUT/$mode.log"
     started=$SECONDS
     printf 'Running %s fTPM registration (timeout %ss), UART: %s\n' "$mode" "$timeout_seconds" "$log"
@@ -57,7 +63,7 @@ for mode in early late; do
         -M jupiter2,wtm-rng=on \
         -cpu rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16 \
         -smp 16 -m 2G -display none -monitor none -serial stdio \
-        -dtb "$BOOT_DTB" -bios "$SBI" -kernel "$IMAGE" \
+        -dtb "$test_dtb" -bios "$SBI" -kernel "$IMAGE" \
         -initrd "$OUT/init.cpio" -append "$args" \
         -device "loader,file=${TEE_ELF//,/,,}" 2>&1 |
         python3 "$TESTS/jupiter2-ftpm-ima-progress.py" "$mode" "$log"; then

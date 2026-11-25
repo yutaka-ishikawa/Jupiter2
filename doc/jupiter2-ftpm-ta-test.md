@@ -277,6 +277,9 @@ GitツリーIDごとに `.build-k3/ftpm-ima-source/` の下へチェックアウ
 `gen_init_cpio` と試験用の `ftpm-ima-init` は `.build-k3/ftpm-ima-linux/`
 に生成する。通常の `make linux` の成果物はそのまま使える。
 `make optee-coexist-test` はランナーが使う同居用 `boot.dtb` を生成する。
+同居用DTBにはLinuxのfTPMドライバが認識する `microsoft,ftpm` ノードが必要。
+ランナーは `fdtput` で起動ごとにDTBのコピーへ新しい `rng-seed` を渡す。
+`fdtput` はDebian/Ubuntuの `device-tree-compiler` に含まれる。
 
 ランナーはビルド済みの試験プログラム、TA、supplicant、fTPMドライバを
 initramfsに格納し、同じカーネルとinitramfsを使ってQEMUを2回起動する。
