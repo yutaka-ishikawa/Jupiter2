@@ -14,7 +14,8 @@
 
 ```bash
 JUPITER2_ROOT="$PWD"
-REL="${OUT:?ビルド手順で設定したOUTが必要です}/release"
+# ビルド手順で設定したOUT環境変数を使います。
+REL="$OUT/release"
 FIT=ram-boot-keystone.itb
 ```
 
