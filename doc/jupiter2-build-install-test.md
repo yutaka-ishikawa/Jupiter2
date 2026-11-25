@@ -72,6 +72,14 @@ FASTBOOT_LOG="$CAPTURE_DIR/spl-fastboot.log" \
   JOBS=20 bash scripts/build-jupiter2-ram-boot.sh "$OUT"
 ```
 
+<a id="ram-boot-variables"></a>
+### RAM起動用の設定変数
+
+`OUT` は上の実行例で設定するシェル変数です。ビルドスクリプトには
+出力先の位置引数として渡します。`export` は不要です。ビルド後は同じシェルの
+`OUT` をRAM起動ガイドで引き継ぎ、`REL="$OUT/release"` として使います。
+以下の環境変数でビルド設定を上書きできます。
+
 | 変数 | 既定値と用途 |
 | --- | --- |
 | `CROSS_COMPILE` | `riscv64-unknown-linux-gnu-`。K3ツールチェーンの接頭辞 |

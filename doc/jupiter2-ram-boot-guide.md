@@ -5,13 +5,16 @@
 同じビルドから生成した2ファイルを対で使います。
 過去に販売元OpenSBIの構成で、USBからの手動転送とUFS上のLinux起動を実機で確認しました。
 
-開発PCのターミナルで、リポジトリのルートからビルド時の出力先と使用するFIT名を設定します。
+ビルドに使った開発PCのシェルをそのまま使います。`OUT` は
+[ビルド手順書のRAM起動イメージの実行例](jupiter2-build-install-test.md#ram-boot-images)
+で設定した出力先です。ここではその値を引き継ぎます。
+各変数の意味と設定方法は[RAM起動用の設定変数](jupiter2-build-install-test.md#ram-boot-variables)
+を参照してください。別の端末で続ける場合は、同じビルドの出力先を使います。
 販売元OpenSBIで試験する場合は `FIT=ram-boot-vendor.itb` を指定します。
 
 ```bash
 JUPITER2_ROOT="$PWD"
-OUT=/absolute/path/to/build-output
-REL="$OUT/release"
+REL="${OUT:?ビルド手順で設定したOUTが必要です}/release"
 FIT=ram-boot-keystone.itb
 ```
 
