@@ -3,26 +3,25 @@ set -euo pipefail
 
 TESTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd "$TESTS/../.." && pwd -P)"
-CROSS_COMPILE="${CROSS_COMPILE:-riscv64-linux-gnu-}"
+PREFIX="${PREFIX:-$ROOT/install/keystone}"
 OUT="${OUT:-$ROOT/.build-k3/ftpm-ima}"
-: "${LINUX_OUT:?Set LINUX_OUT to the IMA test kernel build directory}"
-: "${QEMU:?Set QEMU to the Jupiter2 QEMU executable}"
-: "${SBI:?Set SBI to fw_dynamic.bin}"
-: "${BOOT_DTB:?Set BOOT_DTB to the OP-TEE-first QEMU DTB}"
-: "${TEE_ELF:?Set TEE_ELF to the K3 OP-TEE Core ELF}"
-: "${FTPM_TA:?Set FTPM_TA to the signed fTPM TA}"
-: "${TEE_SUPPLICANT:?Set TEE_SUPPLICANT to the static RV64 tee-supplicant}"
+LINUX_OUT="${LINUX_OUT:-$ROOT/.build-k3/ftpm-ima-linux}"
+QEMU="${QEMU:-$PREFIX/bin/qemu-system-riscv64}"
+SBI="${SBI:-$PREFIX/firmware/k3/fw_dynamic.bin}"
+BOOT_DTB="${BOOT_DTB:-$ROOT/.build-k3/optee-coexist/boot.dtb}"
+TEE_ELF="${TEE_ELF:-$ROOT/.build-k3/optee-coexist/out/core/tee.elf}"
 UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
+FTPM_TA="${FTPM_TA:-$ROOT/.build-k3/ftpm-test/ta/$UUID.ta}"
+TEE_SUPPLICANT="${TEE_SUPPLICANT:-$ROOT/.build-k3/ftpm-test/client/tee-supplicant/tee-supplicant}"
 IMAGE="$LINUX_OUT/arch/riscv/boot/Image"
 MODULE="$LINUX_OUT/drivers/char/tpm/tpm_ftpm_tee.ko"
-for input in "$IMAGE" "$MODULE" "$TEE_ELF" "$SBI" "$BOOT_DTB" "$FTPM_TA" "$TEE_SUPPLICANT"; do
+INIT="$LINUX_OUT/ftpm-ima-init"
+for input in "$IMAGE" "$MODULE" "$INIT" "$LINUX_OUT/usr/gen_init_cpio" "$QEMU" "$TEE_ELF" "$SBI" "$BOOT_DTB" "$FTPM_TA" "$TEE_SUPPLICANT"; do
     test -s "$input" || { printf 'Missing test input: %s\n' "$input" >&2; exit 1; }
 done
 
 mkdir -p "$OUT"
 OUT="$(realpath "$OUT")"
-"${CROSS_COMPILE}gcc" -static -O2 -Wall -Wextra -Werror \
-    -o "$OUT/init" "$TESTS/jupiter2-ftpm-ima.c"
 printf 'Jupiter2 fTPM IMA test probe\n' > "$OUT/probe"
 cat > "$OUT/init.list" <<LIST
 dir /dev 0755 0 0
@@ -34,7 +33,7 @@ dir /var/lib 0755 0 0
 dir /var/lib/tee 0700 0 0
 file /lib/optee_armtz/$UUID.ta $FTPM_TA 0644 0 0
 file /tee-supplicant $TEE_SUPPLICANT 0755 0 0
-file /init $OUT/init 0755 0 0
+file /init $INIT 0755 0 0
 file /tpm_ftpm_tee.ko $MODULE 0644 0 0
 dir /sys 0755 0 0
 dir /sys/kernel 0755 0 0

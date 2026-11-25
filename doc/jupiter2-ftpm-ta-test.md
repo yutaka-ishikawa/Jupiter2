@@ -260,53 +260,35 @@ fTPMは既存と同じREE配置TAと `CONFIG_TCG_FTPM_TEE=m` で動かした。
 
 ### 連携試験をビルドして再実行する
 
-fTPM TAと静的RV64版 `tee-supplicant` は上記のクロスビルド手順で用意する。
-試験専用カーネルは別のGit作業ツリーと別の出力ディレクトリでビルドする。
-通常の `make linux` の成果物を試験用カーネルで上書きする必要はない。
-パッチは `ima_test_ftpm=1` を指定した起動でのみ、IMAの初期化前に
-initramfsのヘルパーを起動する。
-
-リポジトリのルートで実行する。 `IMA_TREE` は未使用のパスにする。
+リポジトリのルートで実行する。
 
 ```bash
-ROOT="$PWD"
-IMA_TREE="$ROOT/.build-k3/ftpm-ima-source"
-export LINUX_OUT="$ROOT/.build-k3/ftpm-ima-linux"
-export CROSS_COMPILE=riscv64-linux-gnu-
-
-git worktree add --detach "$IMA_TREE" HEAD
-git -C "$IMA_TREE" apply "$ROOT/scripts/tests/jupiter2-ftpm-ima-kernel.patch"
-mkdir -p "$LINUX_OUT"
-cp "$ROOT/scripts/tests/jupiter2-ftpm-ima.config" "$LINUX_OUT/.config"
-make -C "$IMA_TREE/linux-k3" O="$LINUX_OUT" ARCH=riscv \
-    CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
-make -C "$IMA_TREE/linux-k3" O="$LINUX_OUT" ARCH=riscv \
-    CROSS_COMPILE="$CROSS_COMPILE" -j20 Image modules
-```
-
-この手順で生成した `Image`、`tpm_ftpm_tee.ko`、`usr/gen_init_cpio` を
-同じ `LINUX_OUT` から使用する。次のパスを手元の成果物に合わせて指定する。
-`BOOT_DTB` は16 hart・2 GiBのOP-TEE先行起動用DTBを使う。
-fTPMとIMAの両ケースとも同じカーネル、TA、initramfsを使う。
-
-```bash
-export QEMU="$ROOT/install/keystone/bin/qemu-system-riscv64"
-export SBI="$ROOT/install/keystone/firmware/k3/fw_dynamic.bin"
-export BOOT_DTB="$ROOT/.build-k3/optee-coexist/boot.dtb"
-export TEE_ELF="$ROOT/.build-k3/optee-coexist/out/core/tee.elf"
-export FTPM_TA="$ROOT/.build-k3/ftpm-test/ta/bc50d971-d4c9-42c4-82cb-343fb7f37896.ta"
-export TEE_SUPPLICANT="$ROOT/.build-k3/ftpm-test/client/tee-supplicant/tee-supplicant"
-
+make build JOBS=20
+make install
+make ftpm-ima JOBS=20
+make optee-coexist-test
 bash scripts/tests/jupiter2-ftpm-ima-qemu.sh
 ```
 
-ランナーは [ゲスト試験コード](../scripts/tests/jupiter2-ftpm-ima.c) を静的リンクし、
-TA、supplicant、fTPMドライバとともにinitramfsへ格納する。
-既定の出力先は `.build-k3/ftpm-ima/`。UARTは `early.log` と `late.log` に保存する。
+`make ftpm-ima` はOP-TEE Coreを準備し、固定コミットのfTPM TAと静的RV64版
+`tee-supplicant` をクロスビルドする。試験専用カーネルはLinuxソースの
+GitツリーIDごとに `.build-k3/ftpm-ima-source/` の下へチェックアウトし、
+試験用パッチと設定を適用する。 `Image`、`tpm_ftpm_tee.ko`、
+`gen_init_cpio` と試験用の `ftpm-ima-init` は `.build-k3/ftpm-ima-linux/`
+に生成する。通常の `make linux` の成果物はそのまま使える。
+`make optee-coexist-test` はランナーが使う同居用 `boot.dtb` を生成する。
+
+ランナーはビルド済みの試験プログラム、TA、supplicant、fTPMドライバを
+initramfsに格納し、同じカーネルとinitramfsを使ってQEMUを2回起動する。
+UARTは既定で `.build-k3/ftpm-ima/early.log` と `late.log` に保存する。
 早期登録ではファイルダイジェストとPCR 10のSHA-256 extendを照合し、
 遅延登録では同じファイルが測定されてもPCR 10が変化しないことを検査する。
 両方が合格すると終了コード0を返す。
 
-登録したランナーでゲストコードとinitramfsを再生成し、早期登録と遅延登録の
-両方をQEMUで確認した。この再試験では、以前の試験用Linux Imageと対応する
-モジュール、同じOP-TEE Core・DTB・TAを使用した。
+既定のパスを変更する場合は [設定変数一覧](make-build-install.md#ftpmとimaの試験設定)
+を参照する。試験用パッチは `ima_test_ftpm=1` を指定した起動で
+IMAの初期化前にinitramfsのヘルパーを起動する。
+
+登録したランナーで早期登録と遅延登録の両方をQEMUで確認した。
+この再試験では、以前の試験用Linux Imageと対応するモジュール、
+同じOP-TEE Core・DTB・TAを使用した。

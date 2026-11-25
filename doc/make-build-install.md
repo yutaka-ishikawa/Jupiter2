@@ -76,6 +76,34 @@ SMビルドの `KEYSTONE_RNG_BACKEND`・`KEYSTONE_CRYPTO_PROVIDER` もありま�
 ルートMakefileはLinuxのソースと出力先を指定し、ファームウェアの設定は
 `opensbi`、`rng`、`crypto` の各ターゲットで選びます。
 
+### fTPMとIMAの試験設定
+
+`make ftpm-ima` は上記の `JOBS` と `CROSS_COMPILE` を使う。
+`LINUX_OUT` を変更したら、ビルドとランナーの両方に同じ値を渡す。
+通常のLinuxビルドとは別の出力先を指定する。
+
+以下は `scripts/tests/jupiter2-ftpm-ima-qemu.sh` の設定変数。
+パスはリポジトリルート基準で、既定値はスクリプトが絶対パスに変換して使用する。
+
+| 環境変数 | 既定値 | 用途 |
+| --- | --- | --- |
+| `PREFIX` | `install/keystone` | QEMUとOpenSBIを探すインストール先 |
+| `QEMU` | `$PREFIX/bin/qemu-system-riscv64` | QEMU実行ファイル |
+| `SBI` | `$PREFIX/firmware/k3/fw_dynamic.bin` | OpenSBI＋Keystoneファームウェア |
+| `BOOT_DTB` | `.build-k3/optee-coexist/boot.dtb` | 16 hart・2 GiBのOP-TEE先行起動用DTB |
+| `TEE_ELF` | `.build-k3/optee-coexist/out/core/tee.elf` | OP-TEE Core |
+| `FTPM_TA` | `.build-k3/ftpm-test/ta/bc50d971-d4c9-42c4-82cb-343fb7f37896.ta` | 署名済みfTPM TA |
+| `TEE_SUPPLICANT` | `.build-k3/ftpm-test/client/tee-supplicant/tee-supplicant` | 静的RV64版supplicant |
+| `LINUX_OUT` | `.build-k3/ftpm-ima-linux` | IMA用Linux Image、モジュール、initramfsツール、試験プログラムのビルド出力 |
+| `OUT` | `.build-k3/ftpm-ima` | initramfsとUARTログの出力先 |
+| `TIMEOUT` | `180` | 各QEMU起動の制限時間（秒） |
+
+例えば、制限時間を変更する場合は次のとおり。
+
+```bash
+TIMEOUT=300 bash scripts/tests/jupiter2-ftpm-ima-qemu.sh
+```
+
 ## 個別のbuildとinstall
 
 | コンポーネント | buildコマンド | installコマンド | 内容 |
