@@ -51,6 +51,8 @@ PCの操作ターミナルとUART端末を分け、電源投入からのUARTロ�
 
 比較・導入の対象となるLinuxを実機で起動し、変更を加える前に実行します。
 同じ端末で2.3まで進め、同じ `INFO_DIR` を使います。
+Linux側の情報は下のコマンドで一括採取します。NOR区画容量の取得には、
+2.3節の既存スクリプトを使います。
 
 ```bash
 set -e
@@ -62,12 +64,22 @@ date -Iseconds > "$INFO_DIR/captured-at.txt"
 uname -a > "$INFO_DIR/uname.txt"
 LC_ALL=C lscpu > "$INFO_DIR/lscpu.txt"
 cat /proc/cpuinfo > "$INFO_DIR/cpuinfo.txt"
+cat /sys/devices/system/cpu/online > "$INFO_DIR/cpu-online.txt"
+cat /proc/meminfo > "$INFO_DIR/meminfo.txt"
 sudo cat /proc/iomem > "$INFO_DIR/iomem.txt"
 sudo dmesg > "$INFO_DIR/dmesg.txt"
-sudo cat /sys/firmware/fdt > "$INFO_DIR/running.dtb"
-test -s "$INFO_DIR/running.dtb"
+if sudo test -s /sys/firmware/fdt; then
+    sudo cat /sys/firmware/fdt > "$INFO_DIR/running.dtb"
+    test -s "$INFO_DIR/running.dtb"
+elif sudo test -d /sys/firmware/devicetree/base && command -v dtc >/dev/null; then
+    sudo dtc -I fs -O dtb /sys/firmware/devicetree/base > "$INFO_DIR/running-reconstructed.dtb"
+    printf '%s\n' 'Original FDT unavailable; reconstructed from sysfs' >> "$INFO_DIR/capture-notes.txt"
+else
+    printf '%s\n' 'Original FDT unavailable; no sysfs DTB collected' >> "$INFO_DIR/capture-notes.txt"
+fi
 
 lsblk -f > "$INFO_DIR/lsblk.txt"
+findmnt > "$INFO_DIR/findmnt.txt"
 findmnt --target / > "$INFO_DIR/root-mount.txt"
 findmnt --target /boot > "$INFO_DIR/boot-mount.txt"
 cat /proc/cmdline > "$INFO_DIR/cmdline.txt"
@@ -83,7 +95,16 @@ else
 fi
 ```
 
-`boot-mount.txt` は `/boot` を含むファイルシステムを記録します。
+採取ファイルは以下の用途で使います。
+
+| ファイル | 採取する情報 |
+| --- | --- |
+| `captured-at.txt`、`uname.txt` | 採取日時、実行中のLinuxの版 |
+| `lscpu.txt`、`cpuinfo.txt`、`cpu-online.txt` | CPU構成、各CPUの情報、オンラインCPUの範囲 |
+| `meminfo.txt`、`iomem.txt`、`dmesg.txt` | Linuxから見えるRAM容量、物理メモリ配置、カーネルログ |
+| `running.dtb` | 実機Linuxに渡されたFDTの原本。原本がない場合は再構成版を `running-reconstructed.dtb` として保存 |
+| `lsblk.txt`、`findmnt.txt`、`root-mount.txt`、`boot-mount.txt` | ストレージ、全マウント、`/` と `/boot` を含むファイルシステム |
+| `cmdline.txt`、`proc-mtd.txt`、`env_k3.txt` | Linux起動引数、MTD区画、使用中の起動設定（存在する場合） |
 GRUBやextlinuxを使用している場合は、[導入手順の第5章](doc/milkv-jupiter2-stack-install.md#5-実機の現状記録とバックアップ)
 に従って使用中の設定もこのディレクトリに保存します。起動媒体、
 ボード型番、ファームウェアの版、選択したDTB名も `capture-notes.txt` に追記します。
@@ -92,6 +113,7 @@ Jupiter2はX100とA100の混成です。CPUの種類やLinuxのonline数だけ�
 ファームウェアのHart別ログも確認します。既知の構成は[実機調査](hardware/jupiter2/jupiter2-hardware-compatibility.md)、
 PMPの16/32個混在は[対応計画と結果](doc/jupiter2-heterogeneous-pmp-plan.md)を参照してください。
 
+<a id="capture-nor"></a>
 ### 2.3 NOR区画容量の確認とファームウェアのバックアップ
 
 [導入手順の第5章](doc/milkv-jupiter2-stack-install.md)で、
@@ -99,16 +121,47 @@ PMPの16/32個混在は[対応計画と結果](doc/jupiter2-heterogeneous-pmp-pl
 区画情報・元OpenSBI・起動設定を保存します。
 バックアップのハッシュを記録し、対応する復旧方法と販売元FSBL/U-Bootの入手元も確認します。
 
+NORへ導入する場合は、既存の [容量確認スクリプト](scripts/check-jupiter2-install-capacity.py)
+を実機にコピーし、同じ端末で実行します。このスクリプトはsysfsから
+`opensbi` 区画のデバイス名、NOR容量、消去単位を取得し、bundle作成で使う
+`capacity_bytes` をJSONに出力します。
+
+```bash
+python3 scripts/check-jupiter2-install-capacity.py --json > "$INFO_DIR/jupiter2-nor-capacity.json"
+```
+
 今回の実測では`mtd5`の`opensbi`が`0x60000`＝393216 bytes（384 KiB）です。
 番号や容量は実機の`/proc/mtd`で再確認してください。
 詳しい読取り調査は[SPI NOR調査](doc/jupiter2-spi-nor-inspection.md)を参照してください。
 
+<a id="capture-save"></a>
 ### 2.4 取得情報・バックアップを開発PCへ保存
 
 **作成後は、記録・バックアップのディレクトリ全体を実機外の開発PCの `hardware/jupiter2/captures/<採取ID>/` にコピーしてください。**
-実機の `INFO_DIR` の中身をそこに配置し、開発PCで記録したUARTログを
-`uart.log` として同じ場所に保存します。開発PCのリポジトリルートで、
-`CAPTURE_ID` を実機で採取した値に設定し、全ファイルのハッシュを記録します。
+実機の `INFO_DIR` の中身をそこに配置し、開発PCで記録した電源投入からのUARTログを
+`uart.log` として同じ場所に保存します。SPLのUSB転送上限も採取する場合は、
+対象機をSPL Fastboot段階にして、開発PCで次を実行します。複数台が接続されている
+場合は `fastboot -s SERIAL` で対象機を指定します。
+
+```bash
+CAPTURE_ID=20261124-165032  # 実機で採取したIDに置き換える
+CAPTURE_DIR="$PWD/hardware/jupiter2/captures/$CAPTURE_ID"
+(
+    set -o pipefail
+    cd "$CAPTURE_DIR" || exit
+    fastboot getvar max-download-size 2>&1 | tee spl-fastboot.log
+)
+```
+
+販売元から入手した同一リリースの `FSBL.bin`、`esos.itb`、`fw_dynamic.itb`、
+`u-boot.itb` は `hardware/jupiter2/vendor/` に置きます。入手元・リリース・
+SHA-256を記録し、現在の実機に対応することを照合してください。差し替えた場合は、
+既存の `scripts/extract-jupiter2-vendor-dtbs.py` でU-Boot用DTBと
+ESOSのRCPU用DTBを同じ `vendor/` に抽出します。
+[保存先とDTB抽出手順](hardware/jupiter2/README.md)
+
+開発PCのリポジトリルートで `CAPTURE_ID` を設定し、コピーとログ採取が済んだ後に
+全ファイルのハッシュを記録します。
 
 ```bash
 CAPTURE_ID=20261124-165032  # 実機で採取したIDに置き換える
@@ -121,7 +174,23 @@ CAPTURE_ID=20261124-165032  # 実機で採取したIDに置き換える
 )
 ```
 
-採取ディレクトリは実機が起動しなくなった場合にも取り出せる場所に保存します。
+QEMUが生成したDTBやDTSは `.build-k3/dtb-compare/` に置きます。
+実機の採取ディレクトリは実機が起動しなくなった場合にも取り出せる場所に保存します。
+
+### 採取ファイルとビルドの対応
+
+| 用途 | スクリプトが実際に使う入力 |
+| --- | --- |
+| Keystone版RAM起動イメージ | `scripts/build-jupiter2-ram-boot.sh` は `vendor/esos.itb` と `vendor-fit.json` のESOS構成を使い、OpenSBI・FSBL・U-Bootをビルドします。採取した上限は `FASTBOOT_LOG="$CAPTURE_DIR/spl-fastboot.log"` で渡す場合に使います。 |
+| NOR導入用bundle | 実機で採取した `jupiter2-nor-capacity.json` の `capacity_bytes` を読み取り、`scripts/build-jupiter2-install-image.py` に `--capacity-bytes` で渡します。 |
+| 販売元DTB抽出 | `scripts/extract-jupiter2-vendor-dtbs.py` は `vendor-fit.json`、`vendor/u-boot.itb`、`vendor/esos.itb` を読み、`vendor/` にDTBを出力します。 |
+| LinuxビルドとQEMU起動 | Linuxビルドは `hardware/jupiter2/linux.config`、`run-k3.sh` は `hardware/jupiter2/qemu.conf` を読みます。 |
+
+`running.dtb` とLinux・UARTの採取記録は構成の照合や復旧に使います。
+通常のビルドは `captures/` を自動検索しません。実機LinuxのDTBを加工する場合は
+`scripts/prepare-jupiter2-keystone-linux-dtb.py` の `--input` に対象DTBを明示します。
+[実機用イメージのビルド手順](doc/jupiter2-build-install-test.md)
+
 ここまでで元の起動構成と復旧に必要な情報をそろえてから、deployへ進みます。
 
 <a id="phase-build"></a>

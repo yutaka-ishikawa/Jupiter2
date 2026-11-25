@@ -51,14 +51,14 @@ ls -lh "$OUT/release/images/"
 
 ### 採取したFastboot上限を使う例
 
-対象機がSPL Fastboot段階にあるとき、開発PCで以下を実行します。
-複数台を接続している場合は `fastboot -s SERIAL getvar max-download-size` で対象を選びます。
+[READMEの実機情報採取手順](../README.md#capture-save)で
+保存した `spl-fastboot.log` を使います。
 
 ```bash
-mkdir -p work/jupiter2-ram-boot
-fastboot getvar max-download-size 2>&1 | tee work/jupiter2-ram-boot/spl-fastboot.log
+CAPTURE_ID=20261124-165032  # 実機で採取したIDに置き換える
+CAPTURE_DIR="$PWD/hardware/jupiter2/captures/$CAPTURE_ID"
 OUT="$PWD/work/jupiter2-ram-boot/keystone-capture-$(date +%Y%m%d-%H%M%S)"
-FASTBOOT_LOG="$PWD/work/jupiter2-ram-boot/spl-fastboot.log" \
+FASTBOOT_LOG="$CAPTURE_DIR/spl-fastboot.log" \
   JOBS=20 bash scripts/build-jupiter2-ram-boot.sh "$OUT"
 ```
 
@@ -68,7 +68,7 @@ FASTBOOT_LOG="$PWD/work/jupiter2-ram-boot/spl-fastboot.log" \
 | `JOBS` | `nproc`。ビルドの並列数 |
 | `K3_BUILD_DIR` | `.build-k3`。OpenSBIのビルド出力先 |
 | `ESOS_ITB` | `hardware/jupiter2/vendor/esos.itb`。対象実機に対応するESOS FIT |
-| `ESOS_CONFIGURATION` | `conf_dual`。ESOS FITの構成名 |
+| `ESOS_CONFIGURATION` | `hardware/jupiter2/vendor-fit.json` の `esos_configuration`（現在は `conf_dual`）。別のESOS構成を使う場合に上書き |
 | `FASTBOOT_LOG` | 未指定時は生成SPLの設定を使う。指定時は対象SPLの `getvar` 採取ログ |
 
 実機では、生成したペアをUSBから転送し、UARTでOpenSBI・U-Boot・Linuxの順に
@@ -78,19 +78,15 @@ FASTBOOT_LOG="$PWD/work/jupiter2-ram-boot/spl-fastboot.log" \
 
 ## 2. NOR導入用のbundle
 
-実機LinuxでOpenSBI用NOR区画の容量を採取します。以下のスクリプトはsysfsを読み取ります。
-得られたJSONを開発PCにコピーします。
+[READMEのNOR区画採取手順](../README.md#capture-nor)で
+保存したJSONを指定し、開発PCのリポジトリルートで実行します。
 
 ```bash
-python3 scripts/check-jupiter2-install-capacity.py --json > jupiter2-nor-capacity.json
-```
-
-開発PCで、採取したJSONをカレントディレクトリに置いて実行します。
-
-```bash
+CAPTURE_ID=20261124-165032  # 実機で採取したIDに置き換える
+CAPTURE_DIR="$PWD/hardware/jupiter2/captures/$CAPTURE_ID"
 make opensbi keystone JOBS=20
 CAPACITY=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["capacity_bytes"])' \
-  < jupiter2-nor-capacity.json)
+  < "$CAPTURE_DIR/jupiter2-nor-capacity.json")
 OUT="$PWD/work/jupiter2-release-$(date +%Y%m%d-%H%M%S)"
 python3 scripts/build-jupiter2-install-image.py --capacity-bytes "$CAPACITY" --output "$OUT"
 (cd "$OUT" && sha256sum -c bundle.tar.gz.sha256)

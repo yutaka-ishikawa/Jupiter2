@@ -16,7 +16,10 @@ K3_BUILD_DIR="$(realpath -m -- "${K3_BUILD_DIR:-$ROOT/.build-k3}")"
 ESOS_ITB="$(realpath -e -- "${ESOS_ITB:-$ROOT/hardware/jupiter2/vendor/esos.itb}")"
 CROSS_COMPILE="${CROSS_COMPILE:-riscv64-unknown-linux-gnu-}"
 JOBS="${JOBS:-$(nproc)}"
-ESOS_CONFIGURATION="${ESOS_CONFIGURATION:-conf_dual}"
+if [[ -z ${ESOS_CONFIGURATION:-} ]]; then
+    ESOS_CONFIGURATION="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["esos_configuration"])' \
+        < "$ROOT/hardware/jupiter2/vendor-fit.json")"
+fi
 if [[ -e "$OUT" || -L "$OUT" ]]; then
     printf 'Output already exists: %s\n' "$OUT" >&2
     exit 1
