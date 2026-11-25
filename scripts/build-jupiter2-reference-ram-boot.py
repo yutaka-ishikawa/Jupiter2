@@ -210,8 +210,7 @@ def configure(text, settings=SETTINGS):
 
 
 def verify_config(path, settings=SETTINGS):
-    config = dict(line.split('=', 1) for line in path.read_text().splitlines()
-                  if line.startswith('CONFIG_') and '=' in line)
+    config = config_values(path)
     expected = {**settings, 'CONFIG_RISCV_SMODE': 'y',
                 'CONFIG_SPL_LOAD_FIT': 'y', 'CONFIG_SPL_OPENSBI': 'y',
                 'CONFIG_SPL_REMOTEPROC_K3_PROC': 'y', 'CONFIG_SPL_LZO': 'y',
@@ -246,6 +245,94 @@ def verify_fsbl(path):
         raise ValueError('FSBL SPL payload CRC mismatch')
 
 
+def config_values(path):
+    return dict(line.split('=', 1) for line in path.read_text().splitlines()
+                if line.startswith('CONFIG_') and '=' in line)
+
+
+def automatic_reservation(args, fit, dtb, records):
+    """Mirror generic OpenSBI's fw_base.S and platform.c size calculation."""
+    tree, _ = fit.parse_fdt(dtb)
+    prefix = args.cross_compile
+    elf = args.opensbi_elf.resolve(strict=True)
+    symbols = subprocess.check_output([prefix + 'nm', '--defined-only', elf], text=True)
+    addresses = {fields[-1]: int(fields[0], 16) for line in symbols.splitlines()
+                 if len(fields := line.split()) == 3 and fields[-1] in
+                 ('_fw_start', '_fw_end', 'fw_fdt_bin')}
+    if 'fw_fdt_bin' in addresses:
+        raise ValueError('automatic reservation requires OpenSBI without an embedded DTB')
+    # Confirm that the ELF describes the exact raw binary being packaged.
+    rebuilt = records / 'opensbi-from-elf.bin'
+    subprocess.run([prefix + 'objcopy', '-S', '-O', 'binary', elf, rebuilt], check=True)
+    if sha(rebuilt) != sha(args.opensbi_bin):
+        raise ValueError('OpenSBI ELF and BIN do not match')
+    rebuilt.unlink()
+
+    cpus = tree.children['cpus'].children.values()
+    hart_ids = [fit.number(node.props['reg']) for node in cpus
+                if node.props.get('device_type') == b'cpu\0' and
+                node.props.get('status', b'okay\0') in (b'okay\0', b'ok\0')]
+    if not hart_ids or len(set(hart_ids)) != len(hart_ids) or max(hart_ids) >= 128:
+        raise ValueError('unsupported OpenSBI hart list in the generated DTB')
+    hart_count = len(hart_ids)
+    chosen = tree.children.get('chosen')
+    configs = [node for node in chosen.children.values()
+               if b'opensbi,config' in node.props.get('compatible', b'').split(b'\0')] if chosen else []
+    if len(configs) > 1:
+        raise ValueError('multiple opensbi,config nodes in the generated DTB')
+    heap = configs[0].props.get('heap-size') if configs else None
+    if heap is not None and len(heap) != 4:
+        raise ValueError('OpenSBI heap-size must be a single DTB cell')
+
+    # Compile constants from the bundled OpenSBI headers for the RV64 ABI.
+    headers = Path(__file__).resolve().parent.parent / 'opensbi/include'
+    probe = records / 'opensbi-runtime-layout.o'
+    subprocess.run([prefix + 'gcc', '-ffreestanding', '-march=rv64imac', '-mabi=lp64',
+                    '-I', headers, '-x', 'c', '-c', '-o', probe, '-'],
+                   input=f"""#include <sbi/sbi_platform.h>
+#include <sbi/sbi_heap.h>
+#include <sbi/sbi_tlb.h>
+#include <sbi/sbi_scratch.h>
+char stack_bytes[SBI_PLATFORM_DEFAULT_HART_STACK_SIZE];
+char default_heap_bytes[SBI_PLATFORM_DEFAULT_HEAP_SIZE({hart_count})
+                        + SBI_TLB_INFO_SIZE * {hart_count} * {hart_count}];
+char heap_align_bytes[HEAP_BASE_ALIGN];
+char scratch_bytes[SBI_SCRATCH_SIZE];
+""", text=True, check=True)
+    sizes = subprocess.check_output([prefix + 'nm', '-S', '--defined-only', probe], text=True)
+    sizes = {parts[3]: int(parts[1], 16) for line in sizes.splitlines()
+             if len(parts := line.split()) == 4}
+    probe.unlink()
+    align = sizes['heap_align_bytes']
+    heap_bytes = fit.number(heap) if heap is not None else sizes['default_heap_bytes']
+    heap_bytes = (heap_bytes + align - 1) // align * align
+    static_bytes = addresses['_fw_end'] - addresses['_fw_start']
+    if static_bytes < args.opensbi_bin.stat().st_size:
+        raise ValueError('OpenSBI ELF static span is smaller than the BIN')
+    runtime_bytes = static_bytes + max(hart_count * sizes['stack_bytes'] + heap_bytes,
+                                      2 * sizes['scratch_bytes'])
+    # The K3 FIT loads OpenSBI at 4 GiB. Cover the runtime span and any
+    # naturally aligned PMP rounding of its read-only and writable regions.
+    if not 0 < runtime_bytes <= 0x100000000:
+        raise ValueError('OpenSBI runtime span exceeds the supported K3 load window')
+    reserve_bytes = max(4096, 1 << (runtime_bytes - 1).bit_length())
+    return {'source': 'OpenSBI ELF, bundled generic platform headers and generated U-Boot FIT DTB',
+            'elf_sha256': sha(elf), 'dtb_sha256': hashlib.sha256(dtb).hexdigest(),
+            'static_bytes': static_bytes, 'hart_count': hart_count,
+            'stack_bytes_per_hart': sizes['stack_bytes'], 'heap_bytes': heap_bytes,
+            'runtime_bytes': runtime_bytes, 'reserve_bytes': reserve_bytes}
+
+
+def fastboot_download_limit(path):
+    pattern = (r'^[ \t]*(?:\(bootloader\)[ \t]*)?max-download-size:[ \t]*'
+               r'(0[xX][0-9a-fA-F]+|[0-9]+)[ \t]*$')
+    values = {int(value, 16 if value.lower().startswith('0x') else 10)
+              for value in re.findall(pattern, path.read_text(), re.MULTILINE)}
+    if len(values) != 1 or min(values) <= 0:
+        raise ValueError('expected one unambiguous max-download-size in the Fastboot log')
+    return values.pop()
+
+
 def build(args):
     if os.path.lexists(args.output):
         raise ValueError('output exists; use a new directory (failed builds are retained)')
@@ -254,9 +341,12 @@ def build(args):
     data = args.opensbi_bin.read_bytes()
     if not data or data.startswith((b'\x7fELF', b'\xd0\x0d\xfe\xed')):
         raise ValueError('--opensbi-bin must be a nonempty raw BIN')
-    if len(data) > args.opensbi_reserve_bytes:
+    if args.opensbi_reserve_bytes is not None and len(data) > args.opensbi_reserve_bytes:
         raise ValueError('OpenSBI BIN exceeds declared runtime reservation')
-    if args.max_download_bytes > 0x20000000:
+    if args.fastboot_log:
+        args.fastboot_log = args.fastboot_log.resolve(strict=True)
+        args.max_download_bytes = fastboot_download_limit(args.fastboot_log)
+    if args.max_download_bytes is not None and args.max_download_bytes > 0x20000000:
         raise ValueError('download limit exceeds pinned SPL fastboot buffer (0x20000000)')
     packager = Path(__file__).with_name('build-jupiter2-ram-boot-image.py')
     spec = importlib.util.spec_from_file_location('jupiter2_fit', packager)
@@ -382,12 +472,34 @@ def build(args):
     dtdata = fit.image_data(uroot.children['images'].children[dtname], ublob, utotal)
     verify_rpmi_dtb(fit, dtdata, contract)
     (records / 'opensbi-uboot.dtb').write_bytes(dtdata)
+    if args.opensbi_elf:
+        reservation = automatic_reservation(args, fit, dtdata, records)
+    else:
+        reservation = {'source': 'explicit argument', 'reserve_bytes': args.opensbi_reserve_bytes}
+    # verify_config validated the generated Kconfig used to build SPL.
+    spl_limit = int(config_values(source / '.config')['CONFIG_FASTBOOT_BUF_SIZE'], 0)
+    if args.max_download_bytes is not None and args.max_download_bytes > spl_limit:
+        raise ValueError('requested download limit exceeds the generated SPL buffer')
+    download_limit = args.max_download_bytes or spl_limit
+    manifest['ram_boot_limits'] = {
+        'opensbi': reservation,
+        'spl_config': 'records/uboot.config:CONFIG_FASTBOOT_BUF_SIZE',
+        'spl_buffer_bytes': spl_limit,
+        'effective_download_bytes': download_limit,
+        'download_source': 'explicit argument' if args.max_download_bytes else 'generated config',
+    }
+    if args.fastboot_log:
+        manifest['ram_boot_limits']['download_source'] = {
+            'fastboot_log': str(args.fastboot_log), 'sha256': sha(args.fastboot_log),
+        }
+    (records / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+
     run([sys.executable, packager, '--fsbl', source / 'FSBL.bin',
          '--uboot-itb', source / 'u-boot.itb', '--uboot-layout', 'reference',
          '--esos-itb', args.esos_itb, '--esos-configuration', args.esos_configuration,
          '--opensbi-bin', args.opensbi_bin, '--configuration', 'conf_11',
-         '--variant', args.variant, '--opensbi-reserve-bytes', args.opensbi_reserve_bytes,
-         '--max-download-bytes', args.max_download_bytes, '--output', args.output / 'release']
+         '--variant', args.variant, '--opensbi-reserve-bytes', reservation['reserve_bytes'],
+         '--max-download-bytes', download_limit, '--output', args.output / 'release']
         + (['--spl-measurement-log'] if args.spl_measurement_log else [])
         + (['--optee-bin', args.optee_bin] if args.optee_bin else []))
     manifest['host_tools'] = package_runtime_tools(args.output / 'release')
@@ -413,8 +525,15 @@ def main():
     parser.add_argument('--cross-compile', default=os.environ.get('CROSS_COMPILE', 'riscv64-unknown-linux-gnu-'))
     parser.add_argument('--esos-configuration', required=True)
     parser.add_argument('--variant', choices=('vendor', 'keystone'), required=True)
-    parser.add_argument('--opensbi-reserve-bytes', type=positive, required=True)
-    parser.add_argument('--max-download-bytes', type=positive, required=True)
+    reservation = parser.add_mutually_exclusive_group(required=True)
+    reservation.add_argument('--opensbi-reserve-bytes', type=positive)
+    reservation.add_argument('--opensbi-elf', type=Path,
+                             help='matching bundled generic OpenSBI ELF for automatic sizing')
+    download = parser.add_mutually_exclusive_group()
+    download.add_argument('--max-download-bytes', type=positive,
+                          help='override the generated SPL download limit with a lower value')
+    download.add_argument('--fastboot-log', type=Path,
+                          help='use max-download-size from a saved SPL Fastboot getvar log')
     parser.add_argument('--jobs', type=positive, default=min(os.cpu_count() or 1, 8))
     parser.add_argument('--optee-bin', type=Path, help='raw K3 OP-TEE Core tee.bin')
     parser.add_argument('--spl-measurement-log', action='store_true',
