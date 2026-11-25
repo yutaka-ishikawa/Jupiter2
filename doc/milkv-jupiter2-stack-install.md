@@ -1,10 +1,10 @@
 # Milk-V Jupiter2実機へのKeystoneソフトウェアスタック導入手順
 
-更新日：2026-11-20（JST）。対象：`yutaka-ishikawa/public`のK3スタックと本書のイメージ作成スクリプト。
+更新日：2026-11-20（JST）。対象：`yutaka-ishikawa/Jupiter2`のK3スタックと本書のイメージ作成スクリプト。
 実機調査・build経路は`6403232967178cb896fc761eb0038fdf9a85bd54`を基準とし、使用commitは取得時に記録する。
 
 対象はSpacemiT K3搭載Milk-V Jupiter2 SBCで、既存のboot firmware・Linux環境を残しながら、
-開発したOpenSBI＋Keystone SM、Linux、Keystone driver、SDK/Eyrieアプリを段階導入する。
+開発したOpenSBI＋Keystone SM、Linux、Keystone driver、SDK/Eyrieアプリ、OP-TEE関連を段階導入する。
 Jupiter（K1/M1）、Jupiter2 NX、Dev Kitにはそのまま適用しない。
 
 **現在のソースは実機導入を無条件に完了できる状態ではない。**
@@ -22,14 +22,14 @@ PMP条件を確定するまで書き込まない。以下の「停止条件」�
 | Eyrie・loader・アプリ | 実機Linuxの通常ファイル | `.ke`に含めて配置。Eyrie単体をNORへ書かない |
 | SDK | 開発ホスト | アプリ作成に使用。SDK全体を実機へ入れる必要はない |
 | QEMU・9p共有 | 開発ホスト専用 | 実機へ導入しない |
-| OP-TEE | 今回の導入対象外 | [同居設計](keystone-optee-coexistence-design.md)は未実装。TAも呼べる構成として扱わない |
+| OP-TEE | CoreはブートFIT、LinuxドライバとTA・supplicantは実機Linux側 | Core入りRAM起動FITと対応DTBを使い、署名済みTAとRV64 supplicantをrootfsに追加 |
 
 インストールは次の2段階で行い、第1段階の成功後だけ第2段階へ進む。
 
 | 段階 | 起動する組合せ | 実施内容 | 失敗時に戻すもの |
 | --- | --- | --- | --- |
 | 第1段階 | 新Linux＋既存OpenSBI | 第6章で配置。第7章でUARTからRAM上だけ新kernelを試し、成功後に永続化 | 元のLinux起動設定。既存OpenSBIは変更しない |
-| 第2段階 | 第1段階と同じ新Linux＋新OpenSBI／SM | 第8章でOpenSBIだけ更新し、同じkernelの起動を確認。その後第9章のEnclave試験 | まずOpenSBIを更新前へ戻す。必要ならLinux起動設定も元へ戻す |
+| 第2段階 | 第1段階と同じ新Linux＋新OpenSBI／SM | 第8章からブートイメージの導入手順へ進み、同じkernelの起動を確認。その後第9章のEnclave試験 | まずOpenSBIを更新前へ戻す。必要ならLinux起動設定も元へ戻す |
 
 第1段階ではKeystone driverをロードせず、Enclaveを実行しない。
 第2段階に入るために旧kernelへ戻す必要はない。
@@ -62,8 +62,8 @@ UFS上の1 MiB区画に収まる場合も、FSBLが実際にそこを読むと�
 実機へSSHして実行するコマンドではない。依存導入は開発PCのパッケージを変更する。
 
 ```bash
-git clone https://github.com/yutaka-ishikawa/public.git
-cd public
+git clone https://github.com/yutaka-ishikawa/Jupiter2.git
+cd Jupiter2
 git checkout main
 git rev-parse HEAD
 sudo bash scripts/install-build-deps.sh
@@ -100,6 +100,20 @@ OpenSBIは別ターゲットなので両方を指定する。
 `make install`、`make install-opensbi`はホスト側への配置であり実機へのインストールではない。
 `guest-overlay/`全体を実機の`/`へ展開してはいけない。QEMU向けのshutdown/reboot、
 BusyBox wrapper等が通常OSのコマンドを置き換えるため、次節では必要なファイルだけ取り出す。
+
+### OP-TEEのビルドと配置用成果物
+
+実機用OP-TEE Coreは[実機用ビルド手順の同梱構成](jupiter2-build-install-test.md#ram-boot-images)でビルドする。
+`.build-k3/optee-hardware/out/core/tee.bin` はRAM起動FITに組み込む。
+OpenSBIへ渡す実機用DTBのOP-TEEドメイン・MPXYと、Linux用DTBのOP-TEEノードを照合する。
+既存のNOR用bundle生成スクリプトはKeystone用FITを作る。OP-TEE同梱はRAM起動で検証する。
+
+Linuxの `.build-k3/linux/.config` で `CONFIG_TEE`、`CONFIG_OPTEE`、
+`CONFIG_RISCV_SBI_MPXY_MBOX` を確認する。fTPMを使う場合は `CONFIG_TCG_FTPM_TEE`
+と、対象DTBの登録経路も確認する。署名済みfTPM TAとRV64版 `tee-supplicant` は、
+同じ実機用Coreの `export-ta_rv64` を使い、
+[fTPMのクロスビルド手順](jupiter2-ftpm-ta-test.md#ftpm-taのクロスビルド)で作る。
+同手順の `OPTEE_OUT` は `$PWD/.build-k3/optee-hardware/out` を指定する。
 
 ## 4. 容量確認とインストールイメージ作成
 
@@ -341,7 +355,7 @@ OpenSBI区画全体と必要なNOR/GPT情報の読取りは
 で行う。MTD番号を固定せずname/type/offset/sizeを照合する。
 現在の販売元一式（FSBL、書込み用U-Boot、EDK2、ESOS、bootinfo、JSON等）は同一releaseで保存する。
 
-### 2段階のrollbackに使う記録
+### Linux起動設定の復旧用バックアップ
 
 第1段階のファイル配置や設定変更より前に、実機Linuxで保存する。
 `ROLLBACK`は以降の各章でも同じ絶対パスを指定する。実機外の作業PCにもコピーしておく。
@@ -353,63 +367,18 @@ mkdir -m 700 "$ROLLBACK"
 uname -r > "$ROLLBACK/original-kernel-release.txt"
 findmnt --target /boot > "$ROLLBACK/boot-mount.txt"
 lsblk -o NAME,PATH,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS > "$ROLLBACK/storage.txt"
-sudo cp -a /boot/env_k3.txt "$ROLLBACK/env_k3.txt"
+ENV_BACKUP="/boot/env_k3.txt.$(date +%Y%m%d-%H%M%S)"
+sudo test ! -e "$ENV_BACKUP"
+sudo test ! -L "$ENV_BACKUP"
+sudo cp -a -- /boot/env_k3.txt "$ENV_BACKUP"
+sudo cmp -- /boot/env_k3.txt "$ENV_BACKUP"
+sudo cp -a -- "$ENV_BACKUP" "$ROLLBACK/env_k3.txt"
 sha256sum "$ROLLBACK/env_k3.txt" > "$ROLLBACK/env_k3.txt.sha256"
 ```
 
+同じディレクトリの `env_k3.txt.<日付>` と、持ち出し用の復旧ディレクトリの両方に保存する。
 これは今回の`env_k3.txt`方式用。GRUB/extlinux方式では、実際に変更する設定を同様に保存する。
 旧kernel・旧initramfs・旧DTB・旧modulesを残し、新releaseが旧releaseと重複しないことを確認する。
-### OpenSBI区画の記録とバックアップ
-
-Linux設定を保存する`jupiter2-rollback-日時/`とは別に、
-`opensbi-partition-info-日時/`を作り、OpenSBI区画の情報・バックアップ・checksumをまとめて保存する。
-以下は今回のNOR `mtd5`を実機Linuxから読み出す手順で、区画への書込みは行わない。
-実際の起動元区画であることは、前節で参照した置換手順に従って確認する。
-
-```bash
-set -euo pipefail
-OPENSBI_INFO="$INFO_DIR/opensbi-partition-info-$(date +%Y%m%d-%H%M%S)"
-mkdir -m 700 "$OPENSBI_INFO"
-MTD_NAME=mtd5
-test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
-test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
-
-cat /proc/mtd > "$OPENSBI_INFO/proc-mtd.txt"
-printf '%s\n' "$MTD_NAME" > "$OPENSBI_INFO/mtd-name.txt"
-for field in name type size erasesize; do
-    cat /sys/class/mtd/"$MTD_NAME"/"$field" > "$OPENSBI_INFO/$field.txt"
-done
-if test -r /sys/class/mtd/"$MTD_NAME"/offset; then
-    cat /sys/class/mtd/"$MTD_NAME"/offset > "$OPENSBI_INFO/offset.txt"
-fi
-
-BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
-sudo dd if=/dev/"$MTD_NAME" of="$BACKUP" bs=64K status=progress
-test "$(stat -c %s "$BACKUP")" -eq "$(cat "$OPENSBI_INFO/size.txt")"
-(cd "$OPENSBI_INFO" && sha256sum opensbi-partition-before.bin) > "$BACKUP.sha256"
-```
-
-今回の実機では`opensbi-partition-before.bin`は393,216 bytesとなる。
-**作成後は、このdirectory全体を実機外の作業PCにもコピーする。**
-
-```text
-opensbi-partition-info-YYYYMMDD-HHMMSS/
-    ├── opensbi-partition-before.bin
-    ├── opensbi-partition-before.bin.sha256
-    ├── proc-mtd.txt
-    ├── mtd-name.txt
-    ├── name.txt
-    ├── type.txt
-    ├── size.txt
-    ├── erasesize.txt
-    └── offset.txt    sysfsで取得できる場合だけ
-```
-
-第10章のrollbackでは、取得済みのこのdirectoryを`OPENSBI_INFO`に指定して使う。
-新しいdirectoryを作り直したり、更新後の区画内容で元バックアップを上書きしたりしない。
-復旧用Linuxから実機のbootfsへアクセスできることも、起動先を変える前に確認する。
-Linuxが起動しない場合、元設定を同じ実機の通常シェルから戻すことはできないためである。
-
 ## 6. 新Linuxとアプリを追加配置する
 
 **第1段階の配置工程。OpenSBIは既存のまま変更しない。**
@@ -442,6 +411,36 @@ sudo install -m 0755 apps/hello.ke apps/hello-native.ke "/opt/keystone/$KREL/"
 設定し、Image・全modules・driverを再buildしてパッケージを作り直す。
 `build-linux-k3.sh`は毎回defconfigを再適用するため、`.config`だけを書き換えてから
 `make keystone`を再実行すると設定が戻る。固有releaseの導入はbuild設定にも反映して固定する。
+
+### OP-TEEのLinux側ファイルを追加配置する
+
+実機用CoreとLinux用DTBに適合するRV64の成果物を実機へ転送する。
+署名済みTAは `tee-supplicant` のTA検索先（通常 `/lib/optee_armtz/`）へ、
+`tee-supplicant` は実機OSの既存サービス設定で使うパスへ配置する。
+既存のファイルやサービス設定は第5章の復旧資料へ退避する。
+実機OSにサービスがなければ、試験時に転送した `tee-supplicant` を別端末で起動する。
+Keystone配布用bundleの `install-linux.sh` はこれらを自動配置しない。
+
+例えば、同じCore向けに作ったfTPM TAとsupplicantを実機の
+`$HOME/jupiter2-optee/` に転送した場合、既存サービスを使わない試験では以下のように配置する。
+既に同じ名前のTAやsupplicantがある場合は、先に既存ファイルと設定を退避する。
+
+```bash
+OPTEE_STAGE="$HOME/jupiter2-optee"
+FTPM_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
+sudo install -D -m 0644 "$OPTEE_STAGE/$FTPM_UUID.ta" "/lib/optee_armtz/$FTPM_UUID.ta"
+sudo install -D -m 0755 "$OPTEE_STAGE/tee-supplicant" /usr/local/sbin/jupiter2-tee-supplicant
+```
+
+起動後、既存の `tee-supplicant` サービスがない場合は別端末で
+`sudo /usr/local/sbin/jupiter2-tee-supplicant` を実行する。
+既存サービスがある場合はそのサービスを使用し、supplicantを二重起動しない。
+
+
+同梱FITから起動した後に `/dev/tee*` を確認し、外部TAのセッションを開いて
+コマンド応答を検査する。fTPMを有効にした場合は `/dev/tpmrmN` の登録と
+対象デバイスでのTPMコマンド応答を確認する。
+[デバイス経由の検査](jupiter2-ftpm-ta-test.md#linuxのtpmリソースマネージャー経由の試験)
 
 ### 配置したkernelのreleaseを確認する
 
@@ -665,136 +664,11 @@ Keystone driverを自動loadする設定は作らず、`insmod`・`modprobe keys
 第1段階が合格したら新Linuxの指定を維持し、第8章へ進む。
 失敗したら第2段階には進まず、[第1段階のrollback](#第1段階のrollback)で元の起動設定へ戻す。
 
-## 8. OpenSBIとSMを置換する
+## 8. ブートイメージの導入
 
-**第2段階。第1段階で起動確認できた新Linuxとその起動設定を維持し、OpenSBI＋SMだけを更新する。**
-第1段階で新kernelが起動しただけでは、firmwareの実機適合性を確認したことにはならない。
-第2章の条件を満たし、第5章の元OpenSBIバックアップと復旧手段を確認してから行う。
-
-以下に、今回のSPI NOR `mtd5`へ、転送済みbundleのITBを**実機Linuxから直接書き込む手順**を示す。
-開発PCやU-Bootプロンプトで実行するコマンドではない。
-使用中のOpenSBIロード元がこのNOR区画であることをUARTログ等で確認済みであることが前提。
-更新対象は`opensbi`だけで、U-Boot／EDK2の`uboot`区画、FSBL、ESOS、env、区画表は変更しない。
-
-### 8.1 実機にflashcpを用意する
-
-Bianbu上で`flashcp`がなければ、実機OSへmtd-utilsを導入する。
-
-```bash
-sudo apt-get update
-sudo apt-get install -y mtd-utils
-command -v flashcp
-```
-
-### 8.2 bundle内のITBと更新対象を確認する
-
-実機へ転送・展開した**`bundle/`の中へ移動してから**次を実行する。
-`BUNDLE`はその場の絶対パスとなるため、以下のfirmwareパスを別のcandidateディレクトリへ
-コピーし直す必要はない。ここでは第1段階で使った通常の全体bundleを使用する。
-
-```bash
-set -euo pipefail
-BUNDLE=$(pwd -P)
-test -f "$BUNDLE/kernelrelease.txt"
-test -s "$BUNDLE/firmware/fw_dynamic.itb"
-bash "$BUNDLE/tools/verify.sh"
-test "$(uname -r)" = "$(cat "$BUNDLE/kernelrelease.txt")"
-
-MTD_NAME=mtd5
-cat /proc/mtd
-test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
-test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
-test "$(cat /sys/class/mtd/"$MTD_NAME"/size)" -eq 393216
-python3 "$BUNDLE/tools/check-capacity.py" \
-    --image "$BUNDLE/firmware/fw_dynamic.itb" --mtd "$MTD_NAME"
-```
-
-実際に書くのは**`$BUNDLE/firmware/fw_dynamic.itb`**。
-`fw_dynamic.bin`、`bundle.tar.gz`、Linuxの`Image`をOpenSBI区画へ書いてはいけない。
-検査が失敗した場合は、以降を実行せず原因を確認する。
-
-### 8.3 元OpenSBIのバックアップを指定する
-
-第5章で作成した`opensbi-partition-info-日時/`を指定する。
-以下を実行すると保存先を質問するので、**実際のdirectoryの絶対パス**を入力する。
-新しく空のdirectoryを作るのではなく、取得済みの元バックアップを指定する。
-
-```bash
-read -r -p '第5章のopensbi-partition-infoディレクトリの絶対パス: ' OPENSBI_INFO
-test -d "$OPENSBI_INFO"
-BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
-test -s "$BACKUP"
-test "$(stat -c %s "$BACKUP")" -eq 393216
-(cd "$OPENSBI_INFO" && sha256sum -c opensbi-partition-before.bin.sha256)
-```
-
-**このdirectory全体を実機外の作業PCへコピー済みであることを確認する。**
-元firmwareでFDL復旧できるFSBL・U-Boot等もPC側へ用意しておく。
-バックアップが読めることだけでなく、実際の復旧経路を確認してから書き込む。
-
-### 8.4 mtd5へ書き込み、読み戻す
-
-ここからが実機NORへの書込みである。
-上記検査とバックアップを確認した同じBashセッションで実行する。
-
-```bash
-sudo flashcp -v "$BUNDLE/firmware/fw_dynamic.itb" /dev/"$MTD_NAME"
-sync
-```
-
-`flashcp`は対象NORの必要な消去blockを消去し、ITBを書き込んで検証する。
-エラーなら再起動せず、第10章の第2段階rollbackへ進む。
-
-成功したら、区画全体もファイルへ読み戻し、ITBの長さ分が元イメージと一致するか照合する。
-
-```bash
-READBACK=$(mktemp "$OPENSBI_INFO/opensbi-after-XXXXXX.bin")
-sudo dd if=/dev/"$MTD_NAME" of="$READBACK" bs=64K status=progress
-test "$(stat -c %s "$READBACK")" -eq "$(cat /sys/class/mtd/"$MTD_NAME"/size)"
-cmp -n "$(stat -c %s "$BUNDLE/firmware/fw_dynamic.itb")" \
-    "$BUNDLE/firmware/fw_dynamic.itb" "$READBACK"
-sha256sum "$BUNDLE/firmware/fw_dynamic.itb" "$READBACK"
-sync
-```
-
-`cmp`が終了code 0なら、書き込んだITB部分は一致している。
-区画全体の読戻しはITBより大きいため、上記二つのSHA-256が同じになるとは限らない。
-読戻しファイルは`opensbi-partition-info-日時/`内に残し、書込み後の記録として使う。
-
-**書込みまたは照合に失敗した場合は、再起動しない。**
-第10章の「第2段階のrollback」に従い、動作中Linuxから元区画を復元・読戻し確認する。
-動作中LinuxはRAM上で実行しているが、次回起動時はNORの内容を使うため、
-区画が不完全な状態でリセットしない。
-
-### 8.5 再起動し、同じ新kernelで確認する
-
-書込みと読戻し照合が成功し、UART端末のログ保存を開始してから再起動する。
-
-```bash
-sudo reboot
-```
-
-UARTで新OpenSBIの固有build情報、SM初期化、全hart、timer/IPIを照合する。
-SBI versionが同じというだけでは、新firmwareを使っている証拠にしない。
-Linuxへ到達したら、今回の新kernelのreleaseを確認する。
-
-```bash
-uname -r
-# 今回の期待値：6.18.3
-```
-
-第1段階と同じkernelで通常動作が確認できてから、第9章のdriverロード・hello実行へ進む。
-PMP/admissionエラーやkernel起動失敗があれば、
-[第2段階のrollback](#第2段階のrollback)で元OpenSBIへ戻す。
-同じkernelが既存OpenSBI上で動作する状態へ復旧し、新OpenSBI側の原因を調査する。
-
-### 別媒体やFDL経由で更新する場合
-
-上記は今回のNOR `mtd5`用で、GPT上のopensbi区画やNANDには適用しない。
-媒体が異なる場合、またはLinuxが起動せずFDLから更新する場合は、
-[OpenSBI置換手順](milkv-jupiter2-opensbi-replacement.md)の該当媒体の手順を使う。
-その場合も入力ITBは今回の`bundle/firmware/fw_dynamic.itb`とし、
-全体イメージの再flashや区画表変更を追加しない。
+ブートイメージを永続更新する場合は、[OpenSBIの区画バックアップ・導入・復旧手順](milkv-jupiter2-opensbi-replacement.md#capture-opensbi-partition)を使用する。
+OP-TEE同梱イメージの確認は、[実機向けビルド手順](jupiter2-build-install-test.md#ram-boot-images)と
+[USB RAM起動手順](jupiter2-ram-boot-guide.md)に従う。
 
 ## 9. 実機での基本確認
 
@@ -923,52 +797,9 @@ UARTのU-Bootから旧kernelを一時起動する方法を使う場合も、実�
 削除対象は第6章の配置先と実際の生成物を照合し、実行中kernelや旧releaseを対象にしない。
 部分配置が残ると再実行が拒否されるため、再インストール前に整理する。
 
-### 第2段階のrollback
+### OpenSBIを復旧する場合
 
-目標はまず**第1段階で確認済みの新Linux＋元OpenSBI**へ戻すこと。
-kernelと`env_k3.txt`は第1段階の合格状態を維持し、OpenSBI区画だけを元に戻す。
-旧kernelを選ぶだけでは、新OpenSBIの問題は解消しない。
-
-| 失敗した時点 | 対処 |
-| --- | --- |
-| 容量検査等で停止し、まだ書き込んでいない | OpenSBIはそのまま。新kernel＋既存OpenSBIでの状態を維持 |
-| erase／書込み／読戻しに失敗したがLinuxが動作中 | 再起動せず、退避済みの元区画全体を復元し、読戻し一致を確認 |
-| 再起動後にLinuxまで到達しない | FDLから販売元FSBLとU-BootをRAM起動し、元OpenSBIを復元 |
-| 新Linuxは起動するがSMやhelloが失敗 | ログを保存し、必要なら元OpenSBIを復元。旧firmware上でEnclaveを再実行しない |
-
-今回のNOR `mtd5`をLinuxから復元する例。
-番号は毎回name/type/sizeで照合し、保存したバックアップがその区画のものであることを確認する。
-
-```bash
-set -euo pipefail
-# TIMESTAMPは第5章で実際に作成したdirectory名の日時に置き換える
-OPENSBI_INFO="$PWD/opensbi-partition-info-TIMESTAMP"
-MTD_NAME=mtd5
-BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
-test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
-test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
-test "$(stat -c %s "$BACKUP")" -eq "$(cat /sys/class/mtd/"$MTD_NAME"/size)"
-# 保存時のSHA-256と一致することを確認してから復元する
-(cd "$(dirname "$BACKUP")" && sha256sum -c "$(basename "$BACKUP").sha256")
-sudo flashcp -v "$BACKUP" /dev/"$MTD_NAME"
-READBACK=$(mktemp "$OPENSBI_INFO/opensbi-readback-XXXXXX.bin")
-sudo dd if=/dev/"$MTD_NAME" of="$READBACK" bs=64K status=progress
-sudo cmp "$BACKUP" "$READBACK"
-sync
-```
-
-`OPENSBI_INFO`は保存先が異なる場合、その実際の絶対パスを指定する。
-読戻しファイルも同じdirectory内に残り、復元結果の記録に使える。
-復元と読戻しが成功するまで再起動しない。エラー時は復旧環境を使う。
-再起動後、UARTで元OpenSBIの識別情報と新kernelの起動を確認する。
-
-Linuxが起動しない場合のFDL手順、および使用中区画がGPTの場合の復旧は、
-[OpenSBI置換手順の第10章](milkv-jupiter2-opensbi-replacement.md#10-起動しない場合の復旧)に従う。
-保存済みの実機に対応するFSBL/U-BootをRAMへロードし、使用中の`opensbi`だけを戻す。
-`uboot`区画がU-BootかEDK2かを勝手に変更せず、FSBL・ESOS・env・区画表も一括更新しない。
-
-導入前の状態へ完全に戻す場合は、元OpenSBIで正常起動することを確認した後、
-第1段階のrollbackも行って元のLinux指定へ戻す。
+[ブートイメージの復旧手順](milkv-jupiter2-opensbi-replacement.md#restore-stack-opensbi)を参照する。
 
 ### 正式採用
 

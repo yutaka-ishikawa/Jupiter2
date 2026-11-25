@@ -109,6 +109,58 @@ sha256sum opensbi-partition-before.bin
 
 可能ならNOR全体も、マスターデバイスが公開されていればその読み出し、そうでなければ全MTDパーティションの個別読み出しで保存する。書き込み用Linuxツールを使う場合は `mtd-utils` が必要。
 
+<a id="capture-opensbi-partition"></a>
+### OpenSBI区画の記録とバックアップ
+
+Linux設定を保存する`jupiter2-rollback-日時/`とは別に、
+`opensbi-partition-info-日時/`を作り、OpenSBI区画の情報・バックアップ・checksumをまとめて保存する。
+以下は今回のNOR `mtd5`を実機Linuxから読み出す手順で、区画への書込みは行わない。
+実際の起動元区画であることは、前節で参照した置換手順に従って確認する。
+
+```bash
+set -euo pipefail
+OPENSBI_INFO="$INFO_DIR/opensbi-partition-info-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$OPENSBI_INFO"
+MTD_NAME=mtd5
+test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
+test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
+
+cat /proc/mtd > "$OPENSBI_INFO/proc-mtd.txt"
+printf '%s\n' "$MTD_NAME" > "$OPENSBI_INFO/mtd-name.txt"
+for field in name type size erasesize; do
+    cat /sys/class/mtd/"$MTD_NAME"/"$field" > "$OPENSBI_INFO/$field.txt"
+done
+if test -r /sys/class/mtd/"$MTD_NAME"/offset; then
+    cat /sys/class/mtd/"$MTD_NAME"/offset > "$OPENSBI_INFO/offset.txt"
+fi
+
+BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
+sudo dd if=/dev/"$MTD_NAME" of="$BACKUP" bs=64K status=progress
+test "$(stat -c %s "$BACKUP")" -eq "$(cat "$OPENSBI_INFO/size.txt")"
+(cd "$OPENSBI_INFO" && sha256sum opensbi-partition-before.bin) > "$BACKUP.sha256"
+```
+
+今回の実機では`opensbi-partition-before.bin`は393,216 bytesとなる。
+**作成後は、このdirectory全体を実機外の作業PCにもコピーする。**
+
+```text
+opensbi-partition-info-YYYYMMDD-HHMMSS/
+    ├── opensbi-partition-before.bin
+    ├── opensbi-partition-before.bin.sha256
+    ├── proc-mtd.txt
+    ├── mtd-name.txt
+    ├── name.txt
+    ├── type.txt
+    ├── size.txt
+    ├── erasesize.txt
+    └── offset.txt    sysfsで取得できる場合だけ
+```
+
+[OpenSBIの復旧手順](#restore-stack-opensbi)では、取得済みのこのdirectoryを`OPENSBI_INFO`に指定して使う。
+新しいdirectoryを作り直したり、更新後の区画内容で元バックアップを上書きしたりしない。
+復旧用Linuxから実機のbootfsへアクセスできることも、起動先を変える前に確認する。
+Linuxが起動しない場合、元設定を同じ実機の通常シェルから戻すことはできないためである。
+
 ### 4.2 UFSなどGPTブロック媒体の場合
 
 `lsblk` とパーティション表で `opensbi` を特定する。`/dev/sda` などの番号を固定しない。対象ディスクに対する `sudo sfdisk --dump /dev/実際のディスク` も保存する。
@@ -308,6 +360,129 @@ sync
 
 上記ブロックはBashで実行する。`set -e` により検査失敗時は停止する。エラーが出たら原因を解消するまで後続の書き込みを実行しない。
 
+## Keystone配布用bundleからSPI NORを更新する
+
+**第2段階。第1段階で起動確認できた新Linuxとその起動設定を維持し、OpenSBI＋SMだけを更新する。**
+第1段階で新kernelが起動しただけでは、firmwareの実機適合性を確認したことにはならない。
+本書の適合条件を満たし、[元OpenSBIバックアップ](#capture-opensbi-partition)と復旧手段を確認してから行う。
+
+以下に、今回のSPI NOR `mtd5`へ、転送済みbundleのITBを**実機Linuxから直接書き込む手順**を示す。
+開発PCやU-Bootプロンプトで実行するコマンドではない。
+使用中のOpenSBIロード元がこのNOR区画であることをUARTログ等で確認済みであることが前提。
+更新対象は`opensbi`だけで、U-Boot／EDK2の`uboot`区画、FSBL、ESOS、env、区画表は変更しない。
+
+### 1 実機にflashcpを用意する
+
+Bianbu上で`flashcp`がなければ、実機OSへmtd-utilsを導入する。
+
+```bash
+sudo apt-get update
+sudo apt-get install -y mtd-utils
+command -v flashcp
+```
+
+### 2 bundle内のITBと更新対象を確認する
+
+実機へ転送・展開した**`bundle/`の中へ移動してから**次を実行する。
+`BUNDLE`はその場の絶対パスとなるため、以下のfirmwareパスを別のcandidateディレクトリへ
+コピーし直す必要はない。ここでは第1段階で使った通常の全体bundleを使用する。
+
+```bash
+set -euo pipefail
+BUNDLE=$(pwd -P)
+test -f "$BUNDLE/kernelrelease.txt"
+test -s "$BUNDLE/firmware/fw_dynamic.itb"
+bash "$BUNDLE/tools/verify.sh"
+test "$(uname -r)" = "$(cat "$BUNDLE/kernelrelease.txt")"
+
+MTD_NAME=mtd5
+cat /proc/mtd
+test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
+test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
+test "$(cat /sys/class/mtd/"$MTD_NAME"/size)" -eq 393216
+python3 "$BUNDLE/tools/check-capacity.py" \
+    --image "$BUNDLE/firmware/fw_dynamic.itb" --mtd "$MTD_NAME"
+```
+
+実際に書くのは**`$BUNDLE/firmware/fw_dynamic.itb`**。
+`fw_dynamic.bin`、`bundle.tar.gz`、Linuxの`Image`をOpenSBI区画へ書いてはいけない。
+検査が失敗した場合は、以降を実行せず原因を確認する。
+
+### 3 元OpenSBIのバックアップを指定する
+
+[区画の記録とバックアップ](#capture-opensbi-partition)で作成した`opensbi-partition-info-日時/`を指定する。
+以下を実行すると保存先を質問するので、**実際のdirectoryの絶対パス**を入力する。
+新しく空のdirectoryを作るのではなく、取得済みの元バックアップを指定する。
+
+```bash
+read -r -p 'opensbi-partition-infoディレクトリの絶対パス: ' OPENSBI_INFO
+test -d "$OPENSBI_INFO"
+BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
+test -s "$BACKUP"
+test "$(stat -c %s "$BACKUP")" -eq 393216
+(cd "$OPENSBI_INFO" && sha256sum -c opensbi-partition-before.bin.sha256)
+```
+
+**このdirectory全体を実機外の作業PCへコピー済みであることを確認する。**
+元firmwareでFDL復旧できるFSBL・U-Boot等もPC側へ用意しておく。
+バックアップが読めることだけでなく、実際の復旧経路を確認してから書き込む。
+
+### 4 mtd5へ書き込み、読み戻す
+
+ここからが実機NORへの書込みである。
+上記検査とバックアップを確認した同じBashセッションで実行する。
+
+```bash
+sudo flashcp -v "$BUNDLE/firmware/fw_dynamic.itb" /dev/"$MTD_NAME"
+sync
+```
+
+`flashcp`は対象NORの必要な消去blockを消去し、ITBを書き込んで検証する。
+エラーなら再起動せず、[元OpenSBIの復旧手順](#restore-stack-opensbi)へ進む。
+
+成功したら、区画全体もファイルへ読み戻し、ITBの長さ分が元イメージと一致するか照合する。
+
+```bash
+READBACK=$(mktemp "$OPENSBI_INFO/opensbi-after-XXXXXX.bin")
+sudo dd if=/dev/"$MTD_NAME" of="$READBACK" bs=64K status=progress
+test "$(stat -c %s "$READBACK")" -eq "$(cat /sys/class/mtd/"$MTD_NAME"/size)"
+cmp -n "$(stat -c %s "$BUNDLE/firmware/fw_dynamic.itb")" \
+    "$BUNDLE/firmware/fw_dynamic.itb" "$READBACK"
+sha256sum "$BUNDLE/firmware/fw_dynamic.itb" "$READBACK"
+sync
+```
+
+`cmp`が終了code 0なら、書き込んだITB部分は一致している。
+区画全体の読戻しはITBより大きいため、上記二つのSHA-256が同じになるとは限らない。
+読戻しファイルは`opensbi-partition-info-日時/`内に残し、書込み後の記録として使う。
+
+**書込みまたは照合に失敗した場合は、再起動しない。**
+[元OpenSBIの復旧手順](#restore-stack-opensbi)に従い、動作中Linuxから元区画を復元・読戻し確認する。
+動作中LinuxはRAM上で実行しているが、次回起動時はNORの内容を使うため、
+区画が不完全な状態でリセットしない。
+
+### 5 再起動し、同じ新kernelで確認する
+
+書込みと読戻し照合が成功し、UART端末のログ保存を開始してから再起動する。
+
+```bash
+sudo reboot
+```
+
+UARTで新OpenSBIの固有build情報、SM初期化、全hart、timer/IPIを照合する。
+SBI versionが同じというだけでは、新firmwareを使っている証拠にしない。
+Linuxへ到達したら、今回の新kernelのreleaseを確認する。
+
+```bash
+uname -r
+# 今回の期待値：6.18.3
+```
+
+第1段階と同じkernelで通常動作が確認できてから、[Linuxスタックの動作確認](milkv-jupiter2-stack-install.md#9-実機での基本確認)へ進む。
+PMP/admissionエラーやkernel起動失敗があれば、
+[第2段階のrollback](#restore-stack-opensbi)で元OpenSBIへ戻す。
+同じkernelが既存OpenSBI上で動作する状態へ復旧し、新OpenSBI側の原因を調査する。
+
 ## 9. 読み戻しと動作確認
 
 Linuxから対象領域を読み戻し、FITの長さ分を比較する。以下の変数は、実際に書いたデバイスとする。
@@ -348,6 +523,54 @@ NORなら `flashcp -v opensbi-partition-before.bin /dev/実際のmtd番号`、GP
 同一媒体を認識できる復旧LinuxをUSB等から起動し、PARTUUIDと開始位置を照合して元パーティションを復元する。事前にこの復旧LinuxからUFS等を読み書きできることを確認しておく。NOR用JSONをUFS復旧の代わりに使用しない。
 
 FDLでUSB認識しない場合は、電源・ケーブル・ポート・ボタン操作を確認する。FSBLやeFuseを変更して復旧を試みない。
+
+<a id="restore-stack-opensbi"></a>
+### Keystone配布用bundleを導入したNORを復旧する
+
+目標はまず**第1段階で確認済みの新Linux＋元OpenSBI**へ戻すこと。
+kernelと`env_k3.txt`は第1段階の合格状態を維持し、OpenSBI区画だけを元に戻す。
+旧kernelを選ぶだけでは、新OpenSBIの問題は解消しない。
+
+| 失敗した時点 | 対処 |
+| --- | --- |
+| 容量検査等で停止し、まだ書き込んでいない | OpenSBIはそのまま。新kernel＋既存OpenSBIでの状態を維持 |
+| erase／書込み／読戻しに失敗したがLinuxが動作中 | 再起動せず、退避済みの元区画全体を復元し、読戻し一致を確認 |
+| 再起動後にLinuxまで到達しない | FDLから販売元FSBLとU-BootをRAM起動し、元OpenSBIを復元 |
+| 新Linuxは起動するがSMやhelloが失敗 | ログを保存し、必要なら元OpenSBIを復元。旧firmware上でEnclaveを再実行しない |
+
+今回のNOR `mtd5`をLinuxから復元する例。
+番号は毎回name/type/sizeで照合し、保存したバックアップがその区画のものであることを確認する。
+
+```bash
+set -euo pipefail
+# TIMESTAMPは区画バックアップで実際に作成したdirectory名の日時に置き換える
+OPENSBI_INFO="$PWD/opensbi-partition-info-TIMESTAMP"
+MTD_NAME=mtd5
+BACKUP="$OPENSBI_INFO/opensbi-partition-before.bin"
+test "$(cat /sys/class/mtd/"$MTD_NAME"/name)" = opensbi
+test "$(cat /sys/class/mtd/"$MTD_NAME"/type)" = nor
+test "$(stat -c %s "$BACKUP")" -eq "$(cat /sys/class/mtd/"$MTD_NAME"/size)"
+# 保存時のSHA-256と一致することを確認してから復元する
+(cd "$(dirname "$BACKUP")" && sha256sum -c "$(basename "$BACKUP").sha256")
+sudo flashcp -v "$BACKUP" /dev/"$MTD_NAME"
+READBACK=$(mktemp "$OPENSBI_INFO/opensbi-readback-XXXXXX.bin")
+sudo dd if=/dev/"$MTD_NAME" of="$READBACK" bs=64K status=progress
+sudo cmp "$BACKUP" "$READBACK"
+sync
+```
+
+`OPENSBI_INFO`は保存先が異なる場合、その実際の絶対パスを指定する。
+読戻しファイルも同じdirectory内に残り、復元結果の記録に使える。
+復元と読戻しが成功するまで再起動しない。エラー時は復旧環境を使う。
+再起動後、UARTで元OpenSBIの識別情報と新kernelの起動を確認する。
+
+Linuxが起動しない場合のFDL手順、および使用中区画がGPTの場合の復旧は、
+[OpenSBI置換手順の第10章](#10-起動しない場合の復旧)に従う。
+保存済みの実機に対応するFSBL/U-BootをRAMへロードし、使用中の`opensbi`だけを戻す。
+`uboot`区画がU-BootかEDK2かを勝手に変更せず、FSBL・ESOS・env・区画表も一括更新しない。
+
+導入前の状態へ完全に戻す場合は、元OpenSBIで正常起動することを確認した後、
+[Linux起動設定の復旧](milkv-jupiter2-stack-install.md#第1段階のrollback)も行って元のLinux指定へ戻す。
 
 ## 11. 根拠と実施上の境界
 

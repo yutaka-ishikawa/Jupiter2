@@ -116,9 +116,9 @@ PMPの16/32個混在は[対応計画と結果](doc/jupiter2-heterogeneous-pmp-pl
 <a id="capture-nor"></a>
 ### 2.3 NOR区画容量の確認とファームウェアのバックアップ
 
-[導入手順の第5章](doc/milkv-jupiter2-stack-install.md)で、
-同じ `INFO_DIR` の下に `opensbi-partition-info-日時/` と `jupiter2-rollback-日時/` を作り、
-区画情報・元OpenSBI・起動設定を保存します。
+[OpenSBI区画のバックアップ](doc/milkv-jupiter2-opensbi-replacement.md#capture-opensbi-partition)と
+[Linux起動設定のバックアップ](doc/milkv-jupiter2-stack-install.md#5-実機の現状記録とバックアップ)に従い、
+同じ `INFO_DIR` の下に区画情報・元OpenSBI・起動設定を保存します。
 バックアップのハッシュを記録し、対応する復旧方法と販売元FSBL/U-Bootの入手元も確認します。
 
 NORへ導入する場合は、既存の [容量確認スクリプト](scripts/check-jupiter2-install-capacity.py)
