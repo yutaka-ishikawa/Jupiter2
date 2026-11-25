@@ -44,19 +44,29 @@ LIST
 "$LINUX_OUT/usr/gen_init_cpio" "$OUT/init.list" > "$OUT/init.cpio"
 
 bootargs='console=ttyS0,115200 earlycon=sbi keep_bootcon printk.devkmsg=on rdinit=/init cma=512M@4G-16G ima_hash=sha256'
+timeout_seconds="${TIMEOUT:-180}"
 for mode in early late; do
     case "$mode" in
         early) args="$bootargs ima_test_ftpm=1" ;;
         late) args="$bootargs -- late" ;;
     esac
     log="$OUT/$mode.log"
-    printf 'Running %s fTPM registration, UART: %s\n' "$mode" "$log"
-    timeout "${TIMEOUT:-180}" "$QEMU" -accel tcg,thread=multi \
+    started=$SECONDS
+    printf 'Running %s fTPM registration (timeout %ss), UART: %s\n' "$mode" "$timeout_seconds" "$log"
+    if timeout "$timeout_seconds" "$QEMU" -accel tcg,thread=multi \
         -M jupiter2,wtm-rng=on \
         -cpu rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16 \
         -smp 16 -m 2G -display none -monitor none -serial stdio \
         -dtb "$BOOT_DTB" -bios "$SBI" -kernel "$IMAGE" \
         -initrd "$OUT/init.cpio" -append "$args" \
-        -device "loader,file=${TEE_ELF//,/,,}" > "$log" 2>&1
+        -device "loader,file=${TEE_ELF//,/,,}" 2>&1 |
+        python3 "$TESTS/jupiter2-ftpm-ima-progress.py" "$mode" "$log"; then
+        printf '[%s] QEMU finished in %ss\n' "$mode" "$((SECONDS - started))"
+    else
+        status=$?
+        printf '[%s] QEMU/logging failed after %ss (exit %s); UART: %s\n' \
+            "$mode" "$((SECONDS - started))" "$status" "$log" >&2
+        exit "$status"
+    fi
     python3 "$TESTS/jupiter2-ftpm-ima-verify.py" "$mode" "$log" "$OUT/probe"
 done
