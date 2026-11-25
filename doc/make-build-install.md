@@ -97,6 +97,7 @@ SMビルドの `KEYSTONE_RNG_BACKEND`・`KEYSTONE_CRYPTO_PROVIDER` もありま�
 | `LINUX_OUT` | `.build-k3/ftpm-ima-linux` | IMA用Linux Image、モジュール、initramfsツール、試験プログラムのビルド出力 |
 | `OUT` | `.build-k3/ftpm-ima` | initramfsとUARTログの出力先 |
 | `TIMEOUT` | `180` | 各QEMU起動の制限時間（秒） |
+| `SSTC` | `on` | QEMUのSstc設定（`on` または `off`）。既定値は同居試験の `--sstc on` と一致 |
 
 例えば、制限時間を変更する場合は次のとおり。
 

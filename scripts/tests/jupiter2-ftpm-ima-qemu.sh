@@ -45,6 +45,11 @@ LIST
 
 bootargs='console=ttyS0,115200 earlycon=sbi keep_bootcon printk.devkmsg=on rdinit=/init cma=512M@4G-16G ima_hash=sha256'
 timeout_seconds="${TIMEOUT:-180}"
+sstc="${SSTC:-on}"
+case "$sstc" in
+    on|off) ;;
+    *) printf 'Invalid SSTC value: %s (expected on or off)\n' "$sstc" >&2; exit 2 ;;
+esac
 for mode in early late; do
     case "$mode" in
         early) args="$bootargs ima_test_ftpm=1" ;;
@@ -61,7 +66,7 @@ for mode in early late; do
     printf 'Running %s fTPM registration (timeout %ss), UART: %s\n' "$mode" "$timeout_seconds" "$log"
     if timeout "$timeout_seconds" "$QEMU" -accel tcg,thread=multi \
         -M jupiter2,wtm-rng=on \
-        -cpu rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16 \
+        -cpu "rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16,sstc=$sstc" \
         -smp 16 -m 2G -display none -monitor none -serial stdio \
         -dtb "$test_dtb" -bios "$SBI" -kernel "$IMAGE" \
         -initrd "$OUT/init.cpio" -append "$args" \

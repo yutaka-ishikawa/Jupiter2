@@ -20,6 +20,8 @@ def main():
     next_report = start + 10
     fd = sys.stdin.fileno()
     pending = b''
+    bytes_received = 0
+    last_line = b''
     with Path(log_path).open('wb') as log:
         while True:
             ready, _, _ = select.select([fd], [], [], max(0, next_report - time.monotonic()))
@@ -29,15 +31,22 @@ def main():
                     if pending and MILESTONE.search(pending):
                         print(f'[{mode}] {pending.decode(errors="replace").strip()}', flush=True)
                     return
+                bytes_received += len(chunk)
                 log.write(chunk)
                 log.flush()
                 *lines, pending = (pending + chunk).split(b'\n')
                 for line in lines:
+                    if line.strip():
+                        last_line = line.strip()
                     if MILESTONE.search(line):
                         print(f'[{mode}] {line.decode(errors="replace").strip()}', flush=True)
             now = time.monotonic()
             if now >= next_report:
-                print(f'[{mode}] QEMU running for {int(now - start)}s; UART: {log_path}', flush=True)
+                elapsed = int(now - start)
+                print(f'[{mode}] QEMU running for {elapsed}s; UART: {bytes_received} bytes in {log_path}',
+                      flush=True)
+                if last_line:
+                    print(f'[{mode}] Last UART line: {last_line.decode(errors="replace")}', flush=True)
                 next_report = now + 10
 
 
