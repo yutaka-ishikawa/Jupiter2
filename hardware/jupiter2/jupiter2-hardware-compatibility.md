@@ -1,24 +1,101 @@
 # Milk-V Jupiter 2実機情報とKeystoneファームウェアの適合性
 
-調査日：2026-11-08（日本時間）  
-照合したソース：`4011d1c9d`（shutdown修正までを含む）
+最終更新日 2026-11-26（日本時間）
+初回調査 2026-11-08。初回比較ソースは `4011d1c9d`。
 
-## 結論
+## 移植時に使用した実機情報
 
-提供された`jupiter2-info.tar.gz`により、実機のCPU・メモリ・S-mode割り込み構成を具体的に確認できた。16 hart、24 MHzのtimebase、UART、S-mode IMSIC/APLICの主要条件は、現在のQEMU Jupiter2モデルと一致する。
+- 実機では販売元OpenSBIを使うUSB RAM起動でUFS上のLinux起動を確認済み。別名の
+  `Image-6.18.3-keystone` でもLinux起動とネットワーク接続を確認。
+  [RAM起動ガイド](../../doc/jupiter2-ram-boot-guide.md) · [実機起動記録](../../doc/jupiter2-ram-boot-procedure.md)
+- 実機の混在PMPはX100が16、A100が32エントリ。本移植では双方の16枠を使い、
+  A100の追加16枠（エントリ16〜31）は無効のまま維持する。混在PMPのQEMU試験では
+  全hartの起動とKeystoneサンプルが通った。同居QEMU試験でもKeystoneとOP-TEEの動作を確認済み。
+  以下のドキュメントは移植時の記録。
+  [混在PMP対応記録](../../doc/jupiter2-heterogeneous-pmp-plan.md)
+- 通常ビルドの最終NOR用FITが271,903バイトだった。対象機と今回生成した
+  FITで容量を再確認する。
+  [容量削減の測定結果](../../doc/jupiter2-firmware-size-reduction.md) · [実機用ビルド手順](../../doc/jupiter2-build-install-test.md)
 
-一方、**現在の`fw_dynamic.bin`を既存の実機用OpenSBI領域へそのまま書き込み、正常動作すると判断できる状態ではない**。主な理由は以下のとおり。
+添付版には、同梱構成で実機の全hartが起動し、KeystoneとOP-TEEのサンプルが通ったとの記載がある。
+実機ログと試験時のビルド情報は未照合のため、下の比較表では実機起動の判定を未確認とする。
 
-1. 照合したローカルバイナリは532,320バイトで、実機DTと起動引数にあるOpenSBI用NOR領域393,216バイト（384 KiB）に収まらない。
-2. Linuxから取得したDTBのroot compatibleは`spacemit,k3-pico-itx`のみで、現在のOpenSBI K3 platform overrideの対応文字列と一致しない。OpenSBIに最初に渡されるDTBが同じかは未確認。
-3. 実機はX100とA100の混成であり、現在のSMが固定している16 PMPエントリ等の前提を、両種類のCPUのM-mode実測値で確認できていない。
-4. 工場出荷側のLinuxはSstcを利用している。今回のLinux Sstc／SM M_TIMER共存、M-mode IPIによる全hartのPMP更新、実機のRPMI電源断は未実行。
+## 実機RAM起動バイナリの参照入力
 
-OpenSBIのベースがMilk-Vと同じK3ブランチであることはユーザーから確認済みである。K3固有の初期化を一から実装し直す話ではない。ただし、ブランチの一致はコミット・設定・起動用DT・Keystone追加部分・書き込み形式の一致を意味しない。
+過去の `reference-keystone-pmp32` について、提供された
+`reference-keystone-pmp32-records.tar.gz` 内の `build-manifest.json` と
+`commands.jsonl` を照合した。このビルドで `captures/` から直接読んだファイルはなかった。
 
-本調査は既存の実機ログとDTBの静的照合であり、改造ファームウェアを実機で起動した検証ではない。
+| 入力・設定 | ビルド記録 |
+| --- | --- |
+| OpenSBI | ビルド済みKeystone版 `fw_dynamic.bin`。SHA-256 `828efc179aa30e0eb18cb5822ad1ffeefa5057ef4aef9eb56ee41e2fa5525a62` |
+| ESOS | 当時の `work/jupiter2-ram-boot/original/esos.itb`、構成 `conf_dual`。SHA-256 `f6afe0f6bcc1f5448198a349819ce9c46d528d646abd358f6c11f66b9e871cd4` は現在の `vendor/esos.itb` と一致 |
+| FSBL・U-Boot | 固定ソース `4c294a06c14e46e9c9cc934373c3e63919703017` から生成、U-Boot FIT構成 `conf_11` |
+| サイズ設定 | OpenSBI予約 1,048,576バイト、SPL転送上限 536,870,912バイトを数値で指定 |
+
+現行ラッパーの既定動作では予約領域を生成したELFとDTBから算出し、SPL転送上限を
+生成SPLの設定から読む。採取ログを入力にするのは `FASTBOOT_LOG` を明示した場合。
+`20261124-165032/spl-fastboot.log` は過去の観測値の転記であり、過去のビルド記録に
+そのパスは現れない。NOR用bundleには対象機から採取した容量を別途渡す。
+[現行のビルド手順](../../doc/jupiter2-build-install-test.md)
+
+## 別の実機への導入前に比較する項目
+
+[READMEの採取手順](../../README.md#22-導入前の実機情報を採取)で新しい採取IDを作り、
+`hardware/jupiter2/captures/<採取ID>/` に保存する。次の表を採取先の
+`capture-notes.txt` に写し、「対象機の値・根拠」と「判定」を記入する。
+未取得の項目は未確認と記録する。ボードや起動条件が変わる場合は採取IDを分ける。
+
+### 採取差分をスクリプトで確認する
+
+リポジトリのルートから、対象機の採取ディレクトリ名を渡す。
+
+```bash
+CAPTURE_ID=20261126-090000  # 対象実機の採取IDに置き換える
+python3 scripts/compare-jupiter2-capture.py "$CAPTURE_ID"
+```
+
+比較基準はLinux・DTBが `20261108-075700`、ストレージ・NORが
+`20261120-101205`、SPL上限が `20261124-165032/spl-fastboot.log`。
+販売元4ファイルも比べる場合は、対象機に対応する一式を採取先の `vendor/` に置く。
+スクリプトは固定した参照ハッシュを使用するため、リポジトリの `vendor/` を
+差し替えた後でも比較基準は変わらない。
+
+結果は `MATCH`、`DIFFERENT`、`UNAVAILABLE`。終了コードは全項目一致が0、
+差分または未取得が1、入力エラーが2。DTBはSHA-256に加え、モデル、compatible、
+timebase、CPU・メモリ・予約領域を比較する。再構成DTBは項目比較に使う。
+起動設定やストレージ記録はファイルのSHA-256を比較し、差が出たファイルは個別に確認する。
+PMP CSR、実際に使用中の起動元、OP-TEEの動作はUARTや実機試験で別途確認する。
+
+
+| 比較項目 | 参照機の記録 | 対象機の値・根拠 | 判定 |
+| --- | --- | --- | --- |
+| ボード・ファームウェア | K3 Pico ITX。販売元4ファイルは `vendor/` に保存 | モデル、販売元リリース、4ファイルのSHA-256 | |
+| Linux版と構成 | 初回採取は `6.18.3-generic` | `uname.txt`、起動するImage・initrd・DTBの名前とハッシュ | |
+| CPU・PMP・timebase | X100×8、A100×8、PMP 16/32、24 MHz | `lscpu.txt`、`cpu-online.txt`、CPU種類別のM-mode UART記録 | |
+| RAMと予約メモリ | 下記の初回実機観測値 | `running.dtb`、`iomem.txt`、`meminfo.txt` | |
+| DTBの段階 | Linux原本は `spacemit,k3-pico-itx`、保存済みU-Boot FITの抽出DTBは `spacemit,k3` | 各段階のDTB、root compatible、SHA-256 | |
+| 起動媒体・Linux起動設定 | UFSからの起動記録あり | UART、`lsblk.txt`、`findmnt.txt`、PARTUUID、使用中の `env_k3.txt` 等 | |
+| OpenSBIのNOR区画 | `opensbi` はオフセット `0x1b0000`、393,216バイト、消去単位4,096バイト | `proc-mtd.txt`、`jupiter2-nor-capacity.json`、使用中の起動元 | |
+| SPL Fastboot転送上限 | 過去の問い合わせで `0x20000000`（512 MiB） | 対象SPLの `spl-fastboot.log` | |
+| OP-TEE同梱 | 実機起動未確認 | 実機用ドメイン・MPXY・メモリ予約、UART起動ログ、TA応答 | |
+
+DTBのハッシュ差は、同じ起動段階の原本同士で確認し、差があれば
+`compatible`、hart、メモリ、予約領域を比較する。NORの容量差は対象機の
+`capacity_bytes` をbundle作成へ渡す。SPLの転送上限はNOR容量と別に記録する。
+[実機用ビルド手順](../../doc/jupiter2-build-install-test.md) · [NORへの導入と復旧](../../doc/milkv-jupiter2-opensbi-replacement.md)
 
 ## 入力資料と記録の保存方針
+
+| 保存場所 | 採取・生成した内容 |
+| --- | --- |
+| `captures/20261108-075700/` | Linuxに渡されたDTB原本、CPU・メモリ配置と起動ログ |
+| `captures/20261120-101205/` | ストレージ・起動設定とOpenSBI区画のバックアップ |
+| `captures/20261124-165032/spl-fastboot.log` | 過去のSPL Fastboot実測値の転記。採取日は未確認 |
+| `vendor/` | `FSBL.bin`、`esos.itb`、`fw_dynamic.itb`、`u-boot.itb` および抽出DTB |
+
+販売元ファイルを変更したら `python3 scripts/extract-jupiter2-vendor-dtbs.py` で
+抽出DTBを更新する。実機採取と生成物の保存方法は[実機資料のREADME](README.md)を参照する。
 
 2026-11-08の調査で使用したアーカイブには、次の6ファイルが含まれていた。
 
@@ -121,9 +198,9 @@ riscv-timer: Timer interrupt in S-mode is available via sstc extension
 
 これは既存LinuxのS-mode側の動作証拠である。SMが使うM-mode IPIの配線、M-modeタイマー割り込み、全hartのPMP更新応答を確認した証拠ではない。Linux用DTBにはM-mode IMSIC/APLICのノードが見当たらないが、OpenSBIのfixup後のDTでは削除される場合があり、実機に存在しないという結論にはならない。
 
-## 現在のファームウェアとの差分・未解決条件
+## ビルド・導入条件と過去の比較記録
 
-### 1. NORのOpenSBI領域に現在のraw binが収まらない
+### 1. OpenSBI用NOR区画と過去のサイズ比較
 
 DTには次のパーティションがあり、Linux起動引数の`384K@1728K(opensbi)`とも一致する。
 
@@ -142,7 +219,7 @@ uboot@210000 {
 | 照合したローカル`fw_dynamic.bin` | 532,320バイト |
 | 超過分 | 139,104バイト |
 
-照合したファイルはSMトレースを有効にしてビルドしたもので、SHA-256は以下。
+初回に照合したファイルはSMトレースを有効にしてビルドしたもので、SHA-256は以下。
 
 ```text
 668bfa1a0c57351456117001f7f8b413825eaff7d8c2ce44ee2e0d6810caceed
@@ -150,7 +227,9 @@ uboot@210000 {
 
 このraw binを既存NORレイアウトの領域へ単純に書く方法は成立しない。領域外まで書くと、隣接するU-Boot領域に入る。FITヘッダー等を追加する場合は、その実際のコンテナサイズも評価する必要がある。
 
-今後の候補は、サイズ削減、対応する圧縮・ロード経路、またはブートチェーンと整合した領域変更である。いずれもFSBL等の読み込み方法を確認してから選ぶ。トレースを無効にした最終版についても別途実サイズを測り、収まると推測しない。
+その後、通常の `make opensbi` でBIN 270,248バイト、最終FIT 271,903バイトを確認した。
+導入時は今回生成した最終FITと対象機の実測区画容量を照合する。
+[サイズ削減調査](../../doc/jupiter2-firmware-size-reduction.md)
 
 ### 2. OpenSBIへ最初に渡されるDTBとroot compatible
 
@@ -170,22 +249,16 @@ compatible = "spacemit,k3-pico-itx";
 
 `fw_platform_lookup_special()`はrootのcompatibleを照合してplatform overrideを選ぶ。**このDTBをそのまま現在のOpenSBIへ渡した場合、K3 overrideは選ばれない。** その場合はCCI、クラスタ起動等の実機overrideも呼ばれない。以前のSstc抑止hookもこの影響を受けたが、現在のtimer共存処理はgeneric共通経路とSMの切替へ接続している。
 
-ただし、今回のDTBはLinux側で採取したものであり、OpenSBIが先に受け取ったDTBと同一かは分からない。U-Boot等がLinux用DTBを別途渡す構成もある。実際のOpenSBI入力DTBを確認する前に、compatibleの追加だけで問題を解決したとは判断しない。
-
-リポジトリ内の`k3-pico-itx.dts`は`spacemit,k3-pico-itx`に加えて`spacemit,k3`も指定しており、提供された実行中DTBとはこの点でも差がある。
+保存済みの販売元U-Boot FITから抽出した `vendor/u-boot-k3-pico-itx.dtb` の
+root compatibleは `spacemit,k3`。対象機のOpenSBIへの引き渡しを確認するには、
+使用したFITとUARTを照合する。Linuxから採取した `running.dtb` はLinux側の確認に使う。
 
 ### 3. PMP前提と混成CPU
 
-現在のSMビルドは以下を指定する。
-
-```text
--DKEYSTONE_K3_PMP_N_REG=16
--DK3_QEMU_PMP16=1
-```
-
-`platform.h`もPMP数16を固定し、SM側の証拠検査はQEMU向けに各hartのPMP数が16であることを要求する。全16 hartのオンライン状態や共通のPMP割り当てにも依存する。
-
-今回の情報にはPMP CSRの個数・粒度・アドレス幅・配置・ロック状態・`mseccfg`・ベンダーPMACFGの実測値がない。X100とA100の双方について、M-modeで採取した値を確認する必要がある。Linuxの`/proc/cpuinfo`やオンラインCPU数からは代替できない。
+実機ログでX100が16、A100が32エントリと確認された。初期版ではA100のPMP設定が
+`-2` を返し、CPU起動に失敗した。現在の通常SMビルドは `KEYSTONE_PMP_PROFILE=mixed`
+を既定とする。対象機では全hartのPMP読戻しとLinuxのオンラインCPU数を確認する。
+[実機ログと修正候補の試験](../../doc/jupiter2-heterogeneous-pmp-plan.md)
 
 ### 4. Sstcと固定オンラインポリシー
 
@@ -213,15 +286,10 @@ Keystone構成ではhart STOP/SUSPENDを拒否するため、工場出荷側と�
 
 ## 次に必要な情報と検証順序
 
-今回の6ファイルで分かった事項を再収集する必要はない。追加で重要なのは次である。
-
-1. **実際に動いているOpenSBIのコミット・defconfig・ビルドコマンド、およびOpenSBI入力DTB。** Linux用DTと初期化用DTの差、K3 override、RPMI・M-mode割り込みノードを確定する。
-2. **電源投入直後からLinuxまでのシリアルログ。** 今回の`dmesg.txt`はLinux以降で、OpenSBIバナー、PMP情報、選択されたreset/IPI/timerデバイスは含まれない。
-3. **FSBL・OpenSBI・U-Bootのパッケージ構造とロード条件。** 384 KiBの制約、圧縮対応、実ロード先、実際に読み込むサイズとコンテナ形式を確定する。
-4. **X100/A100各hartのPMP・PMACFG等のM-mode診断。** ブートhartだけでなく両CPU種類と全hartの割り当てを確認する。既存コードには読み取り診断用の`K3_PMP_DIAG_READONLY`や`K3_A1_DIAG_PMP_SNAPSHOT`があるが、採取方法はベンダーの正常ブート経路と照合して用意する。
-5. **実機での段階的実行確認。** まずベンダー基盤と配置を合わせたLinux起動、全hart起動、M-modeタイマー/IPI、helloの実行・終了・繰り返し、各CPU種類への固定実行、最後にshutdown/rebootを確認する。
-
-アプリが動くことと、PMP・DMAを含むenclaveの隔離保証は別の検証である。本報告は移植・起動の適合性を評価したもので、後者の保証を追加するものではない。
+1. 対象機の採取結果を比較表へ記入し、使用中の起動媒体、販売元リリース、復旧用データを確定する。
+2. 生成したFSBL・統合FITをUSBからRAMに転送し、DDR、ESOS、OpenSBI、U-Boot、Linuxの到達点をUARTで記録する。
+3. Keystone採用時は全hartと両CPU種類でサンプルを確認する。OP-TEE同梱時は実機DTBとCore起動、Linuxドライバ、TAの応答を確認する。
+4. NORへ導入する場合は、対象機の区画容量と今回の最終FITを照合し、復旧用バックアップと読戻し結果を保存する。
 
 ## 関連ソースと既存の調査記録
 
