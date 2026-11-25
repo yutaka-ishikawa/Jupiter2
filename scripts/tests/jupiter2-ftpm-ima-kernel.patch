@@ -1,0 +1,39 @@
+diff --git a/linux-k3/security/integrity/ima/ima_main.c b/linux-k3/security/integrity/ima/ima_main.c
+index ebaebccfb..7e30262c6 100644
+--- a/linux-k3/security/integrity/ima/ima_main.c
++++ b/linux-k3/security/integrity/ima/ima_main.c
+@@ -1225,6 +1225,17 @@ static int ima_kernel_module_request(char *kmod_name)
+ 
+ #endif /* CONFIG_INTEGRITY_ASYMMETRIC_KEYS */
+ 
++#include <linux/initrd.h>
++#include <linux/kmod.h>
++
++static bool ima_test_ftpm;
++
++static int __init ima_test_ftpm_setup(char *value)
++{
++	return kstrtobool(value, &ima_test_ftpm);
++}
++early_param("ima_test_ftpm", ima_test_ftpm_setup);
++
+ static int __init init_ima(void)
+ {
+ 	int error;
+@@ -1235,6 +1246,16 @@ static int __init init_ima(void)
+ 		return 0;
+ 	}
+ 
++	if (ima_test_ftpm) {
++		static char *argv[] = { "/ima-ftpm-prepare", NULL };
++		static char *envp[] = { "HOME=/", "PATH=/", NULL };
++
++		wait_for_initramfs();
++		error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
++		pr_info("QEMU fTPM preparation status=%d\n", error);
++		if (error)
++			return -ENODEV;
++	}
+ 	ima_appraise_parse_cmdline();
+ 	ima_init_template_list();
+ 	hash_setup(CONFIG_IMA_DEFAULT_HASH);
