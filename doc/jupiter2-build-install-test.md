@@ -1,6 +1,15 @@
 # Jupiter2実機用イメージのビルド・導入・試験
 
 USBで一時起動する場合はRAM起動用のFSBLと統合FITを作ります。
+
+生成されるファイルは次の2つです。
+
+- `$OUT/release/images/FSBL.bin`
+- `$OUT/release/images/ram-boot-keystone.itb`
+
+`$OUT` はビルド時に指定する出力ディレクトリです。以下の実行例では
+リポジトリ直下の `work/jupiter2-ram-boot/keystone-<日時>/` です。
+
 実機のOpenSBI用NOR区画へ導入する場合は、容量を採取して配布用bundleを作ります。
 以下はKeystone SMを含む現在のソースから実機向け候補を作る手順です。
 
