@@ -64,13 +64,14 @@ for mode in early late; do
     log="$OUT/$mode.log"
     started=$SECONDS
     printf 'Running %s fTPM registration (timeout %ss), UART: %s\n' "$mode" "$timeout_seconds" "$log"
+    # This unattended guest needs UART output only. Avoid tty job control.
     if timeout "$timeout_seconds" "$QEMU" -accel tcg,thread=multi \
         -M jupiter2,wtm-rng=on \
         -cpu "rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16,sstc=$sstc" \
         -smp 16 -m 2G -display none -monitor none -serial stdio \
         -dtb "$test_dtb" -bios "$SBI" -kernel "$IMAGE" \
         -initrd "$OUT/init.cpio" -append "$args" \
-        -device "loader,file=${TEE_ELF//,/,,}" 2>&1 |
+        -device "loader,file=${TEE_ELF//,/,,}" </dev/null 2>&1 |
         python3 "$TESTS/jupiter2-ftpm-ima-progress.py" "$mode" "$log"; then
         printf '[%s] QEMU finished in %ss\n' "$mode" "$((SECONDS - started))"
     else
