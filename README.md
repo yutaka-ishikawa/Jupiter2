@@ -309,7 +309,7 @@ bash scripts/run-k3.sh --image keystone --pmp-profile mixed
 | 入力・工程 | 手順 |
 | --- | --- |
 | 販売元OpenSBI、ESOS等の入手・抽出と確認 | [RAM起動の準備手順](doc/jupiter2-ram-boot-procedure.md) |
-| 固定ソースからFSBL/U-Bootと販売元版統合FITを生成 | [RAM起動ガイド第2章](doc/jupiter2-ram-boot-guide.md) |
+| 固定ソースからFSBL/U-Bootと販売元版統合FITを生成 | [実機用ビルド手順書](doc/jupiter2-build-install-test.md#ram-boot-images) |
 | ビルドしたSMのBINを使ってKeystone版を生成 | [SM起動・アプリ試験第4章](doc/jupiter2-keystone-app-test.md) |
 
 使用するスクリプトは`scripts/build-jupiter2-reference-ram-boot.py`です。

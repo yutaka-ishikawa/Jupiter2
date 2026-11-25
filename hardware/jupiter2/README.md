@@ -85,7 +85,7 @@ CPU型、PMPの粒度、対応デバイス自体が異なる場合は、該当�
    ボードや起動構成が変わった場合は、Linuxに渡されたDTBも再採取し、
    `captures/<新しい採取ID>/running.dtb` に保存する。以前の採取記録は保持する。
 3. 入力を変更した場合、または生成物がまだない場合は、上の抽出スクリプトを実行し、用途に応じて再生成する。
-   - **実機RAM起動**では [RAM起動ガイド](../../doc/jupiter2-ram-boot-guide.md) の
+   - **実機RAM起動**では [実機用ビルド手順書](../../doc/jupiter2-build-install-test.md#ram-boot-images) の
      参照ビルダー `scripts/build-jupiter2-reference-ram-boot.py` を実行する。
      ガイドに従って `fw_dynamic.itb` から `fw_dynamic.bin` を抽出し、
      対応する `esos.itb` と一緒に指定する。参照ビルダーは固定ソースから

@@ -1,96 +1,25 @@
 # Milk-V Jupiter2：RAMへ転送してLinuxを起動する手順
 
-更新日：2026-11-21。
+[実機用ビルド手順書](jupiter2-build-install-test.md#ram-boot-images)で
+`FSBL.bin` と統合FITを生成した後、このガイドで実機の起動を確認します。
+同じビルドから生成した2ファイルを対で使います。
+過去に販売元OpenSBIの構成で、USBからの手動転送とUFS上のLinux起動を実機で確認しました。
 
-**販売元OpenSBIを使い、修正したFSBL/U-BootとESOSをRAM起動し、UFS上のLinuxを起動できた実機手順。**
-今回ユーザーからLinux起動成功の報告を受けた。Keystone SM/Enclaveの実行確認とは分ける。
-新しい操作補助スクリプトはホストで検査済みで、補助スクリプト自体によるUSB転送は実機未確認。
-従来の手動操作と同じstage/continueを段階別に実行する。
-
-## 1. 使用するスクリプトと作業場所
-
-| ファイル | 実行場所と目的 |
-| --- | --- |
-| scripts/build-jupiter2-reference-ram-boot.py | 開発PC。固定ソースからFSBL/U-Bootをビルドし、販売元OpenSBIとESOSを組み込む |
-| scripts/run-jupiter2-ram-boot.py | 開発PC。RAM転送、またはUART用Linux起動コマンドの生成 |
-| release/tools/ram-boot.py | 上記操作スクリプトの同梱コピー。releaseだけをPCへ持ち運んで使用できる |
-| scripts/tests/jupiter2-ram-boot/ | 開発PC専用のホスト回帰試験。各先頭コメントに目的・検証範囲を記載 |
-
-PCの操作ターミナルとUART端末は分ける。PC用Python/BashをU-Bootへ入力しない。
-Linux用に生成するboot-linux.cmdは逆にUARTのU-Bootへ貼り付けるテキストで、PCのBashでは実行しない。
-
-ファームウェアはRAMへ転送する。Linux kernel/initrd/DTBは既存UFSから読む。
-OSストレージ全体をRAM化する手順ではなく、Linuxのrootfsは通常のrwで起動する。
-fastboot flash/erase、saveenv、env_k3.txtの編集は行わない。
-
-## 2. 開発PCの準備とイメージ作成
-
-Linux開発PCのpublicリポジトリのルートで実行する。
+開発PCのターミナルで、リポジトリのルートからビルド時の出力先と使用するFIT名を設定します。
+販売元OpenSBIで試験する場合は `FIT=ram-boot-vendor.itb` を指定します。
 
 ```bash
-git pull --ff-only
-PUBLIC_ROOT="$PWD"
-sudo apt-get update
-sudo apt-get install git build-essential python3 python3-dev python3-setuptools \
-  bison flex swig libssl-dev libgnutls28-dev libncurses-dev \
-  device-tree-compiler u-boot-tools lzop openssl bc fastboot
-```
-
-K3用RISC-V GCCを別途導入してPATHへ追加する。以下のprefixは今回の例で、導入した実名に合わせる。
-
-```bash
-export CROSS_COMPILE=riscv64-unknown-linux-gnu-
-"${CROSS_COMPILE}gcc" --version
-
-# 今回のSPLで実測したUSB転送上限。NORのopensbi区画容量ではない。
-SPL_DOWNLOAD_BYTES=0x20000000
-# 今回の販売元版で使用した実行時予約領域。別ビルドではBSS/heap/stack等も確認する。
-VENDOR_SBI_RESERVE_BYTES=0x00100000
-OUT="$PWD/work/jupiter2-ram-boot/reference-vendor-$(date +%Y%m%d-%H%M%S)"
-
-python3 scripts/build-jupiter2-reference-ram-boot.py \
-  --opensbi-bin hardware/jupiter2/vendor/fw_dynamic.bin \
-  --esos-itb hardware/jupiter2/vendor/esos.itb \
-  --esos-configuration conf_dual \
-  --variant vendor \
-  --opensbi-reserve-bytes "$VENDOR_SBI_RESERVE_BYTES" \
-  --max-download-bytes "$SPL_DOWNLOAD_BYTES" \
-  --cross-compile "$CROSS_COMPILE" \
-  --output "$OUT"
-
+JUPITER2_ROOT="$PWD"
+OUT=/absolute/path/to/build-output
 REL="$OUT/release"
+FIT=ram-boot-keystone.itb
 ```
 
-**このビルドコマンドの成功でFSBL.binとram-boot-vendor.itbを作る。**
-OpenSBI BINとESOS ITBは入手済みの販売元入力を指定する。BINはfw_dynamic.itbから正しく抽出したものを使う。
-ビルダーはOpenSBI/ESOS自体を再コンパイルしない。新しいFSBLと統合FITは必ず対で使用する。
+PC操作用の端末とUART端末を分けます。生成した `boot-linux.cmd` はUARTのU-Bootに入力します。
+ファームウェアをRAMに読み込み、Linuxのkernel・initrd・DTBはUFSから読みます。
+この手順では `fastboot flash`、`fastboot erase`、`saveenv` を使いません。
 
-```text
-work/jupiter2-ram-boot/reference-vendor-日時/
-├── source/                      固定ソースとビルド出力
-├── records/                     設定、差分、ELF/RPMI契約、ビルドログ
-└── release/
-    ├── README-RAM-BOOT.md
-    ├── images/
-    │   ├── FSBL.bin
-    │   └── ram-boot-vendor.itb
-    ├── tools/
-    │   ├── ram-boot.py
-    │   └── boot-linux.cmd        第7節で生成するUART用テキスト
-    ├── records/                 FIT一覧、manifest、SHA-256
-    └── logs/                    実際のUSB操作時に作るPCログ
-```
-
-ビルダーが適用する要点は、実ELFからRCPUの起動先を設定することと、
-有効なESOS RPMIサーバーからOpenSBI用DTのqueue設定を揃えること。
-今回のcore 1 entryは0x100804000、RPMIはcore 0の0x100800000だった。
-入力ごとに検査して反映し、これらを全入力へ固定値として流用しない。
-起動失敗を無視して先へ進む変更ではない。
-
-失敗時は$OUT/records/build.logを確認する。出力先が存在する場合は停止するので、
-前回の記録を残し、新しいOUTを指定する。--prepare-onlyはソース準備だけで、イメージは作らない。
-
-## 3. UART・USB接続と生成物の確認
+## 1. UART・USB接続と生成物の確認
 
 [UART接続手順](milkv-jupiter2-uart.md)に従い、PC側は115200 baud、8N1、フロー制御なし。
 UARTの全ログを保存する。USB fastbootはJupiter2のDRD Type-CをデータケーブルでPCへ接続する。
@@ -100,17 +29,17 @@ PCで生成物を確認する。
 ```bash
 cd "$REL"
 sha256sum -c records/FSBL.bin.sha256
-sha256sum -c records/ram-boot-vendor.itb.sha256
+sha256sum -c "records/$FIT.sha256"
 sha256sum -c records/host-tools.sha256
 ```
 
 イメージと実機の対応はmanifest、固定ソース差分、今回の検査記録で確認する。
 一般の別ボード用FSBLや別版ESOSとの組合せへそのまま適用しない。
 
-## 4. FSBLをRAMへ転送する（PC）
+## 2. FSBLをRAMへ転送する（PC）
 
 以下は**開発PCのターミナル**で直接入力する。UART端末では実行しない。
-作業ディレクトリは第2節で作ったreleaseである。
+作業ディレクトリは冒頭で指定した `$REL` です。
 Jupiter2を完全電源断し、FDLボタンを押して起動してから離す。
 DRD Type-CをデータケーブルでPCへ接続し、ROMのダウンロード待機にする。
 
@@ -136,10 +65,10 @@ sudo fastboot continue
 ```
 
 UARTでDDR training完了とmemory verify passを確認する。
-ROMのUSB機器がいったん消え、SPLとして再認識されるまで待ってから第5節へ進む。
+ROMのUSB機器がいったん消え、SPLとして再認識されるまで待ってから第3節へ進む。
 stageまたはDDR初期化に失敗した場合は、後続の転送を行わずログを保存する。
 
-## 5. 統合FITをRAMへ転送する（PC）
+## 3. 統合FITをRAMへ転送する（PC）
 
 引き続き**開発PCのターミナル**で実行する。
 今回のSPL serialはHW4MPK3321280144。他の実機ではdevicesの実測値を指定する。
@@ -148,8 +77,8 @@ stageまたはDDR初期化に失敗した場合は、後続の転送を行わず
 cd "$REL"
 sudo fastboot devices
 sudo fastboot -s HW4MPK3321280144 getvar max-download-size
-stat -c '%s bytes' images/ram-boot-vendor.itb
-sha256sum -c records/ram-boot-vendor.itb.sha256
+stat -c '%s bytes' "images/$FIT"
+sha256sum -c "records/$FIT.sha256"
 ```
 
 今回の転送上限の報告値は0x20000000（536870912 bytes、512 MiB）。
@@ -157,7 +86,7 @@ sha256sum -c records/ram-boot-vendor.itb.sha256
 上限を取得できない、serialが表示されない、FITが収まらない場合は次へ進まない。
 
 ```bash
-sudo fastboot -s HW4MPK3321280144 stage images/ram-boot-vendor.itb
+sudo fastboot -s HW4MPK3321280144 stage "images/$FIT"
 ```
 
 stageが成功したら、統合FITを実行する。
@@ -173,16 +102,15 @@ UARTで次を確認する。
 2. OpenSBIへの引渡しを経てU-Bootの=>へ到達。
 3. U-Bootの入出力がserialであること。
 
-ここで指定するのは販売元OpenSBI用ram-boot-vendor.itb。
-SM版のファイル名と試験順序は[Keystoneアプリ試験手順](jupiter2-keystone-app-test.md)を参照する。
+Keystone SM入りFITでの試験順序は[Keystoneアプリ試験手順](jupiter2-keystone-app-test.md)を参照する。
 
 この操作はflash/eraseを送らない。ファームウェア内部の自動保存までUSBコマンドだけで
 保証するものではなく、ビルダーはDDR情報保存・FSBL更新等を無効化している。
 UARTに書込み表示があれば、その操作も記録する。
 手動操作のPCログはターミナルのログ保存機能等で残す。UARTログも別途保存する。
-自動でPCログを残す操作補助スクリプトは第8節で紹介する。
+自動でPCログを残す操作補助スクリプトは第6節で紹介する。
 
-## 6. UFSと起動ファイルを確認する（UART）
+## 4. UFSと起動ファイルを確認する（UART）
 
 以下は**UART端末のU-Bootプロンプト（=>）**へ直接入力する。
 開発PCのBashでは実行しない。
@@ -207,11 +135,11 @@ kernel=/Image-6.18.3-keystone、initrd=/initrd.img-6.18.3、
 DTB=/spacemit/6.18.3-generic/k3-pico-itx.dtbを確認した。
 Partition Type: EFIはGPT形式の表示で、GRUBの起動指定ではない。
 別実機ではpart listとファイル一覧に合わせる。
-第7節の今回の例では修正DTBを使うため、準備後は同じディレクトリにk3-pico-itx-keystone.dtbがあることも確認する。
-このU-Bootのlsにはディレクトリを指定する。ファイル単体の読込みは第7節のload成功で確認する。
-これらのファイルを確認したら、第7節のLinux一時起動へ進む。
+第5節の今回の例では修正DTBを使うため、準備後は同じディレクトリにk3-pico-itx-keystone.dtbがあることも確認する。
+このU-Bootのlsにはディレクトリを指定する。ファイル単体の読込みは第5節のload成功で確認する。
+これらのファイルを確認したら、第5節のLinux一時起動へ進む。
 
-## 7. Linuxを一時起動する（UARTでコマンドを直接入力）
+## 5. Linuxを一時起動する（UARTでコマンドを直接入力）
 
 以下は**UART端末のU-Bootプロンプト（=>）**へ直接入力する、今回の実機の例。
 PCでコマンド生成スクリプトを実行する必要はない。
@@ -273,12 +201,12 @@ Image名が-keystoneでも、kernel releaseはビルド設定で決まる（今�
 販売元OpenSBIでの起動と、SM/Enclaveの成功は分ける。
 SM版でLinuxが起動した後のdriverとhello試験は[Keystoneアプリ試験手順](jupiter2-keystone-app-test.md#6-ドライバーとhello二種を試験する実機linux)を参照する。
 
-## 8. 操作補助スクリプトの紹介（任意）
+## 6. 操作補助スクリプトの紹介（任意）
 
-第4〜6節は上記のコマンドを直接入力して実施できる。
+第2〜4節は上記のコマンドを直接入力して実施できる。
 同じFSBL/FIT転送を補助するtools/ram-boot.pyも同梱している。
 補助スクリプトは画像checksum、ROM機器の台数、SPL serial、転送上限を検査し、PCログをlogs/へ保存する。
-UARTでの到達確認と第6節のUFS確認は利用者が行う。
+UARTでの到達確認と第4節のUFS確認は利用者が行う。
 
 新しく作ったrelease内で使う場合：
 
@@ -298,7 +226,7 @@ python3 tools/ram-boot.py --phase fit --serial HW4MPK3321280144 --sudo
 
 ### UART用Linux起動コマンドの生成（任意）
 
-第7節のコマンドは直接入力できる。必要なら開発PCのrelease内で次を実行し、
+第5節のコマンドは直接入力できる。必要なら開発PCのrelease内で次を実行し、
 同等のload失敗時の停止分岐付きテキストを生成できる。このPC操作だけではLinuxは起動しない。
 
 ```bash
@@ -315,21 +243,21 @@ cat tools/boot-linux.cmd
 
 ### 既存releaseをそのまま使う場合
 
-以前作ったreleaseにはtools/がない。再ビルドしなくても、更新したpublicの操作スクリプトを使える。
+以前作ったreleaseにはtools/がない。再ビルドしなくても、更新したJupiter2の操作スクリプトを使える。
 RELを既存のreleaseの絶対パスへ設定し、開発PCで実行する。
 
 ```bash
-python3 "$PUBLIC_ROOT/scripts/run-jupiter2-ram-boot.py" \
+python3 "$JUPITER2_ROOT/scripts/run-jupiter2-ram-boot.py" \
   --release "$REL" --phase fsbl --sudo
-python3 "$PUBLIC_ROOT/scripts/run-jupiter2-ram-boot.py" \
+python3 "$JUPITER2_ROOT/scripts/run-jupiter2-ram-boot.py" \
   --release "$REL" --phase fit --serial HW4MPK3321280144 --sudo
 ```
 
-二つを一括貼付けせず、間に第4節のDDR完了とSPL再認識を確認する。
+二つを一括貼付けせず、間に第2節のDDR完了とSPL再認識を確認する。
 Linux用テキストも同じスクリプトの--phase linuxで生成できる。
 既存releaseはreference builder由来で、records/manifest.jsonと画像checksumが必要。
 
-## 9. 失敗時と記録
+## 7. 失敗時と記録
 
 PC側の失敗時は後続stage/continueを実行しない。logs/とrecords/を保存する。
 UART側の失敗では、最後の表示だけでなく起動先頭からのログを保存する。
@@ -346,12 +274,12 @@ UART側の失敗では、最後の表示だけでなく起動先頭からのロ�
 | ファイル読込み失敗 | bootfs番号、ファイル名、DTB指定を確認。生成テキストはbootiへ進まない |
 | kernel panic/root mount失敗 | bootiからの全ログ、root PARTUUID、kernel/modules/initrdの対応を確認 |
 
-## 10. ホスト試験と調査記録
+## 8. ホスト試験と調査記録
 
 ホスト回帰試験は専用ディレクトリに集約した。テストが作る形式試験用イメージは実機へ転送しない。
 
 ```bash
-cd "$PUBLIC_ROOT"
+cd "$JUPITER2_ROOT"
 # 完全なホスト試験には、通常依存に加えRISC-V対応LLVMが必要。
 sudo apt-get install clang lld
 bash scripts/tests/jupiter2-ram-boot/run-host-tests.sh
@@ -364,7 +292,7 @@ USB操作やCPU/SBI/PMPの模擬はしない。新しい操作補助ツールに
 [段階別の実機記録とテスト手順](jupiter2-reference-ram-boot-tests.md)、
 [障害台帳](keystone-bug-report.md)を参照する。
 
-## 11. 次にKeystoneアプリを試験する
+## 9. 次にKeystoneアプリを試験する
 
 販売元OpenSBIでLinuxが起動したことと、SM/Enclaveが動くことは別の段階。
 提供Linux用DTBには、SMのM-only mailboxページ内の直接controllerが有効な不整合があった。

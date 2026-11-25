@@ -30,6 +30,7 @@ NOR用の包装スクリプトにはPython 3.11以上が必要です。
 採取した実機情報と `hardware/jupiter2/` の記録を照合します。
 [実機入力の管理](../hardware/jupiter2/README.md)
 
+<a id="ram-boot-images"></a>
 ## 1. RAM起動用のFSBLと統合FIT
 
 ```bash
@@ -79,6 +80,47 @@ FASTBOOT_LOG="$CAPTURE_DIR/spl-fastboot.log" \
 | `ESOS_ITB` | `hardware/jupiter2/vendor/esos.itb`。対象実機に対応するESOS FIT |
 | `ESOS_CONFIGURATION` | `hardware/jupiter2/vendor-fit.json` の `esos_configuration`（現在は `conf_dual`）。別のESOS構成を使う場合に上書き |
 | `FASTBOOT_LOG` | 未指定時は生成SPLの設定を使う。指定時は対象SPLの `getvar` 採取ログ |
+
+### 販売元OpenSBIで基準起動用のイメージを作る
+
+販売元の `fw_dynamic.itb` から `hardware/jupiter2/vendor/fw_dynamic.bin` を抽出します。
+[販売元OpenSBIの抽出手順](jupiter2-ram-boot-procedure.md)を参照してください。
+
+```bash
+sudo apt-get update
+sudo apt-get install git build-essential python3 python3-dev python3-setuptools \
+  bison flex swig libssl-dev libgnutls28-dev libncurses-dev \
+  device-tree-compiler u-boot-tools lzop openssl bc fastboot
+```
+
+K3用RISC-V GCCを別途導入してPATHへ追加する。以下のprefixは今回の例で、導入した実名に合わせる。
+
+```bash
+export CROSS_COMPILE=riscv64-unknown-linux-gnu-
+"${CROSS_COMPILE}gcc" --version
+
+# 今回のSPLで実測したUSB転送上限。NORのopensbi区画容量ではない。
+SPL_DOWNLOAD_BYTES=0x20000000
+# 今回の販売元版で使用した実行時予約領域。別ビルドではBSS/heap/stack等も確認する。
+VENDOR_SBI_RESERVE_BYTES=0x00100000
+OUT="$PWD/work/jupiter2-ram-boot/reference-vendor-$(date +%Y%m%d-%H%M%S)"
+
+python3 scripts/build-jupiter2-reference-ram-boot.py \
+  --opensbi-bin hardware/jupiter2/vendor/fw_dynamic.bin \
+  --esos-itb hardware/jupiter2/vendor/esos.itb \
+  --esos-configuration conf_dual \
+  --variant vendor \
+  --opensbi-reserve-bytes "$VENDOR_SBI_RESERVE_BYTES" \
+  --max-download-bytes "$SPL_DOWNLOAD_BYTES" \
+  --cross-compile "$CROSS_COMPILE" \
+  --output "$OUT"
+
+```
+
+生成先は `$OUT/release/images/` で、ファイルは `FSBL.bin` と
+`ram-boot-vendor.itb` です。
+
+### 生成イメージを実機で確認する
 
 実機では、生成したペアをUSBから転送し、UARTでOpenSBI・U-Boot・Linuxの順に
 起動を確認します。続けて実機向けのLinuxとKeystoneドライバで `hello` と
