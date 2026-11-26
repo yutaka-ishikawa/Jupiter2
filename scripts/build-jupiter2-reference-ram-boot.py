@@ -352,8 +352,13 @@ def build(args):
     spec = importlib.util.spec_from_file_location('jupiter2_fit', packager)
     fit = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fit)
-    if args.optee_bin and not (args.opensbi_dtb or args.opensbi_overlay):
-        raise ValueError('--optee-bin requires --opensbi-overlay or --opensbi-dtb for the actual board')
+    if args.optee_bin:
+        args.optee_bin = args.optee_bin.resolve(strict=True)
+        if not args.optee_bin.is_file() or not args.optee_bin.stat().st_size:
+            raise ValueError('--optee-bin must point to a nonempty tee.bin')
+    generate_optee_dtb = args.optee_bin and not (args.opensbi_dtb or args.opensbi_overlay)
+    if generate_optee_dtb and not args.prepare_only and not shutil.which('fdtput'):
+        raise ValueError('install device-tree-compiler for fdtput')
     if args.opensbi_overlay:
         args.opensbi_overlay = args.opensbi_overlay.resolve(strict=True)
         if not args.opensbi_overlay.is_file():
@@ -494,6 +499,15 @@ def build(args):
         manifest['opensbi_overlay'] = {
             'path': str(args.opensbi_overlay), 'sha256': sha(args.opensbi_overlay),
         }
+    elif generate_optee_dtb:
+        base_dtb = records / 'opensbi-uboot-base.dtb'
+        base_dtb.write_bytes(dtdata)
+        configured = records / 'opensbi-uboot.dtb'
+        uboot = uroot.children['images'].children['uboot']
+        entry = fit.number(uboot.props.get('entry', uboot.props['load']))
+        run([sys.executable, Path(__file__).with_name('prepare-jupiter2-optee-opensbi-dtb.py'),
+             base_dtb, configured, '--uboot-entry', hex(entry)])
+        dtdata = configured.read_bytes()
     verify_rpmi_dtb(fit, dtdata, contract)
     if args.optee_bin:
         fit.validate_optee_dtb(dtdata)
@@ -527,7 +541,7 @@ def build(args):
          '--variant', args.variant, '--opensbi-reserve-bytes', reservation['reserve_bytes'],
          '--max-download-bytes', download_limit, '--output', args.output / 'release']
         + (['--spl-measurement-log'] if args.spl_measurement_log else [])
-        + (['--opensbi-dtb', records / 'opensbi-uboot.dtb'] if args.opensbi_dtb or args.opensbi_overlay else [])
+        + (['--opensbi-dtb', records / 'opensbi-uboot.dtb'] if args.opensbi_dtb or args.opensbi_overlay or generate_optee_dtb else [])
         + (['--optee-bin', args.optee_bin] if args.optee_bin else []))
     manifest['host_tools'] = package_runtime_tools(args.output / 'release')
     manifest.update(status='packaged',

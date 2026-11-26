@@ -21,6 +21,10 @@ def prepare(opensbi_dtb, linux_dtb, output):
     fit['validate_optee_dtb'](firmware)
     root, _ = fit['parse_fdt'](firmware)
     dispatcher = root.children['chosen'].children['sbi-mpxy-opteed']
+    firmware_reserved = root.children.get('reserved-memory')
+    optee_reserved = {name: child.props['reg']
+                      for name, child in firmware_reserved.children.items()
+                      if name.startswith(('optee-core@', 'optee-shm@'))} if firmware_reserved else {}
     channels = [cell for cell, in struct.iter_unpack(
         '>I', dispatcher.props['riscv,sbi-mpxy-channel-id'])]
     if len(channels) != 16 or len(set(channels)) != 16:
@@ -58,6 +62,28 @@ def prepare(opensbi_dtb, linux_dtb, output):
         def edit(options, *arguments):
             subprocess.run(['fdtput', *options, str(staged), *arguments], check=True)
 
+        if optee_reserved:
+            reserved = root.children.get('reserved-memory')
+            if reserved is None:
+                edit(['-c'], '/reserved-memory')
+                for prop in ('#address-cells', '#size-cells'):
+                    edit(['-t', 'x'], '/reserved-memory', prop, '2')
+                edit([], '/reserved-memory', 'ranges')
+            elif (reserved.props.get('#address-cells') != struct.pack('>I', 2)
+                  or reserved.props.get('#size-cells') != struct.pack('>I', 2)
+                  or reserved.props.get('ranges') != b''):
+                raise ValueError('expected identity-mapped Linux reserved-memory with 64-bit cells')
+            for name, reg in optee_reserved.items():
+                start, size = struct.unpack('>QQ', reg)
+                for existing in reserved.children.values() if reserved else ():
+                    for base, length in struct.iter_unpack('>QQ', existing.props.get('reg', b'')):
+                        if start < base + length and base < start + size:
+                            raise ValueError(f'{name} overlaps Linux reservation {existing.name}')
+                path = f'/reserved-memory/{name}'
+                edit(['-c'], path)
+                edit(['-t', 'x'], path, 'reg',
+                     *(f'{cell:x}' for cell in struct.unpack('>IIII', reg)))
+                edit([], path, 'no-map')
         if add_handle:
             edit(['-t', 'x'], mailbox_path, 'phandle', handle.hex())
         edit(['-p', '-c'], '/firmware/optee')

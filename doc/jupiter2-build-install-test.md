@@ -215,22 +215,21 @@ VARIANT=keystone
 
 選んだ構成で設定した `SBI`、`OUT`、`VARIANT` と、1.2節の `TEE_BIN` を引き継ぎます。
 
-OpenSBI側は、販売元FITから抽出済みの
-`hardware/jupiter2/vendor/u-boot-k3-pico-itx.dtb` と
-参照ビルドの `records/opensbi-uboot.dtb` を実機構成の照合に使います。
-ビルダーは同じ参照U-Boot構成からベースDTBを再生成し、指定した実機向けDTオーバーレイを適用します。
-オーバーレイにはOP-TEEドメイン、Coreと共有メモリの予約、MPXY設定が必要です。
-以下のオーバーレイのパスは配置例です。実機向けオーバーレイは別途用意します。
-設定済みの実機DTBを持っている場合は `--opensbi-dtb` で直接指定できます。
+OpenSBI側は参照U-BootのPico-ITX用DTBをベースに、ビルド中に
+OP-TEEドメイン、Coreと共有メモリの予約、MPXY設定を生成します。
+ベースDTBは `records/opensbi-uboot-base.dtb` に保存します。
+この構成の実機起動とPMP割り当ては未検証です。
+
+実機向けの設定済みDTBやオーバーレイを既に用意している場合は、
+それぞれ `--opensbi-dtb` または `--opensbi-overlay` で指定できます。
 
 ```bash
-OPENSBI_OVERLAY="$PWD/work/jupiter2-opensbi-optee.dtbo"
 ESOS_CONFIGURATION=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["esos_configuration"])' \
   < hardware/jupiter2/vendor-fit.json)
 python3 scripts/build-jupiter2-reference-ram-boot.py \
   --opensbi-bin "$SBI.bin" --opensbi-elf "$SBI.elf" \
   --esos-itb hardware/jupiter2/vendor/esos.itb --esos-configuration "$ESOS_CONFIGURATION" \
-  --optee-bin "$TEE_BIN" --opensbi-overlay "$OPENSBI_OVERLAY" --variant "$VARIANT" --cross-compile "$CROSS_COMPILE" \
+  --optee-bin "$TEE_BIN" --variant "$VARIANT" --cross-compile "$CROSS_COMPILE" \
   --jobs 20 --output "$OUT"
 
 FIT="ram-boot-$VARIANT.itb"
@@ -261,8 +260,7 @@ fdtget -t x "$LINUX_OPTEE_DTB" /firmware/optee mboxes
 ```
 
 生成したLinux用DTBはUFSへ別名で配置し、U-Bootの `booti` に渡します。
-OpenSBI用DTBの実機ドメインポリシーは入力として用意する必要があります。
-QEMU用のメモリ範囲やPMP設定をそのまま流用しないでください。
+別のメモリ構成を使う場合は、対象実機用に検証したDTBまたはオーバーレイを指定します。
 
 [実機移植計画](jupiter2-optee-ftpm-porting-plan.md) · [同居設計](keystone-optee-coexistence-design.md)
 
