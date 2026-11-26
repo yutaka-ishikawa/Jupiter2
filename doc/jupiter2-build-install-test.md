@@ -35,6 +35,13 @@ export CROSS_COMPILE=riscv64-unknown-linux-gnu-
 "${CROSS_COMPILE}gcc" --version
 ```
 
+OP-TEE入りの構成をビルドする場合は、開発PCに `pyelftools` を導入し、Pythonから読み込めることを確認します。
+
+```bash
+sudo apt-get install python3-pyelftools
+python3 -c 'from elftools.elf.elffile import ELFFile'
+```
+
 K3用クロスツールチェーンをPATHに置き、接頭辞は導入したものに合わせます。
 NOR用の包装スクリプトにはPython 3.11以上が必要です。
 採取した実機情報と `hardware/jupiter2/` の記録を照合します。
@@ -148,9 +155,6 @@ python3 scripts/build-jupiter2-reference-ram-boot.py \
 未書き込み機ではHUKが必要な機能を検証する前に対象機の鍵構成を確認してください。
 
 ```bash
-sudo apt-get install python3-pyelftools
-python3 -c 'from elftools.elf.elffile import ELFFile'
-
 OPTEE_WORK="$PWD/.build-k3/optee-hardware"
 OPTEE_SRC="$OPTEE_WORK/optee_os"
 OPTEE_REV=2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59
@@ -211,13 +215,18 @@ VARIANT=keystone
 
 選んだ構成で設定した `SBI`、`OUT`、`VARIANT` と、1.2節の `TEE_BIN` を引き継ぎます。
 
+実機のU-Boot DTBをベースにOP-TEEドメイン、Coreと共有メモリの予約、MPXY設定を
+反映したDTBを用意し、`OPENSBI_DTB` に絶対パスを設定します。下のパスは配置例です。
+
+
 ```bash
+OPENSBI_DTB="$PWD/work/jupiter2-opensbi-optee.dtb"
 ESOS_CONFIGURATION=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["esos_configuration"])' \
   < hardware/jupiter2/vendor-fit.json)
 python3 scripts/build-jupiter2-reference-ram-boot.py \
   --opensbi-bin "$SBI.bin" --opensbi-elf "$SBI.elf" \
   --esos-itb hardware/jupiter2/vendor/esos.itb --esos-configuration "$ESOS_CONFIGURATION" \
-  --optee-bin "$TEE_BIN" --variant "$VARIANT" --cross-compile "$CROSS_COMPILE" \
+  --optee-bin "$TEE_BIN" --opensbi-dtb "$OPENSBI_DTB" --variant "$VARIANT" --cross-compile "$CROSS_COMPILE" \
   --jobs 20 --output "$OUT"
 
 FIT="ram-boot-$VARIANT.itb"
@@ -230,12 +239,26 @@ fdtget -t s "$OUT/release/images/$FIT" /configurations/conf_11 loadables
 `tee.elf` の配置と一致することを確認します。同梱構成とKeystoneのみのFITは
 同じファイル名になるため、出力ディレクトリで区別してください。
 
-**実機起動前に必要な作業**。参照ビルダーの `--optee-bin` はCoreを格納します。
-OpenSBIへ渡すDTBのOP-TEEドメインとMPXY設定を追加する機能はありません。
-`$OUT/records/opensbi-uboot.dtb` で、Coreへの初回引き渡し、対象hart、
-Core・共有メモリの予約、実機の周辺機器へのアクセスとPMP割り当てを照合してください。
-その設定を含む実機用U-Boot FITの準備と、その構成での起動検証が必要です。
-Linux用DTBのOP-TEEノードも別途確認します。
+指定したDTBはFITのFDTイメージに格納され、`$OUT/records/opensbi-uboot.dtb` にも保存されます。
+ビルダーはOP-TEEエントリアドレスとMPXYのドメイン参照を検証します。
+実機のhart構成、メモリ予約、PMP、Linux用DTBの `/firmware/optee` と
+MPXYチャネルの対応は別途確認します。
+Linux用DTBのMPXY接続は、同じOpenSBI用DTBから生成します。
+入力のLinux用DTBには対象実機で使用したものを指定します。
+
+```bash
+LINUX_DTB="$PWD/work/k3-pico-itx-keystone.dtb"
+LINUX_OPTEE_DTB="$OUT/release/images/k3-pico-itx-keystone-optee.dtb"
+python3 scripts/prepare-jupiter2-optee-linux-dtb.py \
+  "$OUT/records/opensbi-uboot.dtb" "$LINUX_DTB" "$LINUX_OPTEE_DTB"
+fdtget -t s "$LINUX_OPTEE_DTB" /firmware/optee compatible
+fdtget -t x "$LINUX_OPTEE_DTB" /firmware/optee mboxes
+```
+
+生成したLinux用DTBはUFSへ別名で配置し、U-Bootの `booti` に渡します。
+OpenSBI用DTBの実機ドメインポリシーは入力として用意する必要があります。
+QEMU用のメモリ範囲やPMP設定をそのまま流用しないでください。
+
 [実機移植計画](jupiter2-optee-ftpm-porting-plan.md) · [同居設計](keystone-optee-coexistence-design.md)
 
 ### 1.6 実機への配置と起動確認

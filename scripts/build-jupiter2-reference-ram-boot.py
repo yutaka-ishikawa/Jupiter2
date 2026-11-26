@@ -352,6 +352,12 @@ def build(args):
     spec = importlib.util.spec_from_file_location('jupiter2_fit', packager)
     fit = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fit)
+    if args.optee_bin and not args.opensbi_dtb:
+        raise ValueError('--optee-bin requires --opensbi-dtb for the actual board')
+    if args.opensbi_dtb:
+        args.opensbi_dtb = args.opensbi_dtb.resolve(strict=True)
+        if args.optee_bin:
+            fit.validate_optee_dtb(args.opensbi_dtb.read_bytes())
     root, esos_blob, esos_total = fit.read_fit(args.esos_itb)
     configs = root.children['configurations'].children
     if args.esos_configuration not in configs:
@@ -470,6 +476,8 @@ def build(args):
     selected = uroot.children['configurations'].children['conf_11']
     dtname = fit.string(selected, 'fdt')
     dtdata = fit.image_data(uroot.children['images'].children[dtname], ublob, utotal)
+    if args.opensbi_dtb:
+        dtdata = args.opensbi_dtb.read_bytes()
     verify_rpmi_dtb(fit, dtdata, contract)
     (records / 'opensbi-uboot.dtb').write_bytes(dtdata)
     if args.opensbi_elf:
@@ -501,6 +509,7 @@ def build(args):
          '--variant', args.variant, '--opensbi-reserve-bytes', reservation['reserve_bytes'],
          '--max-download-bytes', download_limit, '--output', args.output / 'release']
         + (['--spl-measurement-log'] if args.spl_measurement_log else [])
+        + (['--opensbi-dtb', records / 'opensbi-uboot.dtb'] if args.opensbi_dtb else [])
         + (['--optee-bin', args.optee_bin] if args.optee_bin else []))
     manifest['host_tools'] = package_runtime_tools(args.output / 'release')
     manifest.update(status='packaged',
@@ -535,6 +544,7 @@ def main():
     download.add_argument('--fastboot-log', type=Path,
                           help='use max-download-size from a saved SPL Fastboot getvar log')
     parser.add_argument('--jobs', type=positive, default=min(os.cpu_count() or 1, 8))
+    parser.add_argument('--opensbi-dtb', type=Path, help='board DTB passed to OpenSBI')
     parser.add_argument('--optee-bin', type=Path, help='raw K3 OP-TEE Core tee.bin')
     parser.add_argument('--spl-measurement-log', action='store_true',
                         help='emit experimental OpenSBI/U-Boot measurements on UART')

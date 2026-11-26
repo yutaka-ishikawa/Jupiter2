@@ -213,6 +213,24 @@ def positive(value):
     return n
 
 
+def validate_optee_dtb(data):
+    root, _ = parse_fdt(data)
+    try:
+        chosen = root.children['chosen']
+        domain = chosen.children['opensbi-domains'].children['optee-domain']
+        opteed = chosen.children['sbi-mpxy-opteed']
+        if (number(domain.props['next-addr']) == 0x171000000
+                and string(opteed, 'compatible') == 'riscv,sbi-mpxy-opteed'
+                and number(opteed.props['opensbi-domain-instance'])
+                == number(domain.props['phandle'])
+                and opteed.props['riscv,sbi-mpxy-channel-id']):
+            return
+    except KeyError:
+        pass
+    fail('OP-TEE requires a board-specific --opensbi-dtb with optee-domain at '
+         '0x171000000 and its SBI MPXY dispatcher and channels')
+
+
 def build(args):
     if os.path.lexists(args.output):
         fail('output directory already exists; choose a new directory')
@@ -222,6 +240,8 @@ def build(args):
     paths = {key: getattr(args, key).resolve() for key in ('uboot_itb', 'esos_itb', 'opensbi_bin', 'fsbl')}
     if args.optee_bin:
         paths['optee_bin'] = args.optee_bin.resolve()
+    if args.opensbi_dtb:
+        paths['opensbi_dtb'] = args.opensbi_dtb.resolve()
     inputs = {key: path.read_bytes() for key, path in paths.items()}
     if not inputs['fsbl'] or not inputs['opensbi_bin']:
         fail('FSBL and OpenSBI BIN must be nonempty')
@@ -263,7 +283,14 @@ def build(args):
     fdt = imported_image(ui[fdtname], 'fdt', ub, utotal)
     if string(fdt, 'type') != 'flat_dt':
         fail('selected FDT image is not a flat device tree')
-    parse_fdt(fdt.props['data'])
+    if args.opensbi_dtb:
+        properties = {key: value for key, value in fdt.props.items()
+                      if key not in ('data', 'type', 'compression')}
+        fdt = make_image('fdt', inputs['opensbi_dtb'], 'flat_dt', **properties)
+    if args.optee_bin:
+        validate_optee_dtb(fdt.props['data'])
+    else:
+        parse_fdt(fdt.props['data'])
     econfs = eroot.children['configurations'].children
     if args.esos_configuration:
         if args.esos_configuration not in econfs:
@@ -435,6 +462,7 @@ def main():
                         help='verified total runtime extent, including BSS/heap/scratch; not just BIN size')
     parser.add_argument('--max-download-bytes', type=positive, required=True,
                         help='verified SPL fastboot download buffer limit, NOT NOR partition size')
+    parser.add_argument('--opensbi-dtb', type=Path, help='board DTB passed to OpenSBI')
     parser.add_argument('--optee-bin', type=Path, help='raw K3 OP-TEE Core tee.bin')
     parser.add_argument('--spl-measurement-log', action='store_true',
                         help='reserve the fixed SPL event-log region')
