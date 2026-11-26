@@ -466,6 +466,7 @@ buildとinstallには同じ`K3_BUILD_DIR`、`KEYSTONE_BUILD_DIR`、`PREFIX`を�
 | 実機情報・CPU/メモリーの記録 | [実機調査](hardware/jupiter2/jupiter2-hardware-compatibility.md)、[インベントリ](hardware/jupiter2/jupiter2-hardware-inventory.json) |
 | バックアップ・Linux配置・NOR更新・復旧 | [実機導入手順](doc/milkv-jupiter2-stack-install.md)、[OpenSBI置換調査](doc/milkv-jupiter2-opensbi-replacement.md) |
 | RAM起動の操作・イメージ作成 | [RAM起動ガイド](doc/jupiter2-ram-boot-guide.md)、[準備・判断手順](doc/jupiter2-ram-boot-procedure.md) |
+| RAM起動したU-Bootから販売元Linuxを起動 | [販売元Linuxの一時起動手順](doc/jupiter2-vendor-linux-ram-boot.md) |
 | 参照FSBL/ESOS/RPMIの整合 | [開発記録](doc/jupiter2-reference-ram-boot-development.md)、[試験手順](doc/jupiter2-reference-ram-boot-tests.md) |
 | SM用DTB・実機hello試験 | [SM起動・アプリ試験](doc/jupiter2-keystone-app-test.md) |
 | QEMU/Bianbuの操作・共有・ゲストツール | [QEMU運用手順](doc/jupiter2-qemu-operations.md)、[guestコマンド](doc/keystone-guest-commands.md) |
