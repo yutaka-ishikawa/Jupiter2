@@ -250,13 +250,127 @@ sudo bash tools/install-linux.sh
 initramfsの生成は[第6章](#6-新linuxとアプリを追加配置する)、
 起動するLinuxの変更は[第7章](#7-試験用boot-entryを追加する)で行う。
 今回の`/boot/env_k3.txt`を使う構成は、第7章の「U-Bootから直接起動する場合」を参照する。
-OpenSBI＋SMの書込みは[第8章](#8-opensbiとsmを置換する)の別工程となる。
+OpenSBI＋SMの書込みは[第8章](#8-ブートイメージの導入)の別工程となる。
 DTBの配置、boot設定の編集、driverのロード、再起動も、このスクリプトでは行わない。
 
 配置途中でI/Oエラー等が発生しても、それまでにコピーしたファイルは自動削除しない。
 再実行前に上表の配置先を確認する。
 必要なfirmware更新と新kernelの起動確認が済んだ後、
 `sudo bash tools/run-hello.sh`でbundle内の二つのサンプルを実行できる。
+
+### モジュール・tools・appsを個別に配置する
+
+実機Linuxで、転送・展開済みの通常bundleを使う。パスを実際の展開先に置き換え、
+最初に整合性を確認する。以降は必要な項目だけを実行する。
+
+```bash
+BUNDLE=/absolute/path/to/bundle
+bash "$BUNDLE/tools/verify.sh"
+```
+
+**カーネルモジュールのみ**。bundleと同一ビルドのLinux Imageに対応する
+モジュール一式を新規配置する。確認に失敗した場合は後続の配置へ進まない。
+`/lib/modules/<release>/` が既にある場合は、既存モジュールの混在を防ぐため中止する。
+`uname -r` が同じでも、別のビルドのImageへ流用しない。
+
+```bash
+(
+    set -eu
+    KREL=$(cat "$BUNDLE/kernelrelease.txt")
+    case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
+    SRC="$BUNDLE/modules/$KREL"
+    DEST="/lib/modules/$KREL"
+    test -d "$SRC"
+    test ! -e "$DEST"
+    test ! -L "$DEST"
+    sudo cp -a -- "$SRC" "$DEST"
+    sudo depmod -a "$KREL"
+)
+```
+
+Keystoneドライバはこのモジュール一式に含まれる。必要なモジュールをinitramfsへ
+反映する場合は、第6章の生成手順に進む。この配置だけではImageや起動設定は変わらない。
+
+**appsのみ**。`hello.ke` と `hello-native.ke` をリリース別に置く。実行は対応する
+Linux・Keystoneドライバ・SMで起動した後に行う。
+
+```bash
+(
+    set -eu
+    KREL=$(cat "$BUNDLE/kernelrelease.txt")
+    case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
+    DEST="/opt/keystone/$KREL"
+    test -s "$BUNDLE/apps/hello.ke"
+    test -s "$BUNDLE/apps/hello-native.ke"
+    test ! -e "$DEST"
+    test ! -L "$DEST"
+    sudo install -d -- "$DEST"
+    sudo install -m 0755 -- "$BUNDLE/apps/hello.ke" "$BUNDLE/apps/hello-native.ke" "$DEST/"
+)
+```
+
+**toolsのみ**。`check-capacity.py` は単体で配置できる。実機で実行すると
+OpenSBI用NOR区画の容量を読み取る。
+
+```bash
+sudo install -m 0755 -- "$BUNDLE/tools/check-capacity.py" /usr/local/bin/jupiter2-check-capacity
+python3 /usr/local/bin/jupiter2-check-capacity --json
+```
+
+`verify.sh`、`preflight.sh`、`install-linux.sh`、`run-hello.sh` は
+自身の親ディレクトリをbundleとして扱う。これらのツールだけを利用する場合は、
+展開済みbundleをそのまま保持し、実機のシステム領域にLinuxファイルやアプリを
+配置せずに必要なツールを呼び出す。例えば整合性の再確認は
+`bash "$BUNDLE/tools/verify.sh"` で行う。
+
+### 実機Linux上でKeystoneとOP-TEEをテストする
+
+個別配置後、試験対象のファームウェアと対応するLinux Imageで起動した実機で実行する。
+同梱構成では、以下の2試験を同じLinux起動中に行い、UARTログと各試験の結果を保存する。
+
+#### Keystoneの試験
+
+直前の節で指定した `BUNDLE` を使う。次のスクリプトは起動中のkernel releaseと
+配置済みKeystoneドライバを照合し、ドライバを読み込んでbundle内の
+`hello.ke` と `hello-native.ke` を順に実行する。
+
+```bash
+sudo bash "$BUNDLE/tools/run-hello.sh"
+```
+
+両アプリが終了コード0で終わり、Enclaveが正常終了したことを確認する。
+詳しい確認項目は[実機での基本確認](#9-実機での基本確認)を参照する。
+
+#### OP-TEEの試験
+
+OP-TEE Core入りFITで起動し、UART上でCoreの起動を確認する。
+次に実機Linuxで、OP-TEEドライバの初期化ログとTEEデバイスを確認する。
+
+```bash
+sudo dmesg | grep -Ei 'optee|mpxy'
+ls -l /dev/tee[0-9]* /dev/teepriv[0-9]*
+```
+
+TAの応答を確認する例として、実機用Coreと同じTA開発キットでビルドしたfTPM TAと
+RV64版 `tee-supplicant` を[Linux側の配置手順](#op-teeのlinux側ファイルを追加配置する)
+に従って用意し、supplicantを起動する。
+
+LinuxのfTPMドライバを使う場合は、実機に `tpm2-tools` を用意する。
+ドライバを読み込んでから、起動ログとsysfsでfTPMに対応するデバイスを確認する。
+`TPM_DEVICE` は実際に割り当てられた番号に合わせる。
+
+```bash
+sudo modprobe tpm_ftpm_tee
+sudo dmesg | grep -Ei 'optee|ftpm|tpm'
+ls -l /dev/tpmrm*
+TPM_DEVICE=/dev/tpmrm0
+sudo tpm2_getrandom -T "device:$TPM_DEVICE" --hex 16
+```
+
+16バイトに相当する32桁の16進数が返り、終了コードが0なら、その経路でTAの応答を確認できた。
+LinuxのfTPMドライバがセッションを保持しない構成では、
+[TA直接呼び出し用の試験プログラム](jupiter2-ftpm-ta-test.md#テストコードとtee-supplicantのビルド)
+を実機へ転送し、`sudo ./ftpm-smoke` を実行して `fTPM PASS` と終了コード0を確認する。
 
 ### bundle.tar.gzに含まれる記録ファイル
 
