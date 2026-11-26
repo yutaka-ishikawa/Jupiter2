@@ -9,6 +9,7 @@
 改造OpenSBI＋Keystone SM、FSBL/U-Bootからの既存RAM起動・統合FIT生成手順、
 `linux-k3/` とDTB、K3 QEMU、rootfs、Keystoneの検証環境にOP-TEEとfTPM TAを追加する。
 同居構成の既定起動ではKeystoneとOP-TEEの両方を利用できるようにする。
+実機の共通16枠PMPで動かすための変更順と受入条件は、[16枠PMP実装計画](jupiter2-coexistence-16-pmp-plan.md)に記載する。
 最初の実機到達点は、同一ファームウェア・Linuxの起動中にKeystone Enclaveと
 fTPM TAが動作し、LinuxからTPM 2.0コマンドを実行でき、試験用NVデータが
 再起動・電源再投入後にも残ること。Measured Boot・IMAと製品向けの鍵管理は後続とする。
