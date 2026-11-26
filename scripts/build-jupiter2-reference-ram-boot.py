@@ -352,8 +352,15 @@ def build(args):
     spec = importlib.util.spec_from_file_location('jupiter2_fit', packager)
     fit = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fit)
-    if args.optee_bin and not args.opensbi_dtb:
-        raise ValueError('--optee-bin requires --opensbi-dtb for the actual board')
+    if args.optee_bin and not (args.opensbi_dtb or args.opensbi_overlay):
+        raise ValueError('--optee-bin requires --opensbi-overlay or --opensbi-dtb for the actual board')
+    if args.opensbi_overlay:
+        args.opensbi_overlay = args.opensbi_overlay.resolve(strict=True)
+        if not args.opensbi_overlay.is_file():
+            raise ValueError('--opensbi-overlay must point to a compiled DT overlay')
+        fit.parse_fdt(args.opensbi_overlay.read_bytes())
+        if not args.prepare_only and not shutil.which('fdtoverlay'):
+            raise ValueError('install device-tree-compiler for fdtoverlay')
     if args.opensbi_dtb:
         args.opensbi_dtb = args.opensbi_dtb.resolve(strict=True)
         if args.optee_bin:
@@ -478,7 +485,18 @@ def build(args):
     dtdata = fit.image_data(uroot.children['images'].children[dtname], ublob, utotal)
     if args.opensbi_dtb:
         dtdata = args.opensbi_dtb.read_bytes()
+    elif args.opensbi_overlay:
+        base_dtb = records / 'opensbi-uboot-base.dtb'
+        base_dtb.write_bytes(dtdata)
+        merged_dtb = records / 'opensbi-uboot.dtb'
+        run(['fdtoverlay', '-i', base_dtb, '-o', merged_dtb, args.opensbi_overlay])
+        dtdata = merged_dtb.read_bytes()
+        manifest['opensbi_overlay'] = {
+            'path': str(args.opensbi_overlay), 'sha256': sha(args.opensbi_overlay),
+        }
     verify_rpmi_dtb(fit, dtdata, contract)
+    if args.optee_bin:
+        fit.validate_optee_dtb(dtdata)
     (records / 'opensbi-uboot.dtb').write_bytes(dtdata)
     if args.opensbi_elf:
         reservation = automatic_reservation(args, fit, dtdata, records)
@@ -509,7 +527,7 @@ def build(args):
          '--variant', args.variant, '--opensbi-reserve-bytes', reservation['reserve_bytes'],
          '--max-download-bytes', download_limit, '--output', args.output / 'release']
         + (['--spl-measurement-log'] if args.spl_measurement_log else [])
-        + (['--opensbi-dtb', records / 'opensbi-uboot.dtb'] if args.opensbi_dtb else [])
+        + (['--opensbi-dtb', records / 'opensbi-uboot.dtb'] if args.opensbi_dtb or args.opensbi_overlay else [])
         + (['--optee-bin', args.optee_bin] if args.optee_bin else []))
     manifest['host_tools'] = package_runtime_tools(args.output / 'release')
     manifest.update(status='packaged',
@@ -544,7 +562,10 @@ def main():
     download.add_argument('--fastboot-log', type=Path,
                           help='use max-download-size from a saved SPL Fastboot getvar log')
     parser.add_argument('--jobs', type=positive, default=min(os.cpu_count() or 1, 8))
-    parser.add_argument('--opensbi-dtb', type=Path, help='board DTB passed to OpenSBI')
+    dtb = parser.add_mutually_exclusive_group()
+    dtb.add_argument('--opensbi-dtb', type=Path, help='board DTB passed to OpenSBI')
+    dtb.add_argument('--opensbi-overlay', type=Path,
+                     help='board OP-TEE overlay applied to the reference U-Boot DTB')
     parser.add_argument('--optee-bin', type=Path, help='raw K3 OP-TEE Core tee.bin')
     parser.add_argument('--spl-measurement-log', action='store_true',
                         help='emit experimental OpenSBI/U-Boot measurements on UART')
