@@ -282,13 +282,18 @@ bundleと同一ビルドのLinux Imageに対応する
 (
     set -eu
     BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
-    bash "$BUNDLE/tools/verify.sh"
     KREL=$(cat "$BUNDLE/kernelrelease.txt")
     case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
+    cmp -- "$BUNDLE/linux/Image" "/boot/Image-$KREL-keystone" || {
+        status=$?
+        printf 'エラー: bundleと起動用Imageの照合に失敗しました（cmp終了コード %s）。\n' "$status" >&2
+        printf '起動用Imageと同じビルドのbundleを指定してください。モジュール交換とinitrd更新を中止します。\n' >&2
+        exit "$status"
+    }
+    bash "$BUNDLE/tools/verify.sh"
     SRC="$BUNDLE/modules/$KREL"
     DEST="/lib/modules/$KREL"
     test -d "$SRC"
-    cmp "$BUNDLE/linux/Image" "/boot/Image-$KREL-keystone"
     test -s "/boot/config-$KREL"
     command -v update-initramfs >/dev/null
     BACKUP=
