@@ -238,8 +238,6 @@ skip_device_disable:
 	fdt_nop_node(fdt, poffset);
 }
 
-#define FDT_DOMAIN_REGION_MAX_COUNT	16
-
 struct parse_region_data {
 	struct sbi_domain *dom;
 	u32 region_count;
@@ -303,6 +301,13 @@ static int __fdt_parse_region(const void *fdt, int domain_offset,
 	return 0;
 }
 
+static bool inherit_root_region(const struct sbi_domain_memregion *reg)
+{
+	return !(reg->flags & (SBI_DOMAIN_MEMREGION_SU_READABLE |
+			       SBI_DOMAIN_MEMREGION_SU_WRITABLE |
+			       SBI_DOMAIN_MEMREGION_SU_EXECUTABLE));
+}
+
 static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 {
 	u32 val32;
@@ -312,7 +317,7 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 	struct sbi_hartmask *mask;
 	struct sbi_hartmask assign_mask;
 	struct parse_region_data preg;
-	unsigned int dt_regions;
+	unsigned int dt_regions, region_capacity;
 	const char *stage = "possible-harts";
 	int *cold_domain_offset = opaque;
 	struct sbi_domain_memregion *reg;
@@ -322,15 +327,30 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 	if (!dom)
 		return SBI_ENOMEM;
 
-	dom->regions = sbi_calloc(sizeof(*dom->regions),
-				  FDT_DOMAIN_REGION_MAX_COUNT + 1);
+	/* Each DT entry is a phandle/access pair. Root is stable here. */
+	val = fdt_getprop(fdt, domain_offset, "regions", &len);
+	if ((val && len % (2 * sizeof(*val))) ||
+	    (!val && len != -FDT_ERR_NOTFOUND)) {
+		sbi_printf("FDT domain %s: invalid regions property\n",
+			   fdt_get_name(fdt, domain_offset, NULL));
+		err = SBI_EINVAL;
+		goto fail_free_domain;
+	}
+	region_capacity = val ? len / (2 * sizeof(*val)) : 0;
+	sbi_domain_for_each_memregion(&root, reg) {
+		if (inherit_root_region(reg))
+			region_capacity++;
+	}
+
+	/* Include the zeroed sentinel required by the domain iterator. */
+	dom->regions = sbi_calloc(sizeof(*dom->regions), region_capacity + 1);
 	if (!dom->regions) {
 		err = SBI_ENOMEM;
 		goto fail_free_domain;
 	}
 	preg.dom = dom;
 	preg.region_count = 0;
-	preg.max_regions = FDT_DOMAIN_REGION_MAX_COUNT;
+	preg.max_regions = region_capacity;
 
 	mask = sbi_zalloc(sizeof(*mask));
 	if (!mask) {
@@ -387,9 +407,7 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 	 * 2) mmio regions protecting M-mode only mmio devices
 	 */
 	sbi_domain_for_each_memregion(&root, reg) {
-		if ((reg->flags & SBI_DOMAIN_MEMREGION_SU_READABLE) ||
-		    (reg->flags & SBI_DOMAIN_MEMREGION_SU_WRITABLE) ||
-		    (reg->flags & SBI_DOMAIN_MEMREGION_SU_EXECUTABLE))
+		if (!inherit_root_region(reg))
 			continue;
 		if (preg.max_regions <= preg.region_count) {
 			sbi_printf("FDT domain %s: region limit %u reached "
