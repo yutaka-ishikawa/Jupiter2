@@ -264,7 +264,7 @@ DTBの配置、boot設定の編集、driverのロード、再起動も、この�
 最初に整合性を確認する。以降は必要な項目だけを実行する。
 
 ```bash
-BUNDLE=/absolute/path/to/bundle
+BUNDLE="$HOME/tmp/bundle"  # 実際の展開先に合わせる
 bash "$BUNDLE/tools/verify.sh"
 ```
 
@@ -281,8 +281,10 @@ bash "$BUNDLE/tools/verify.sh"
     SRC="$BUNDLE/modules/$KREL"
     DEST="/lib/modules/$KREL"
     test -d "$SRC"
-    test ! -e "$DEST"
-    test ! -L "$DEST"
+    if [[ -e "$DEST" || -L "$DEST" ]]; then
+        printf '既存モジュールディレクトリがあります: %s\n' "$DEST" >&2
+        exit 1
+    fi
     sudo cp -a -- "$SRC" "$DEST"
     sudo depmod -a "$KREL"
 )
@@ -291,8 +293,42 @@ bash "$BUNDLE/tools/verify.sh"
 Keystoneドライバはこのモジュール一式に含まれる。必要なモジュールをinitramfsへ
 反映する場合は、第6章の生成手順に進む。この配置だけではImageや起動設定は変わらない。
 
+**既存のモジュール一式でKeystoneドライバだけを追加・更新する**。起動中のImageが
+bundleの `linux/Image` と同じビルドであることをU-Bootの起動記録とImageの照合で
+確認してから実行する。以下は `/boot/Image-<release>-keystone` を起動した場合の例。
+更新前に実行中のEnclaveとKeystoneアプリを終了する。ロード済みの場合はドライバを
+取り外してから更新する。旧ファイルは `keystone-driver.ko.~1~` などの連番付きで保存する。
+Imageも変更した場合は、対応する新Imageとモジュール一式を別リリースとして配置する。
+
+```bash
+(
+    set -eu
+    bash "$BUNDLE/tools/verify.sh"
+    KREL=$(cat "$BUNDLE/kernelrelease.txt")
+    case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
+    test "$(uname -r)" = "$KREL"
+    cmp "$BUNDLE/linux/Image" "/boot/Image-$KREL-keystone"
+    test -d "/lib/modules/$KREL"
+    SRC="$BUNDLE/modules/$KREL/extra/keystone-driver.ko"
+    DEST="/lib/modules/$KREL/extra/keystone-driver.ko"
+    test -s "$SRC"
+    test ! -L "$DEST"
+    if [[ -e "$DEST" ]]; then
+        test -f "$DEST"
+    fi
+    if [[ -d /sys/module/keystone_driver ]]; then
+        sudo modprobe -r keystone_driver
+    fi
+    sudo install -D --backup=numbered -m 0644 -- "$SRC" "$DEST"
+    sudo depmod -a "$KREL"
+    sudo modprobe keystone_driver
+    test -c /dev/keystone_enclave
+)
+```
+
 **appsのみ**。`hello.ke` と `hello-native.ke` をリリース別に置く。実行は対応する
-Linux・Keystoneドライバ・SMで起動した後に行う。
+Linux・Keystoneドライバ・SMで起動した後に行う。同じリリースへ再配置する場合は、
+旧アプリを連番付きで保存してから更新する。
 
 ```bash
 (
@@ -302,10 +338,9 @@ Linux・Keystoneドライバ・SMで起動した後に行う。
     DEST="/opt/keystone/$KREL"
     test -s "$BUNDLE/apps/hello.ke"
     test -s "$BUNDLE/apps/hello-native.ke"
-    test ! -e "$DEST"
     test ! -L "$DEST"
     sudo install -d -- "$DEST"
-    sudo install -m 0755 -- "$BUNDLE/apps/hello.ke" "$BUNDLE/apps/hello-native.ke" "$DEST/"
+    sudo install --backup=numbered -m 0755 --         "$BUNDLE/apps/hello.ke" "$BUNDLE/apps/hello-native.ke" "$DEST/"
 )
 ```
 
