@@ -1676,3 +1676,16 @@ UART抜粋は、[初回の3試行](evidence/jupiter2-ksb086/01-initial-uart.log)
   両方のPCR検査と電源断に成功した。別のローカルOpenSBIでは早期登録は
   合格したが、遅延登録はOP-TEEのストレージ処理に入った後に100秒で
   タイムアウトした。
+
+### KSB-092: 実機の同居RAM起動でOpenSBIのドメイン初期化が停止する
+
+Jupiter2 Pico-ITXのUSB RAM起動で、統合FITの転送とESOS両コアの応答後に
+`sbi_domain_finalize: platform domains_init() failed (error -3)` が出た。
+U-BootとLinuxへは到達していない。影響範囲は実機のKeystone・OP-TEE同居構成。
+原因および上流との関係は未確定。
+
+`opensbi/lib/utils/fdt/fdt_domain.c` に、失敗したドメイン名と処理段階の
+出力を追加した。継承時に領域数の上限に達した場合は、DT指定数、継承済み数、
+上限、次のroot領域を表示する。既存の領域上限とアクセス権限は維持する。
+Keystone構成の `fw_dynamic.elf` と `fw_dynamic.bin` は再リンク済み。
+診断版の統合FITの生成と実機での診断ログ取得は未実施。

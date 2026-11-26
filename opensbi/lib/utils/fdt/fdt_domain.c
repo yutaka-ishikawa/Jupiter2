@@ -10,6 +10,7 @@
 
 #include <libfdt.h>
 #include <libfdt_env.h>
+#include <sbi/sbi_console.h>
 #include <sbi/sbi_domain.h>
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_hartmask.h>
@@ -311,6 +312,8 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 	struct sbi_hartmask *mask;
 	struct sbi_hartmask assign_mask;
 	struct parse_region_data preg;
+	unsigned int dt_regions;
+	const char *stage = "possible-harts";
 	int *cold_domain_offset = opaque;
 	struct sbi_domain_memregion *reg;
 	int i, err = 0, len, cpus_offset, cpu_offset, doffset;
@@ -366,11 +369,14 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 	}
 
 	/* Setup memregions from DT */
+	stage = "DT memory regions";
 	err = fdt_iterate_each_memregion_ro(fdt, domain_offset, &preg,
 					    __fdt_parse_region);
 	if (err)
 		goto fail_free_all;
 
+	dt_regions = preg.region_count;
+	stage = "root memory regions";
 	/*
 	 * Copy over root domain memregions which don't allow
 	 * read, write and execute from lower privilege modes.
@@ -386,6 +392,13 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 		    (reg->flags & SBI_DOMAIN_MEMREGION_SU_EXECUTABLE))
 			continue;
 		if (preg.max_regions <= preg.region_count) {
+			sbi_printf("FDT domain %s: region limit %u reached "
+				   "(DT %u, inherited %u); next root region "
+				   "base=0x%lx order=%lu flags=0x%lx\n",
+				   dom->name, (unsigned int)preg.max_regions,
+				   dt_regions,
+				   (unsigned int)preg.region_count - dt_regions,
+				   reg->base, reg->order, reg->flags);
 			err = SBI_EINVAL;
 			goto fail_free_all;
 		}
@@ -458,6 +471,7 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 		dom->system_suspend_allowed = false;
 
 	/* Find /cpus DT node */
+	stage = "hart assignment";
 	cpus_offset = fdt_path_offset(fdt, "/cpus");
 	if (cpus_offset < 0) {
 		err = cpus_offset;
@@ -494,6 +508,7 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 	}
 
 	/* Register the domain */
+	stage = "registration";
 	err = sbi_domain_register(dom, &assign_mask);
 	if (err)
 		goto fail_free_all;
@@ -501,6 +516,8 @@ static int __fdt_parse_domain(const void *fdt, int domain_offset, void *opaque)
 	return 0;
 
 fail_free_all:
+	sbi_printf("FDT domain %s: %s failed (error %d)\n",
+		   dom->name, stage, err);
 	sbi_free(mask);
 fail_free_regions:
 	sbi_free(dom->regions);
