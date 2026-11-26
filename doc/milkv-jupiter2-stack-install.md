@@ -243,8 +243,11 @@ sudo bash tools/install-linux.sh
 | `apps/hello.ke`、`apps/hello-native.ke` | `/opt/keystone/<release>/` | Enclave動作確認用の二つのサンプル |
 
 配置後、`depmod -a <release>`でmodule依存情報を生成する。
-事前にbundleのchecksum、実機側の必要コマンドと区画容量を検査し、
-同じreleaseの既存modulesや配置先がある場合は停止する。
+事前にbundleのchecksum、実機側の必要コマンドと区画容量を検査する。
+既存の配置先ごとに上書きするか、旧版のバックアップを残すかを確認する。
+すべての確認が済んでから書き込みを始める。既定は上書きしない、バックアップは残す。
+モジュールはリリースのディレクトリ一式を交換する。既存のアプリ用ディレクトリでは対象のアプリだけを交換する。
+旧版は配置先の隣に `*.backup-*` として退避し、保存しないと選んだものは配置と `depmod` の成功後に削除する。
 
 **このコマンドでは新しいLinuxを起動しない。現在実行中のkernelも、次回起動するkernelの指定も変わらない。**
 initramfsの生成は[第6章](#6-新linuxとアプリを追加配置する)、

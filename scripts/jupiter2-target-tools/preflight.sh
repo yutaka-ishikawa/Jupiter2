@@ -17,14 +17,6 @@ python3 "$bundle/tools/check-capacity.py" --image "$bundle/firmware/fw_dynamic.i
 printf '\nOS release and filesystem space:\n'
 uname -r
 df -h /boot /lib/modules /opt
-if [[ -f "$bundle/kernelrelease.txt" ]]; then
-    release=$(cat "$bundle/kernelrelease.txt")
-    case "$release" in ''|*[!A-Za-z0-9._+-]*) exit 2;; esac
-    if [[ -e /lib/modules/$release || -L /lib/modules/$release ]]; then
-        echo "STOP: /lib/modules/$release already exists; use a distinct kernel release." >&2
-        exit 2
-    fi
-fi
 command -v update-initramfs >/dev/null || echo 'NOTE: prepare initramfs with your OS tools.'
 command -v flashcp >/dev/null || echo 'NOTE: NOR programming separately requires native mtd-utils (flashcp).'
 echo 'Preflight checks completed; boot source, load addresses, PMP and compatibility still require review.'
