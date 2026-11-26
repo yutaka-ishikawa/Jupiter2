@@ -1695,3 +1695,9 @@ Keystone構成の `fw_dynamic.elf` と `fw_dynamic.bin` は再リンク済み。
 DT指定分と継承分を先に数え、終端を含む配列を必要数で確保するよう修正した。
 保護領域とPMPの割り当て規則は維持した。Keystone構成のOpenSBIは再リンクに成功。
 修正版の実機起動、PMP割り当て、Keystoneの空き枠は未確認。
+
+修正版の実機ログでは両ドメインの登録を通過した。hart 0のPMP設定はGEUの
+1 KiB領域を4 KiB粒度で表現できず `-2` で停止した。実機用DTB生成では、
+K3 OP-TEEの既存MMIOマッピングに合わせてGEUを `0xf0702000` の4 KiBページとする。
+権限はOP-TEEに読み書き、untrusted-domainに拒否を維持する。
+DTB生成と領域指定は確認済み。FIT再ビルドと修正版の実機起動は未確認。

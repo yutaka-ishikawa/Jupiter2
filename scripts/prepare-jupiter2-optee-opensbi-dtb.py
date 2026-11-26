@@ -43,7 +43,8 @@ def prepare(source, output, uboot_entry):
         ('core', 0x171000000, 24, 0x38, 0),
         ('shm', 0x172000000, 24, 0x18, 0x18),
         ('uboot-fdt', uboot_entry, 21, 0x08, 0x38),
-        ('geu', 0xf0702800, 10, 0x18, 0),
+        # Match the 4 KiB GEU mapping in OP-TEE's K3 platform config.
+        ('geu', 0xf0702000, 12, 0x18, 0),
         ('pmu-main', 0xd4050000, 14, 0x18, 0),
         ('pmu-ap', 0xd4282000, 12, 0x18, 0),
     )
