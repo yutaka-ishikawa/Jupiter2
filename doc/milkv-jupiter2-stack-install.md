@@ -270,7 +270,8 @@ Keystoneドライバ単体の追加・更新のうち、該当する方を実行
 bundleと同一ビルドのLinux Imageに対応する
 モジュール一式を新規配置する。確認に失敗した場合は後続の配置へ進まない。
 既存の `/lib/modules/<release>/` があれば上書きするか確認する。
-`y` または `Y` の場合だけ旧ディレクトリを日時付きで退避し、新しい一式に入れ替える。
+上書きを承認した場合は、旧ディレクトリをバックアップとして残すか確認する。
+既定は保存。保存しない場合も、入れ替えと `depmod` が成功するまでは旧一式を一時退避する。
 `uname -r` が同じでも、別のビルドのImageへ流用しない。
 
 ```bash
@@ -284,9 +285,16 @@ bundleと同一ビルドのLinux Imageに対応する
     DEST="/lib/modules/$KREL"
     test -d "$SRC"
     BACKUP=
+    KEEP_BACKUP=yes
     if [[ -e "$DEST" || -L "$DEST" ]]; then
         read -r -p "$DEST を上書きしますか？ [y/N] " answer || exit 1
         case "$answer" in y|Y) ;; *) exit 1;; esac
+        read -r -p '旧モジュールのバックアップを残しますか？ [Y/n] ' answer || exit 1
+        case "$answer" in
+            ''|y|Y) ;;
+            n|N) KEEP_BACKUP=no ;;
+            *) exit 1 ;;
+        esac
         BACKUP="$DEST.backup-$(date +%Y%m%d-%H%M%S)"
         test ! -e "$BACKUP"
         test ! -L "$BACKUP"
@@ -306,6 +314,9 @@ bundleと同一ビルドのLinux Imageに対応する
     fi
     sudo rmdir -- "$STAGE"
     sudo depmod -a "$KREL"
+    if [[ -n "$BACKUP" && "$KEEP_BACKUP" == no ]]; then
+        sudo rm -rf -- "$BACKUP"
+    fi
 )
 ```
 
