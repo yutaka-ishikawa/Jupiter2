@@ -258,17 +258,16 @@ DTBの配置、boot設定の編集、driverのロード、再起動も、この�
 必要なfirmware更新と新kernelの起動確認が済んだ後、
 `sudo bash tools/run-hello.sh`でbundle内の二つのサンプルを実行できる。
 
-### モジュール・tools・appsを個別に配置する
+<a id="install-kernel-modules-only"></a>
+### カーネルモジュールのみをインストールする
 
-実機Linuxで、転送・展開済みの通常bundleを使う。パスを実際の展開先に置き換え、
-最初に整合性を確認する。以降は必要な項目だけを実行する。
+実機Linuxで実行する。展開先が `$HOME/tmp/bundle` と異なる場合は、
+実際のパスを `BUNDLE` に設定する。モジュール一式の新規配置と
+Keystoneドライバ単体の追加・更新のうち、該当する方を実行する。
 
-```bash
-BUNDLE="$HOME/tmp/bundle"  # 実際の展開先に合わせる
-bash "$BUNDLE/tools/verify.sh"
-```
+#### モジュール一式の新規配置
 
-**カーネルモジュールのみ**。bundleと同一ビルドのLinux Imageに対応する
+bundleと同一ビルドのLinux Imageに対応する
 モジュール一式を新規配置する。確認に失敗した場合は後続の配置へ進まない。
 `/lib/modules/<release>/` が既にある場合は、既存モジュールの混在を防ぐため中止する。
 `uname -r` が同じでも、別のビルドのImageへ流用しない。
@@ -276,6 +275,8 @@ bash "$BUNDLE/tools/verify.sh"
 ```bash
 (
     set -eu
+    BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
+    bash "$BUNDLE/tools/verify.sh"
     KREL=$(cat "$BUNDLE/kernelrelease.txt")
     case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
     SRC="$BUNDLE/modules/$KREL"
@@ -293,7 +294,9 @@ bash "$BUNDLE/tools/verify.sh"
 Keystoneドライバはこのモジュール一式に含まれる。必要なモジュールをinitramfsへ
 反映する場合は、第6章の生成手順に進む。この配置だけではImageや起動設定は変わらない。
 
-**既存のモジュール一式でKeystoneドライバだけを追加・更新する**。起動中のImageが
+#### Keystoneドライバ単体の追加・更新
+
+起動中のImageが
 bundleの `linux/Image` と同じビルドであることをU-Bootの起動記録とImageの照合で
 確認してから実行する。以下は `/boot/Image-<release>-keystone` を起動した場合の例。
 更新前に実行中のEnclaveとKeystoneアプリを終了する。ロード済みの場合はドライバを
@@ -303,6 +306,7 @@ Imageも変更した場合は、対応する新Imageとモジュール一式を�
 ```bash
 (
     set -eu
+    BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
     bash "$BUNDLE/tools/verify.sh"
     KREL=$(cat "$BUNDLE/kernelrelease.txt")
     case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
@@ -324,6 +328,16 @@ Imageも変更した場合は、対応する新Imageとモジュール一式を�
     sudo modprobe keystone_driver
     test -c /dev/keystone_enclave
 )
+```
+
+### tools・appsを個別に配置する
+
+実機Linuxで、転送・展開済みの通常bundleを使う。パスを実際の展開先に置き換え、
+最初に整合性を確認する。以降は必要な項目だけを実行する。
+
+```bash
+BUNDLE="$HOME/tmp/bundle"  # 実際の展開先に合わせる
+bash "$BUNDLE/tools/verify.sh"
 ```
 
 **appsのみ**。`hello.ke` と `hello-native.ke` をリリース別に置く。実行は対応する
