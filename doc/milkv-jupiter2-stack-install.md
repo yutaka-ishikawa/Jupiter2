@@ -316,6 +316,7 @@ bundleと同一ビルドのLinux Imageに対応する
     sudo depmod -a "$KREL"
     if [[ -n "$BACKUP" && "$KEEP_BACKUP" == no ]]; then
         sudo rm -rf -- "$BACKUP"
+        printf '一時退避した旧モジュールを削除しました: %s\n' "$BACKUP"
     fi
 )
 ```
