@@ -265,11 +265,12 @@ DTBの配置、boot設定の編集、driverのロード、再起動も、この�
 実際のパスを `BUNDLE` に設定する。モジュール一式の新規配置と
 Keystoneドライバ単体の追加・更新のうち、該当する方を実行する。
 
-#### モジュール一式の新規配置
+#### モジュール一式の新規配置・更新
 
 bundleと同一ビルドのLinux Imageに対応する
 モジュール一式を新規配置する。確認に失敗した場合は後続の配置へ進まない。
-`/lib/modules/<release>/` が既にある場合は、既存モジュールの混在を防ぐため中止する。
+既存の `/lib/modules/<release>/` があれば上書きするか確認する。
+`y` または `Y` の場合だけ旧ディレクトリを日時付きで退避し、新しい一式に入れ替える。
 `uname -r` が同じでも、別のビルドのImageへ流用しない。
 
 ```bash
@@ -282,11 +283,28 @@ bundleと同一ビルドのLinux Imageに対応する
     SRC="$BUNDLE/modules/$KREL"
     DEST="/lib/modules/$KREL"
     test -d "$SRC"
+    BACKUP=
     if [[ -e "$DEST" || -L "$DEST" ]]; then
-        printf '既存モジュールディレクトリがあります: %s\n' "$DEST" >&2
+        read -r -p "$DEST を上書きしますか？ [y/N] " answer || exit 1
+        case "$answer" in y|Y) ;; *) exit 1;; esac
+        BACKUP="$DEST.backup-$(date +%Y%m%d-%H%M%S)"
+        test ! -e "$BACKUP"
+        test ! -L "$BACKUP"
+    fi
+
+    STAGE=$(sudo mktemp -d "/lib/modules/.$KREL.install.XXXXXX")
+    sudo cp -a -- "$SRC" "$STAGE/modules"
+    if [[ -n "$BACKUP" ]]; then
+        sudo mv -T -- "$DEST" "$BACKUP"
+        printf '旧モジュールの退避先 %s\n' "$BACKUP"
+    fi
+    if ! sudo mv -T -- "$STAGE/modules" "$DEST"; then
+        if [[ -n "$BACKUP" ]]; then
+            sudo mv -T -- "$BACKUP" "$DEST"
+        fi
         exit 1
     fi
-    sudo cp -a -- "$SRC" "$DEST"
+    sudo rmdir -- "$STAGE"
     sudo depmod -a "$KREL"
 )
 ```
