@@ -271,8 +271,12 @@ bundleと同一ビルドのLinux Imageに対応する
 モジュール一式を新規配置する。確認に失敗した場合は後続の配置へ進まない。
 既存の `/lib/modules/<release>/` があれば上書きするか確認する。
 上書きを承認した場合は、旧ディレクトリをバックアップとして残すか確認する。
-既定は保存。保存しない場合も、入れ替えと `depmod` が成功するまでは旧一式を一時退避する。
-`uname -r` が同じでも、別のビルドのImageへ流用しない。
+既定は保存。保存しない場合も、入れ替えとinitrdの生成・更新が成功するまでは旧一式を一時退避する。
+対象のImageと同じビルドのモジュールを使う。
+[新kernel用initrdの生成手順](#新kernel用initrdを生成する)を参照し、
+対象の `/boot` をマウントして、同じビルドの `/boot/config-<release>` を用意する。
+スクリプトは `depmod` に続けてinitrdを生成・更新する。交換前のモジュールが既存initrdに残るため、
+スクリプトが成功してから、U-Bootで新しい `initrd.img-<release>` を使って起動する。
 
 ```bash
 (
@@ -284,6 +288,9 @@ bundleと同一ビルドのLinux Imageに対応する
     SRC="$BUNDLE/modules/$KREL"
     DEST="/lib/modules/$KREL"
     test -d "$SRC"
+    cmp "$BUNDLE/linux/Image" "/boot/Image-$KREL-keystone"
+    test -s "/boot/config-$KREL"
+    command -v update-initramfs >/dev/null
     BACKUP=
     KEEP_BACKUP=yes
     if [[ -e "$DEST" || -L "$DEST" ]]; then
@@ -314,15 +321,29 @@ bundleと同一ビルドのLinux Imageに対応する
     fi
     sudo rmdir -- "$STAGE"
     sudo depmod -a "$KREL"
+    INITRD="/boot/initrd.img-$KREL"
+    if [[ -e "$INITRD" ]]; then
+        INITRD_MODE=-u
+    else
+        INITRD_MODE=-c
+    fi
+    if sudo update-initramfs "$INITRD_MODE" -k "$KREL"; then
+        if [[ ! -s "$INITRD" ]]; then
+            printf 'initrdの生成・更新に失敗しました。出力が存在しないか空です: %s\n' "$INITRD" >&2
+            exit 1
+        fi
+        printf 'initrdの生成・更新に成功しました（終了コード 0）: %s\n' "$INITRD"
+    else
+        status=$?
+        printf 'initrdの生成・更新に失敗しました（終了コード %s）: %s\n' "$status" "$INITRD" >&2
+        exit "$status"
+    fi
     if [[ -n "$BACKUP" && "$KEEP_BACKUP" == no ]]; then
         sudo rm -rf -- "$BACKUP"
         printf '一時退避した旧モジュールを削除しました: %s\n' "$BACKUP"
     fi
 )
 ```
-
-Keystoneドライバはこのモジュール一式に含まれる。必要なモジュールをinitramfsへ
-反映する場合は、第6章の生成手順に進む。この配置だけではImageや起動設定は変わらない。
 
 #### Keystoneドライバ単体の追加・更新
 
@@ -359,6 +380,11 @@ Imageも変更した場合は、対応する新Imageとモジュール一式を�
     test -c /dev/keystone_enclave
 )
 ```
+
+Keystoneドライバ単体の更新では、起動に使うinitrdにドライバが含まれている場合に
+initrdも更新する。例えば `KREL` にbundleのリリースを設定し、
+`lsinitramfs "/boot/initrd.img-$KREL"` の出力に `keystone-driver.ko` または
+その圧縮ファイルがある場合は、再起動前に `sudo update-initramfs -u -k "$KREL"` を実行する。
 
 ### tools・appsを個別に配置する
 

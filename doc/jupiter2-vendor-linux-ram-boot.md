@@ -3,6 +3,21 @@
 Keystone・OP-TEE同梱のRAM起動イメージでU-Bootを起動し、UFS上の販売元Linux・initrd・DTBを使います。
 設定はU-BootのRAM上で行うため、`saveenv` は不要です。
 
+## 起動の前提条件
+
+- 開発PCに、同じビルドで生成した `FSBL.bin` と Keystone・OP-TEE同梱の
+  `ram-boot-keystone.itb` を用意します。統合FITのU-Bootで `scsi`、`unzip`、`booti` が使えることが前提です。
+- UFSのブートパーティション（この例ではU-Bootの `scsi 0:2`）の直下に、
+  **変更前の販売元の `env_k3.txt` を `env_k3.txt.org` として保存済み**であることが前提です。
+  このパーティションをLinuxで `/boot` にマウントしている場合の保存先は `/boot/env_k3.txt.org` です。
+  まだ保存していなければ、販売元の `env_k3.txt` を変更する前にコピーしてください。
+  すでに変更済みなら、保存してある変更前のバックアップから配置します。
+- 同じブートパーティションに、設定が指す販売元のカーネル・initrd・実機モデル用DTBが残っていることを確認します。
+  この例では `/vmlinuz-6.18.3-generic`、`/initrd.img-6.18.3-generic`、
+  `/spacemit/6.18.3-generic/k3-pico-itx.dtb` を使います。
+- 販売元Linuxのルートファイルシステムと、そのカーネルに対応するモジュール一式が残っていることを確認します。
+  後述の `root=PARTUUID` は、そのルートパーティションの値を使います。
+
 ## USBからFSBLと統合FITをRAMへ転送する
 
 以下のUSB転送とU-Bootの起動は実機で確認済みです。
