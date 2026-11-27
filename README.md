@@ -318,33 +318,10 @@ bash scripts/run-k3.sh --image keystone --pmp-profile mixed
 
 ### 3.8 NOR容量確認と実機配布用bundleの作成
 
-通常のfirmware、Linux、driver、appsがそろった後に、開発PCで実行します。
-以下の393216は今回の実測値です。フェーズ1で確認した実機容量と一致させます。
-
-```bash
-python3 scripts/build-jupiter2-install-image.py \
-  --capacity-bytes 393216 \
-  --output work/jupiter2-release
-```
-
-成功すると、最終の`fw_dynamic.itb`を作り、容量検査後に次を出力します。
-出力先は未作成のディレクトリを指定します。
-
-```text
-work/jupiter2-release/
-├── bundle/
-│   ├── firmware/
-│   ├── linux/
-│   ├── modules/
-│   ├── apps/
-│   ├── tools/
-│   └── docs/
-├── bundle.tar.gz
-└── bundle.tar.gz.sha256
-```
-
-これはRAM起動用`release/`とは別の配布物です。
-[導入手順第4章](doc/milkv-jupiter2-stack-install.md)に、依存ツール、同梱内容、容量の再確認を記載しています。
+開発PCでのNOR用bundleの作成は実機用ビルド手順の第2章に従います。
+対象実機の`opensbi` NOR区画容量を使い、`$OUT/bundle.tar.gz`と
+`$OUT/bundle.tar.gz.sha256`を生成します。
+[NOR導入用bundleの作成](doc/jupiter2-build-install-test.md#nor-bundle)
 
 <a id="phase-deploy"></a>
 ## 4. フェーズ3：実機への配置と起動確認
@@ -352,7 +329,8 @@ work/jupiter2-release/
 ### 4.1 成果物を実機へ転送する
 
 フェーズ1のバックアップを開発PCにも保存済みであることを確認します。
-Linux配布用bundleはディレクトリ全体を実機へ転送します。
+Linux配布用の `bundle.tar.gz` と `bundle.tar.gz.sha256` を実機へ転送し、
+ハッシュ確認後に展開します。[bundleの転送と事前検査](doc/milkv-jupiter2-stack-install.md#4-bundleの転送と事前検査)
 RAM転送用の`release/`はfastbootを実行するPCで使用します。
 各配布物のmanifest・SHA-256と、使用するソース版を記録します。
 
@@ -366,14 +344,14 @@ sudo bash tools/install-linux.sh
 
 Image、対応modules、Keystone driver、hello二種を追加配置します。
 **この操作だけでは新Linuxを起動しません。initrd生成、起動設定変更、firmware書き込みも別工程です。**
-配置先と事前確認は[導入手順第6章](doc/milkv-jupiter2-stack-install.md)を参照してください。
-途中で失敗した場合、全体の自動rollbackは行わないため、部分配置を確認してから再実行します。
+上書き・バックアップの確認、配置先と失敗時の確認方法は導入手順第6章に記載しています。
+[Linuxとアプリの配置](doc/milkv-jupiter2-stack-install.md#6-新linuxとアプリを追加配置する)
 
 ### 4.3 initrdを生成し、使用するDTBを準備する
 
 インストールしたkernelの実際のreleaseを調べ、そのrelease用のinitrdを生成します。
 今回のreleaseは`6.18.3`で、Imageファイル名の`-keystone`とは区別します。
-[initrd生成手順](doc/milkv-jupiter2-stack-install.md)と
+[initrd生成手順](doc/milkv-jupiter2-stack-install.md#新kernel用initrdを生成する)と
 [Keystone用Linux DTBの準備](doc/jupiter2-keystone-app-test.md)を参照してください。
 既存のImage/initrd/DTBを残して、別名の候補を配置します。
 
@@ -381,7 +359,7 @@ Image、対応modules、Keystone driver、hello二種を追加配置します。
 
 **第1段階では`/boot/env_k3.txt`を編集せず、UARTのU-Bootで候補のkernel/initrd/DTBを指定します。**
 `knl_name`、`ramdisk_name`、`dtb_dir`、`fdtfile`を含む値を実際の配置先に合わせ、saveenvを使わず起動します。
-[導入手順第7章](doc/milkv-jupiter2-stack-install.md)のU-Boot手順で、Linux・UFS・ネットワーク等を確認します。
+[導入手順第7章](doc/milkv-jupiter2-stack-install.md#7-試験用boot-entryを追加する)のU-Boot手順で、Linux・UFS・ネットワーク等を確認します。
 起動できなければ、元の起動設定で復帰し、次の段階へ進みません。
 
 ### 4.5 正常起動後にLinuxの起動設定を保存する
@@ -418,7 +396,7 @@ UTM読み取りの終了139については[KSB-073の修正・試験結果](doc/
 
 RAM起動とsample試験の成功後、永続的なfirmware更新が必要な場合に実施します。
 実機の容量・バックアップ・最終ITBのhashを再確認し、
-[導入手順第8章](doc/milkv-jupiter2-stack-install.md)の書き込み・読み戻し・再起動確認へ進みます。
+[導入手順第8章](doc/milkv-jupiter2-stack-install.md#8-ブートイメージの導入)の書き込み・読み戻し・再起動確認へ進みます。
 RAM起動用の統合FITを、そのままNORのOpenSBI区画へ書く手順ではありません。
 
 ### 4.9 各段階のrollbackとFDLリカバリー

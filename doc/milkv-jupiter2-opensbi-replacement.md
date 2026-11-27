@@ -262,9 +262,8 @@ sha256sum candidate/fw_dynamic.bin candidate/fw_dynamic.itb > candidate.sha256
 
 まず変更していない販売元OpenSBI本体を同じITSで再包装し、抽出本体の一致を確認すると、包装工程を切り分けられる。ただしファイルの整合性確認は実機互換性の証明ではない。
 
-容量確認と最終FIT・転送用イメージの作成は、
-[スタック導入手順の第4章](milkv-jupiter2-stack-install.md#4-容量確認とインストールイメージ作成)の
-`check-jupiter2-install-capacity.py`と`build-jupiter2-install-image.py`を使用できる。
+測定済みのNOR容量を使う場合は、実機用ビルド手順の `--firmware-only` でFITを包装できる。
+[FITだけを包装する手順](jupiter2-build-install-test.md#nor-firmware-only)
 生成後も実機で容量とSHA-256を再確認し、以降の書込みは先決条件を満たした場合だけ行う。
 
 ## 7. SPI NORをfastbootで更新する主手順

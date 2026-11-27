@@ -224,6 +224,7 @@ OUT="$PWD/work/jupiter2-ram-boot/keystone-optee-$(date +%Y%m%d-%H%M%S)"
 VARIANT=keystone
 ```
 
+<a id="optee-fit-build"></a>
 ### 1.5 OP-TEE入りFITを作る（1.3・1.4共通）
 
 選んだ構成で設定した `SBI`、`OUT`、`VARIANT` と、1.2節の `TEE_BIN`・`TEE_ELF` を同じシェルで引き継ぎます。
@@ -313,6 +314,7 @@ OP-TEE入り構成は1.5節のDTBの条件を満たしたイメージを使い�
 
 [Keystoneアプリの実機試験](jupiter2-keystone-app-test.md) · [OP-TEEの検査項目](jupiter2-optee-ftpm-porting-plan.md)
 
+<a id="nor-bundle"></a>
 ## 2. NOR導入用のbundle
 
 `--capacity-bytes` には、対象実機の `opensbi` NOR区画で測定した容量をバイト単位で指定します。
@@ -355,5 +357,23 @@ OUT="$PWD/work/jupiter2-release-$(date +%Y%m%d-%H%M%S)"
 出力は `bundle/firmware/fw_dynamic.itb`、Linux・モジュール・Keystoneアプリを含む
 `bundle.tar.gz` とそのSHA-256です。包装時に最終ITB全体が対象NOR区画に収まるか、
 Linux Imageとドライバが対応するかを検査します。
-実機への書き込み、既存イメージのバックアップ・復旧、導入後の起動確認は
-[実機導入・復旧手順](milkv-jupiter2-stack-install.md) に従います。
+実機へ転送するのは `$OUT/bundle.tar.gz` と `$OUT/bundle.tar.gz.sha256` です。
+展開後の事前検査、Linuxの配置とinitrd生成、起動確認は実機導入手順に従います。
+[bundleの転送と事前検査](milkv-jupiter2-stack-install.md#4-bundleの転送と事前検査)
+
+<a id="nor-firmware-only"></a>
+### OpenSBIのFITだけを包装する場合
+
+レビュー済みのOpenSBIがビルド済みで、FITだけを配布する場合は、
+対象実機から測定した同じ`CAPACITY`と、新しい出力先を指定します。
+
+```bash
+OUT="$PWD/work/jupiter2-firmware-$(date +%Y%m%d-%H%M%S)"
+python3 scripts/build-jupiter2-install-image.py --firmware-only \
+  --capacity-bytes "${CAPACITY:?先に実機のNOR区画容量を設定してください}" --output "$OUT" &&
+  (cd "$OUT" && sha256sum -c bundle.tar.gz.sha256)
+```
+
+別途確認したBINを使う場合は、`--firmware-bin /absolute/path/fw_dynamic.bin`を追加します。
+この配布物にはFIT、検証・操作用ツールと文書が含まれます。
+[OpenSBIの更新・復旧手順](milkv-jupiter2-opensbi-replacement.md)

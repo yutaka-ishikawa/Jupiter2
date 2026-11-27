@@ -1,265 +1,267 @@
-# Milk-V Jupiter2実機へのKeystoneソフトウェアスタック導入手順
+# Milk-V Jupiter2実機へのKeystone・OP-TEEスタック導入手順
 
-更新日：2026-11-20（JST）。対象：`yutaka-ishikawa/Jupiter2`のK3スタックと本書のイメージ作成スクリプト。
-実機調査・build経路は`6403232967178cb896fc761eb0038fdf9a85bd54`を基準とし、使用commitは取得時に記録する。
-
-対象はSpacemiT K3搭載Milk-V Jupiter2 SBCで、既存のboot firmware・Linux環境を残しながら、
-開発したOpenSBI＋Keystone SM、Linux、Keystone driver、SDK/Eyrieアプリ、OP-TEE関連を段階導入する。
-Jupiter（K1/M1）、Jupiter2 NX、Dev Kitにはそのまま適用しない。
-
-**現在のソースは実機導入を無条件に完了できる状態ではない。**
-ビルド・配布物作成・バックアップまでは準備できるが、firmwareの容量・起動互換性・
-PMP条件を確定するまで書き込まない。以下の「停止条件」は作業上の必須条件である。
-本手順による実機書き込み・起動は未検証。
+SpacemiT K3搭載Milk-V Jupiter2 Pico-ITXで、開発PCで作成した成果物を実機へ転送し、
+Linux・モジュール・アプリを配置して起動を確認する。まず使用中の起動設定をバックアップする。
+OpenSBIの書き込みと復旧には専用の手順書を使う。
+[実機の構成と適合性](../hardware/jupiter2/jupiter2-hardware-compatibility.md)
 
 ## 1. 導入範囲と順序
 
-| 要素 | 配置・実行場所 | 導入方法 |
+| 構成 | 使用する成果物 | 実機での起動 |
 | --- | --- | --- |
-| OpenSBI＋Keystone SM | M-mode、実機のfirmware領域 | SMをリンクしたBINを対応FITへ包装し、使用中のopensbi区画だけ更新 |
-| Linux Image・modules | 実機のboot領域・rootfs | 旧kernelを残し、新しいreleaseと試験用boot entryを追加 |
-| Keystone driver | 対応kernelのmodulesディレクトリ | 同じ完全kernel出力で作成した`.ko`を配置 |
-| Eyrie・loader・アプリ | 実機Linuxの通常ファイル | `.ke`に含めて配置。Eyrie単体をNORへ書かない |
-| SDK | 開発ホスト | アプリ作成に使用。SDK全体を実機へ入れる必要はない |
-| QEMU・9p共有 | 開発ホスト専用 | 実機へ導入しない |
-| OP-TEE | CoreはブートFIT、LinuxドライバとTA・supplicantは実機Linux側 | Core入りRAM起動FITと対応DTBを使い、署名済みTAとRV64 supplicantをrootfsに追加 |
+| Keystoneのみ | 通常のNOR用bundle。USBで先に試験する場合はKeystone版の`FSBL.bin`と統合FITも用意 | RAM起動で確認し、永続導入する場合は使用中のOpenSBI区画を更新 |
+| KeystoneとOP-TEEを同梱 | 同じビルドの`FSBL.bin`、Core入り統合FIT、Linux用DTB。Linux・ドライバ・アプリは対応する通常bundleを利用 | USB RAM起動で同梱FITを試験 |
+| OP-TEEのみ | OP-TEE単独の`FSBL.bin`、統合FIT、Linux用DTBと対応TA | USB RAM起動。既存Linuxを使う場合はTEE・MPXY対応を確認 |
 
-インストールは次の2段階で行い、第1段階の成功後だけ第2段階へ進む。
+Linuxを更新する場合は、次の順序で進める。
 
-| 段階 | 起動する組合せ | 実施内容 | 失敗時に戻すもの |
-| --- | --- | --- | --- |
-| 第1段階 | 新Linux＋既存OpenSBI | 第6章で配置。第7章でUARTからRAM上だけ新kernelを試し、成功後に永続化 | 元のLinux起動設定。既存OpenSBIは変更しない |
-| 第2段階 | 第1段階と同じ新Linux＋新OpenSBI／SM | 第8章からブートイメージの導入手順へ進み、同じkernelの起動を確認。その後第9章のEnclave試験 | まずOpenSBIを更新前へ戻す。必要ならLinux起動設定も元へ戻す |
+1. 元のLinuxと起動設定を退避し、bundleから新Linuxを配置する。既存OpenSBIのまま、新Linuxと対応initrd・Linux用DTBで起動を確認する。この段階ではKeystoneドライバをロードしない。
+2. 同じLinux Imageを使い、対象のOpenSBI／SMまたはOP-TEE入りFITで起動する。使用するファームウェアに対応するLinux用DTBを選び、構成に応じてKeystone・OP-TEEを試験する。
 
-第1段階ではKeystone driverをロードせず、Enclaveを実行しない。
-第2段階に入るために旧kernelへ戻す必要はない。
-各段階のrollbackは[第10章](#10-復旧と正式採用)を参照する。
+[配置とinitrdの生成](#6-新linuxとアプリを追加配置する) · [ブートイメージの導入](#8-ブートイメージの導入) · [Linuxからの動作確認](#9-実機での基本確認)
 
 ## 2. 書き込み前の停止条件
 
-[実機適合性調査](../hardware/jupiter2/jupiter2-hardware-compatibility.md)と
-[EDK2維持のOpenSBI置換手順](milkv-jupiter2-opensbi-replacement.md)を先に確認する。
+実機の型番、FWの版、FSBLがOpenSBIを読む媒体、使用中のLinuxのbootfsとrootfsを
+UARTログと採取記録で照合する。NOR更新では実機の`opensbi`区画の容量と最終ITBを比較する。
+販売元ファームウェア、元の起動設定、復旧経路を確認してから作業する。
+[実機の採取記録](../hardware/jupiter2/README.md) · [起動媒体の特定とOpenSBI区画のバックアップ](milkv-jupiter2-opensbi-replacement.md#capture-opensbi-partition)
 
-| 条件 | 必要な確認 |
-| --- | --- |
-| 使用中のboot媒体 | FSBLのUARTログ、MTD/GPT配置、販売元manifestを照合。LinuxのrootがUFSでもOpenSBIはNORの場合がある |
-| firmware容量 | 記録済みNOR区画は384 KiB。過去のSM入りraw BINは532,320 bytesで超過。今回の最終ITBで再測定する |
-| 実ロード形式 | 対応FSBLが読むFIT構造、load/entry、後段EDK2、RAM確保範囲を確認。BINを直接書かない |
-| 初期DT | OpenSBI入力DTでK3 override、timer、IPI、RPMI、予約領域が正しく選ばれること。Linuxで採取したDTだけでは代替しない |
-| 混成CPU | X100（hart 0–7）とA100（8–15）全hartのPMP数・粒度・アドレス幅・lock・優先順位をM-modeで確認 |
-| 同期とtimer | 全hart PMP更新/IPI ACK、Sstc保存・復元、SM M_TIMER経路が実機で成立すること |
-| 復旧 | 正しい販売元FSBL/U-Bootと元OpenSBIを退避し、FDL認識・復旧媒体アクセスを事前確認 |
-
-現行ビルドの`KEYSTONE_K3_PMP_N_REG=16`、`K3_QEMU_PMP16`等は実機対応の証明ではない。
-診断・移植変更が必要なら先に実装し、別commitで固定する。診断結果に合わせて監査を
-修正するのであり、起動のためにPMP gateを無効化しない。
-NORのuboot区画内に0xffの末尾領域があっても、opensbi区画を拡張してよい根拠にはならない。
-UFS上の1 MiB区画に収まる場合も、FSBLが実際にそこを読むと確定するまで対象を変更しない。
+Pico-ITXの16枠同梱構成は、実機用FITとLinux用DTBの生成を開発PCで確認済み。
+実機ではUARTでファームウェアとLinuxの到達段階を確認し、PMPや周辺機器の
+検査は同梱構成の実機検査項目に従う。
+[16枠同梱構成の検査項目](jupiter2-coexistence-16-pmp-plan.md#2-検証項目と合格条件)
 
 ## 3. 開発ホストで候補をビルドする
 
-以下はUbuntu系開発PCのBashで、repository rootから実行する。
-実機へSSHして実行するコマンドではない。依存導入は開発PCのパッケージを変更する。
+開発PCでの依存ツール導入、Linux・OpenSBIのビルド、NOR用bundleの作成は
+実機用ビルド手順書に従う。通常bundleの成果物は`$OUT/bundle.tar.gz`と
+`$OUT/bundle.tar.gz.sha256`。
+[NOR導入用bundleの作成](jupiter2-build-install-test.md#nor-bundle)
+
+USB RAM起動では、実機用ビルド手順書の第1章で構成に合うFSBLと統合FITを生成する。
+OP-TEE入りの場合は第1.5節で同じFITに対応するLinux用DTBも作る。
+[RAM起動用イメージの作成](jupiter2-build-install-test.md#ram-boot-images)
+
+fTPMも使う場合は、署名済みTAとRV64版`tee-supplicant`を準備する。実機用Coreと
+同じTA開発キットを使い、fTPMのクロスビルド手順の`OPTEE_OUT`には
+`$PWD/.build-k3/optee-hardware/out`を指定する。
+[fTPM TAのクロスビルド](jupiter2-ftpm-ta-test.md#ftpm-taのクロスビルド) ·
+[tee-supplicantと試験プログラムのビルド](jupiter2-ftpm-ta-test.md#テストコードとtee-supplicantのビルド)
+
+<a id="4-容量確認とインストールイメージ作成"></a>
+## 4. bundleの転送と事前検査
+
+開発PCで作成した`bundle.tar.gz`と`bundle.tar.gz.sha256`を実機へコピーする。
+以下は実機の`$HOME/tmp`へコピーした例。展開済みの`bundle/`がある場合は、
+別のディレクトリに転送し、`TRANSFER_DIR`をそのパスにする。
 
 ```bash
-git clone https://github.com/yutaka-ishikawa/Jupiter2.git
-cd Jupiter2
-git checkout main
-git rev-parse HEAD
-sudo bash scripts/install-build-deps.sh
+TRANSFER_DIR="$HOME/tmp"
+(
+    cd "$TRANSFER_DIR" || exit
+    sha256sum -c bundle.tar.gz.sha256 || exit
+    if [[ -e bundle || -L bundle ]]; then
+        printf '展開先が既に存在します %s/bundle\n' "$PWD" >&2
+        exit 1
+    fi
+    tar -xzf bundle.tar.gz
+) && BUNDLE="$TRANSFER_DIR/bundle"
 ```
 
-表示したcommitを導入記録へ保存する。再現時は`git checkout 保存したcommit`で固定する。
-実機対応の追加修正がある場合はレビュー済みcommitを指定する。
-異なるソース・設定・toolchainの中間物は混用しない。
+通常bundleでは、展開したディレクトリに`kernelrelease.txt`がある。
+実機Linuxで読み取り専用の事前検査を実行する。
 
 ```bash
-set -euo pipefail
-mkdir -p work/jupiter2-install
-# crypto開発鍵profileを作らず、通常のprovider-unavailableを使う。
-KEYSTONE_SM_TRACE=0 make opensbi keystone JOBS=4 \
-    2>&1 | tee work/jupiter2-install/build.log
+bash "${BUNDLE:?展開したbundleのパスを設定してください}/tools/preflight.sh"
 ```
 
-`make keystone`はLinux、SDK/Eyrie、サンプル、driver、guest-overlayを準備する。
-OpenSBIは別ターゲットなので両方を指定する。
-このコマンドは実機flashを行わず、QEMU rootfsの作成も行わない。
-`make build`全体はQEMUや開発暗号profileも作るため、実機候補作成には上記の個別指定を使う。
+このコマンドは同梱の`SHA256SUMS`を検証し、実機の`opensbi` NOR区画にFITが収まるか、
+必要なコマンドがあるかを確認し、`/boot`・`/lib/modules`・`/opt`の空き容量を表示する。
+使用中の起動媒体と`/boot`の対応は第5章で確認する。容量超過や照合エラーがあれば配置へ進まない。
 
-主な成果物は次の場所にある。
+実機側で使用するパッケージはBianbuなどの実機OS向けのものを入れる。
+Python 3.11以上、Bash、coreutils、kmod、展開用のtarとgzipを使う。
+Bianbuでinitrdを作る場合は`initramfs-tools`も用意する。NOR書き込み時の
+`mtd-utils`の導入は書き込み手順を参照する。
+[実機のNOR書き込み手順](milkv-jupiter2-opensbi-replacement.md#keystone配布用bundleからspi-norを更新する)
 
-```text
-.build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic.{bin,elf}
-.build-k3/linux/arch/riscv/boot/Image
-.build-k3/linux/arch/riscv/boot/dts/
-.build-k3/linux/{.config,Module.symvers}
-.build-keystone/driver/keystone-driver.ko
-.build-keystone/guest-overlay/usr/share/keystone/examples/{hello,hello-native}.ke
-```
+| 確認に使うファイル | 内容 |
+| --- | --- |
+| `kernelrelease.txt` | 同梱Imageとモジュールのリリース |
+| `firmware/fw_dynamic.itb`、`capacity.json` | NOR用FITと作成時の容量検査 |
+| `SHA256SUMS` | 展開後のファイルのハッシュ |
+| `source-commit.txt`、`source-local.patch`、`source-untracked.txt` | 作成時のコミット、追跡済みファイルの差分、未追跡ファイルのパス |
+| `tools/`、`docs/` | 実機用スクリプトと手順書 |
 
-`make install`、`make install-opensbi`はホスト側への配置であり実機へのインストールではない。
-`guest-overlay/`全体を実機の`/`へ展開してはいけない。QEMU向けのshutdown/reboot、
-BusyBox wrapper等が通常OSのコマンドを置き換えるため、次節では必要なファイルだけ取り出す。
+`--firmware-only`で作った配布物はFITの導入に使う。Linux配置にはImage・モジュール・
+アプリを含む通常bundleを用意する。Linux用DTBは対象構成のものを別途配置する。
+[FITのみを包装する手順](jupiter2-build-install-test.md#nor-firmware-only)
 
-### OP-TEEのビルドと配置用成果物
+## 5. 実機の現状記録とバックアップ
 
-実機用OP-TEE Coreは[実機用ビルド手順の同梱構成](jupiter2-build-install-test.md#ram-boot-images)でビルドする。
-`.build-k3/optee-hardware/out/core/tee.bin` はRAM起動FITに組み込む。
-OpenSBIへ渡す実機用DTBのOP-TEEドメイン・MPXYと、Linux用DTBのOP-TEEノードを照合する。
-既存のNOR用bundle生成スクリプトはKeystone用FITを作る。OP-TEE同梱はRAM起動で検証する。
+導入前の採取手順に従って`INFO_DIR`を実機側で設定する。UARTは基板資料で電圧と
+端子を確認し、115200/8N1・フロー制御なしで電源投入直後から記録する。
+[実機情報の採取](../README.md#22-導入前の実機情報を採取) · [UART接続](milkv-jupiter2-uart.md)
 
-Linuxの `.build-k3/linux/.config` で `CONFIG_TEE`、`CONFIG_OPTEE`、
-`CONFIG_RISCV_SBI_MPXY_MBOX` を確認する。fTPMを使う場合は `CONFIG_TCG_FTPM_TEE`
-と、対象DTBの登録経路も確認する。署名済みfTPM TAとRV64版 `tee-supplicant` は、
-同じ実機用Coreの `export-ta_rv64` を使い、
-[fTPMのクロスビルド手順](jupiter2-ftpm-ta-test.md#ftpm-taのクロスビルド)で作る。
-同手順の `OPTEE_OUT` は `$PWD/.build-k3/optee-hardware/out` を指定する。
+`findmnt -T /boot`と採取記録を比較し、U-Bootが読むbootfsがマウントされていることを確認する。
+元のImage、initrd、DTB、モジュールと起動設定を復旧用に残す。GRUBやextlinuxを使う場合は、
+現在選んでいるエントリーと実際の設定ファイルを保存する。
+NOR・GPT上のOpenSBI区画の記録とバックアップはブートイメージの手順で行う。
+[OpenSBI区画のバックアップ](milkv-jupiter2-opensbi-replacement.md#capture-opensbi-partition)
 
-## 4. 容量確認とインストールイメージ作成
+### Linux起動設定の復旧用バックアップ
 
-以下はクロスビルドを行った開発PCで実行する。Python 3.11以上、Git、
-`mkimage`、`dumpimage`、`dtc`が必要。第3章のbuildとは別に、次の包装用ツールも導入する。
-
-### 開発PCにイメージ作成用ツールをインストールする
-
-Ubuntu 24.04またはDebian 12以降のAPT環境：
+`env_k3.txt`を使う構成では、実機Linux上で`/boot/env_k3.txt.<日付>`を作り、
+復旧用ディレクトリにもコピーする。`ROLLBACK`は復旧時に使用する。
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y python3 git u-boot-tools device-tree-compiler coreutils bash tar gzip
+ROLLBACK="${INFO_DIR:?採取先のINFO_DIRを設定してください}/jupiter2-rollback-$(date +%Y%m%d-%H%M%S)"
+(
+    set -eu
+    mkdir -m 700 "$ROLLBACK"
+    uname -r > "$ROLLBACK/original-kernel-release.txt"
+    findmnt -T /boot > "$ROLLBACK/boot-mount.txt"
+    lsblk -o NAME,PATH,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS > "$ROLLBACK/storage.txt"
+
+    ENV_BACKUP="/boot/env_k3.txt.$(date +%Y%m%d-%H%M%S)"
+    sudo test ! -e "$ENV_BACKUP"
+    sudo test ! -L "$ENV_BACKUP"
+    sudo cp -a -- /boot/env_k3.txt "$ENV_BACKUP"
+    sudo cmp -- /boot/env_k3.txt "$ENV_BACKUP"
+    sudo cp -a -- "$ENV_BACKUP" "$ROLLBACK/env_k3.txt"
+    cd "$ROLLBACK"
+    sudo sha256sum env_k3.txt > env_k3.txt.sha256
+)
 ```
 
-Fedora等のDNF環境：
+採取記録と復旧用ディレクトリのコピーを開発PCにも保存する。
+
+## 6. 新Linuxとアプリを追加配置する
+
+### 通常bundleを一括配置する
+
+第5章のバックアップを済ませてから、実機Linuxで実行する。
+`findmnt -T /boot`が示す対象を保存済みのbootfsと照合する。
+初回試験では、旧Linuxのモジュールを残せる別リリースのImageとモジュールを使う。
 
 ```bash
-sudo dnf install -y python3 git uboot-tools dtc coreutils bash tar gzip
+BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
+cat "$BUNDLE/kernelrelease.txt"
+findmnt -T /boot
 ```
 
-使用中のOSに対応する一方を実行する。Pythonの版とコマンドの有無を確認する。
+展開先とbootfsを確認してから、一括配置を実行する。
 
 ```bash
-python3 -c 'import sys; print(sys.version); assert sys.version_info >= (3, 11), "Python 3.11以上が必要です"'
-command -v git mkimage dumpimage dtc
+sudo bash "$BUNDLE/tools/install-linux.sh"
 ```
 
-`mkimage`と`dumpimage`はAPTの`u-boot-tools`／DNFの`uboot-tools`、
-`dtc`はAPTの`device-tree-compiler`／DNFの`dtc`に含まれる。
-Pythonの追加pipパッケージは不要。Pythonが3.11未満なら対応するPythonを用意し、
-以降の`python3`をその実行コマンドに置き換える。
-これらは開発PC上でFITを作るためのホスト用ツールであり、実機へコピーしない。
+| bundle内のファイル | 実機の配置先 |
+| --- | --- |
+| `linux/Image` | `/boot/Image-<release>-keystone` |
+| `linux/config` | `/boot/config-<release>-keystone` |
+| `modules/<release>/`（Keystoneドライバを含む） | `/lib/modules/<release>/` |
+| `apps/hello.ke`、`apps/hello-native.ke` | `/opt/keystone/<release>/` |
 
-以下のイメージ作成スクリプトはビルド済み成果物を包装するもので、コンパイルや実機書込みは行わない。
+`<release>`は`kernelrelease.txt`の値。スクリプトは対象ごとに既存ファイルの
+上書きとバックアップの保存を確認し、すべての回答を得てから配置する。
+上書きの既定は拒否、バックアップの既定は保存。モジュールはリリース単位、
+既存アプリ用ディレクトリのアプリはファイル単位で更新する。
+旧版の退避先は各配置先の隣に`*.backup-*`として表示される。
 
-### 実機でopensbi区画容量を確認する
+配置と`depmod`の成功後、保存しないと選んだ退避ファイルを削除する。
+途中で失敗した場合、スクリプトは配置済みの新ファイルの取り除きと旧ファイルの復元を試みる。
+復元エラーが出た場合は表示された退避先を確認する。
+一括配置後はinitrdとLinux用DTBを準備し、起動先の指定は第7章で行う。
 
-repositoryの`scripts/check-jupiter2-install-capacity.py`を実機へコピーして実行する。
-root権限は不要。`/sys/class/mtd/`からnameが`opensbi`、typeが`nor`の区画を一意に検出する。
+### 新kernel用initrdを生成する
+
+一括配置が成功したら、Bianbuの実機Linux上で新しいリリースのinitrdを作る。
+`update-initramfs -k`に渡すのは`kernelrelease.txt`の値。
+例えば`Image-6.18.3-keystone`に対応するリリースは`6.18.3`。
 
 ```bash
-python3 scripts/check-jupiter2-install-capacity.py
-# 対象番号を明示する場合もname/typeを検査する
-python3 scripts/check-jupiter2-install-capacity.py --mtd mtd5 --json
+(
+    set -eu
+    BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
+    KREL=$(cat "$BUNDLE/kernelrelease.txt")
+    case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
+    cmp -- "$BUNDLE/linux/Image" "/boot/Image-$KREL-keystone"
+    cmp -- "$BUNDLE/modules/$KREL/extra/keystone-driver.ko" \
+      "/lib/modules/$KREL/extra/keystone-driver.ko"
+    CONFIG="/boot/config-$KREL"
+    if [[ -e "$CONFIG" || -L "$CONFIG" ]]; then
+        cmp -- "$BUNDLE/linux/config" "$CONFIG"
+    else
+        sudo install -m 0644 -- "$BUNDLE/linux/config" "$CONFIG"
+    fi
+
+    INITRD="/boot/initrd.img-$KREL"
+    INITRD_MODE=-c
+    if [[ -e "$INITRD" ]]; then
+        INITRD_MODE=-u
+    fi
+    if sudo update-initramfs "$INITRD_MODE" -k "$KREL"; then
+        if [[ ! -s "$INITRD" ]]; then
+            printf 'initrdの生成・更新に失敗しました。出力が存在しないか空です %s\n' "$INITRD" >&2
+            exit 1
+        fi
+        printf 'initrdの生成・更新に成功しました（終了コード 0） %s\n' "$INITRD"
+    else
+        status=$?
+        printf 'initrdの生成・更新に失敗しました（終了コード %s） %s\n' "$status" "$INITRD" >&2
+        exit "$status"
+    fi
+)
 ```
 
-今回提供された実機の配置はNOR全体8 MiB、OpenSBI区画`mtd5`が393216 bytes（384 KiB）、
-erase単位4096 bytes。比較対象はNOR全体ではなくOpenSBI区画の容量である。
-番号・容量は再確認し、JSONの`capacity_bytes`を次の開発PCの指定値へ転記する。
-区画名の重複、非NOR、読取り失敗時は停止する。使用中boot媒体の判定は別途必要。
+`/boot/config-<release>`はinitramfs-toolsが参照する標準名。
+内容が異なる場合は、bundleとインストール済みImage・モジュール・configの組を確認する。
+生成成功後に、実機のrootfsに必要なストレージやファイルシステムのドライバが
+Imageまたはinitrdに含まれることを確認する。
 
-### 開発PCでイメージを作る
+### Linux用DTBを配置する
 
-第3章のbuild成功後、repository rootで実行する。`--capacity-bytes`は実測値を明示し、
-既存出力へ上書きしないよう新しい`--output`を指定する。
+Keystoneのみの試験では実機向けに準備した`k3-pico-itx-keystone.dtb`を使う。
+既存OpenSBIで新Linuxを起動する第1段階でも、そのファームウェアに適合するDTBを選ぶ。
+[Keystone用DTBの作成と配置](jupiter2-keystone-app-test.md#2-別名の試験用linux-dtbを作る開発pc)
+
+OP-TEE入りのFITでは、同じFITビルドから生成したLinux用DTBを使う。
+以下は第1.5節の`$OUT/release/images/k3-pico-itx-keystone-optee.dtb`を
+実機の`$HOME/tmp`へ転送済みの場合の例。`DTB_DIR`は実機の起動に使うディレクトリに合わせる。
+元の起動用DTBを保持できるよう、別名で配置する。
+[OP-TEE入りFITとLinux用DTBの生成](jupiter2-build-install-test.md#optee-fit-build)
 
 ```bash
-python3 scripts/build-jupiter2-install-image.py \
-    --capacity-bytes 393216 \
-    --output work/jupiter2-release
+DTB_SRC="$HOME/tmp/k3-pico-itx-keystone-optee.dtb"
+DTB_DIR=/boot/spacemit/6.18.3-generic
+sudo install --backup=numbered -m 0644 -- "$DTB_SRC" "$DTB_DIR/"
 ```
 
-**上記コマンドを実行し、終了code 0で完了すると、インストール用イメージが作成される。**
-OpenSBI＋SMの最終FITは`work/jupiter2-release/bundle/firmware/fw_dynamic.itb`、
-Linux・modules・アプリ・実機用tools・docsを含む配布イメージは
-`work/jupiter2-release/bundle.tar.gz`に生成される。
-展開済みの同内容も`work/jupiter2-release/bundle/`にまとまる。
-新しいLinux Imageをコンパイルする処理は含まれないため、第3章のbuild成功が前提となる。
-最終ITBが393216 bytesを超えるなどの検査失敗時は配布イメージを残さず終了する。
+一時起動時はU-Bootでこのファイルを明示して読み込み、`fdt print /firmware/optee`を確認する。
+[同梱構成のU-Boot起動手順](jupiter2-ram-boot-guide.md#5-linuxを一時起動するuartでコマンドを直接入力)
 
-このコマンドは以下を行う。
+### OP-TEEのLinux側ファイルを追加配置する
 
-1. OpenSBI BINを既存K3 ITSで最終ITBに包装する（load/entry `0x100000000`、非圧縮）。
-2. `dumpimage`で本体を抽出し、元BINとSHA-256が一致することを確認する。
-3. 最終ITB全体を指定容量と比較し、超過なら出力を残さず失敗する。
-4. Imageとdriver overlayの記録済みkernel hashを照合し、全modules、driver、hello二種をまとめる。
-5. 容量結果、FIT表示、source情報、SHA256SUMS、転送用tar.gzを生成する。
+外部TAを試験する場合は、実機用Coreと同じTA開発キットで作成した署名済みTAと
+RV64の`tee-supplicant`を実機へ転送する。通常のKeystone用bundleとは別に扱う。
+既存のTAや`tee-supplicant`サービスの設定を保存し、実機のTA検索先と実行パスに合わせて配置する。
 
-出力例：
-
-```text
-work/jupiter2-release/
-    ├── bundle.tar.gz
-    ├── bundle.tar.gz.sha256
-    └── bundle/
-        ├── firmware/fw_dynamic.{bin,elf,itb,its}
-        ├── linux/{Image,config}
-        ├── modules/KERNELRELEASE/
-        ├── apps/{hello,hello-native}.ke
-        ├── kernelrelease.txt
-        ├── capacity.json
-        ├── fit-inspection.txt
-        ├── README.md
-        ├── tools/{check-capacity.py,verify.sh,preflight.sh,install-linux.sh,run-hello.sh}
-        ├── docs/                    本手順・置換復旧・実機調査等
-        ├── check-capacity.py        互換用の従来パス
-        ├── source-commit.txt
-        ├── source-local.patch
-        ├── source-untracked.txt
-        └── SHA256SUMS
-```
-
-**実機へ持っていくものは、この`bundle/`全体、または`bundle.tar.gz`とそのchecksumだけ。**
-生成物・実機用スクリプト・運用資料を一か所へ集約しており、実機にrepositoryのcheckoutは不要。
-展開先の`README.md`に最初の操作とOS依存ツールを記載する。
+以下は既存サービスを使わず、fTPM用の成果物を`$HOME/jupiter2-optee/`へ転送した例。
 
 ```bash
-# 実機。展開済みbundle内で実行。verify/preflightは書込みをしない。
-bash tools/verify.sh
-bash tools/preflight.sh
-# 第5章のバックアップを済ませ、第6章の配置を行う場合だけ実行する。手動配置との二重実行はしない。
-sudo bash tools/install-linux.sh
+OPTEE_STAGE="$HOME/jupiter2-optee"
+FTPM_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
+sudo install -D --backup=numbered -m 0644 \
+  "$OPTEE_STAGE/$FTPM_UUID.ta" "/lib/optee_armtz/$FTPM_UUID.ta"
+sudo install -D --backup=numbered -m 0755 \
+  "$OPTEE_STAGE/tee-supplicant" /usr/local/sbin/jupiter2-tee-supplicant
 ```
 
-### install-linux.shが実機へ配置するファイル
-
-`sudo bash tools/install-linux.sh`は、展開したbundleから次のファイルを実機へコピーする。
-表の`<release>`は、bundle内の`kernelrelease.txt`に記録されたkernel releaseを表す。
-
-| bundle内のファイル | 実機への配置先 | 用途 |
-| --- | --- | --- |
-| `linux/Image` | `/boot/Image-<release>-keystone` | 新しいLinux kernel本体 |
-| `linux/config` | `/boot/config-<release>-keystone` | そのkernelのbuild設定。起動時に読む設定ファイルではない |
-| `modules/<release>/`全体 | `/lib/modules/<release>/` | 新kernel用の全kernel modules。Keystone driverを含む |
-| `modules/<release>/extra/keystone-driver.ko` | `/lib/modules/<release>/extra/keystone-driver.ko` | 上記modulesに含まれるKeystone driver |
-| `apps/hello.ke`、`apps/hello-native.ke` | `/opt/keystone/<release>/` | Enclave動作確認用の二つのサンプル |
-
-配置後、`depmod -a <release>`でmodule依存情報を生成する。
-事前にbundleのchecksum、実機側の必要コマンドと区画容量を検査する。
-既存の配置先ごとに上書きするか、旧版のバックアップを残すかを確認する。
-すべての確認が済んでから書き込みを始める。既定は上書きしない、バックアップは残す。
-モジュールはリリースのディレクトリ一式を交換する。既存のアプリ用ディレクトリでは対象のアプリだけを交換する。
-旧版は配置先の隣に `*.backup-*` として退避し、保存しないと選んだものは配置と `depmod` の成功後に削除する。
-
-**このコマンドでは新しいLinuxを起動しない。現在実行中のkernelも、次回起動するkernelの指定も変わらない。**
-initramfsの生成は[第6章](#6-新linuxとアプリを追加配置する)、
-起動するLinuxの変更は[第7章](#7-試験用boot-entryを追加する)で行う。
-今回の`/boot/env_k3.txt`を使う構成は、第7章の「U-Bootから直接起動する場合」を参照する。
-OpenSBI＋SMの書込みは[第8章](#8-ブートイメージの導入)の別工程となる。
-DTBの配置、boot設定の編集、driverのロード、再起動も、このスクリプトでは行わない。
-
-配置途中でI/Oエラー等が発生しても、それまでにコピーしたファイルは自動削除しない。
-再実行前に上表の配置先を確認する。
-必要なfirmware更新と新kernelの起動確認が済んだ後、
-`sudo bash tools/run-hello.sh`でbundle内の二つのサンプルを実行できる。
+OP-TEE入りFITで起動してから、実機OSの既存サービスか、別端末で
+`sudo /usr/local/sbin/jupiter2-tee-supplicant`を使う。
+[OP-TEEとTAの動作確認](#op-teeの試験)
 
 <a id="install-kernel-modules-only"></a>
 ### カーネルモジュールのみをインストールする
@@ -267,6 +269,7 @@ DTBの配置、boot設定の編集、driverのロード、再起動も、この�
 実機Linuxで実行する。展開先が `$HOME/tmp/bundle` と異なる場合は、
 実際のパスを `BUNDLE` に設定する。モジュール一式の新規配置と
 Keystoneドライバ単体の追加・更新のうち、該当する方を実行する。
+`findmnt -T /boot`を第5章の記録と照合し、対象のbootfsを使う。
 
 #### モジュール一式の新規配置・更新
 
@@ -360,6 +363,8 @@ bundleの `linux/Image` と同じビルドであることをU-Bootの起動記�
 確認してから実行する。以下は `/boot/Image-<release>-keystone` を起動した場合の例。
 更新前に実行中のEnclaveとKeystoneアプリを終了する。ロード済みの場合はドライバを
 取り外してから更新する。旧ファイルは `keystone-driver.ko.~1~` などの連番付きで保存する。
+対象releaseのinitrdと標準名のconfigを用意し、`depmod`の後でinitrdを更新する。
+初めてinitrdを作る場合は前掲の生成手順を使う。
 Imageも変更した場合は、対応する新Imageとモジュール一式を別リリースとして配置する。
 
 ```bash
@@ -372,6 +377,10 @@ Imageも変更した場合は、対応する新Imageとモジュール一式を�
     test "$(uname -r)" = "$KREL"
     cmp "$BUNDLE/linux/Image" "/boot/Image-$KREL-keystone"
     test -d "/lib/modules/$KREL"
+    cmp -- "$BUNDLE/linux/config" "/boot/config-$KREL"
+    INITRD="/boot/initrd.img-$KREL"
+    test -s "$INITRD"
+    command -v update-initramfs >/dev/null
     SRC="$BUNDLE/modules/$KREL/extra/keystone-driver.ko"
     DEST="/lib/modules/$KREL/extra/keystone-driver.ko"
     test -s "$SRC"
@@ -384,25 +393,29 @@ Imageも変更した場合は、対応する新Imageとモジュール一式を�
     fi
     sudo install -D --backup=numbered -m 0644 -- "$SRC" "$DEST"
     sudo depmod -a "$KREL"
+    if sudo update-initramfs -u -k "$KREL"; then
+        if [[ ! -s "$INITRD" ]]; then
+            printf 'initrdの更新に失敗しました。出力が存在しないか空です %s\n' "$INITRD" >&2
+            exit 1
+        fi
+        printf 'initrdの更新に成功しました（終了コード 0） %s\n' "$INITRD"
+    else
+        status=$?
+        printf 'initrdの更新に失敗しました（終了コード %s） %s\n' "$status" "$INITRD" >&2
+        exit "$status"
+    fi
     sudo modprobe keystone_driver
     test -c /dev/keystone_enclave
 )
 ```
 
-Keystoneドライバ単体の更新では、起動に使うinitrdにドライバが含まれている場合に
-initrdも更新する。例えば `KREL` にbundleのリリースを設定し、
-`lsinitramfs "/boot/initrd.img-$KREL"` の出力に `keystone-driver.ko` または
-その圧縮ファイルがある場合は、再起動前に `sudo update-initramfs -u -k "$KREL"` を実行する。
+initrdの更新に失敗した場合は、表示された終了コードと旧ドライバの退避先を確認する。
+対象releaseのinitrdを正しく更新してから次回の起動に使う。
 
 ### tools・appsを個別に配置する
 
 実機Linuxで、転送・展開済みの通常bundleを使う。パスを実際の展開先に置き換え、
-最初に整合性を確認する。以降は必要な項目だけを実行する。
-
-```bash
-BUNDLE="$HOME/tmp/bundle"  # 実際の展開先に合わせる
-bash "$BUNDLE/tools/verify.sh"
-```
+以降は必要な項目を実行する。
 
 **appsのみ**。`hello.ke` と `hello-native.ke` をリリース別に置く。実行は対応する
 Linux・Keystoneドライバ・SMで起動した後に行う。同じリリースへ再配置する場合は、
@@ -411,6 +424,8 @@ Linux・Keystoneドライバ・SMで起動した後に行う。同じリリー�
 ```bash
 (
     set -eu
+    BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
+    bash "$BUNDLE/tools/verify.sh"
     KREL=$(cat "$BUNDLE/kernelrelease.txt")
     case "$KREL" in ''|.|..|*[!A-Za-z0-9._+-]*) exit 1;; esac
     DEST="/opt/keystone/$KREL"
@@ -418,7 +433,8 @@ Linux・Keystoneドライバ・SMで起動した後に行う。同じリリー�
     test -s "$BUNDLE/apps/hello-native.ke"
     test ! -L "$DEST"
     sudo install -d -- "$DEST"
-    sudo install --backup=numbered -m 0755 --         "$BUNDLE/apps/hello.ke" "$BUNDLE/apps/hello-native.ke" "$DEST/"
+    sudo install --backup=numbered -m 0755 -- \
+      "$BUNDLE/apps/hello.ke" "$BUNDLE/apps/hello-native.ke" "$DEST/"
 )
 ```
 
@@ -426,8 +442,13 @@ Linux・Keystoneドライバ・SMで起動した後に行う。同じリリー�
 OpenSBI用NOR区画の容量を読み取る。
 
 ```bash
-sudo install -m 0755 -- "$BUNDLE/tools/check-capacity.py" /usr/local/bin/jupiter2-check-capacity
-python3 /usr/local/bin/jupiter2-check-capacity --json
+(
+    set -eu
+    BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
+    bash "$BUNDLE/tools/verify.sh"
+    sudo install -m 0755 -- "$BUNDLE/tools/check-capacity.py" /usr/local/bin/jupiter2-check-capacity
+    python3 /usr/local/bin/jupiter2-check-capacity --json
+)
 ```
 
 `verify.sh`、`preflight.sh`、`install-linux.sh`、`run-hello.sh` は
@@ -438,421 +459,92 @@ python3 /usr/local/bin/jupiter2-check-capacity --json
 
 ### 実機Linux上でKeystoneとOP-TEEをテストする
 
-個別配置後、試験対象のファームウェアと対応するLinux Imageで起動した実機で実行する。
-同梱構成では、以下の2試験を同じLinux起動中に行い、UARTログと各試験の結果を保存する。
+第7〜8章の起動手順を済ませ、試験対象のファームウェアと対応するImage・initrd・DTBで
+実機Linuxを起動してから実行する。
 
 #### Keystoneの試験
 
-直前の節で指定した `BUNDLE` を使う。次のスクリプトは起動中のkernel releaseと
-配置済みKeystoneドライバを照合し、ドライバを読み込んでbundle内の
-`hello.ke` と `hello-native.ke` を順に実行する。
+Keystone SMで起動した実機Linuxで実行する。スクリプトは起動中のリリースと
+配置済みドライバをbundleと照合し、ドライバを読み込んで`hello.ke`と`hello-native.ke`を順に実行する。
 
 ```bash
+BUNDLE="${BUNDLE:-$HOME/tmp/bundle}"
 sudo bash "$BUNDLE/tools/run-hello.sh"
 ```
 
-両アプリが終了コード0で終わり、Enclaveが正常終了したことを確認する。
-詳しい確認項目は[実機での基本確認](#9-実機での基本確認)を参照する。
+両サンプルの正常終了と、試験後もLinuxが応答することを確認する。
+混成CPUでの試験はLinux CPU番号とhart IDの対応を確認してからX100・A100で実施する。
+[Keystoneアプリの詳しい試験](jupiter2-keystone-app-test.md#6-ドライバーとhello二種を試験する実機linux)
 
 #### OP-TEEの試験
 
-OP-TEE Core入りFITで起動し、UART上でCoreの起動を確認する。
-次に実機Linuxで、OP-TEEドライバの初期化ログとTEEデバイスを確認する。
+Linuxのビルド設定で `CONFIG_TEE`、`CONFIG_OPTEE`、`CONFIG_RISCV_SBI_MPXY_MBOX` を確認する。
+実機LinuxではMPXYに対応するLinux用DTBのノード、OP-TEEドライバの初期化ログ、
+TEEデバイスを確認する。
 
 ```bash
-sudo dmesg | grep -Ei 'optee|mpxy'
+test -d /sys/firmware/devicetree/base/firmware/optee
+sudo dmesg | grep -Ei 'op.?tee|mpxy'
 ls -l /dev/tee[0-9]* /dev/teepriv[0-9]*
 ```
 
-TAの応答を確認する例として、実機用Coreと同じTA開発キットでビルドしたfTPM TAと
-RV64版 `tee-supplicant` を[Linux側の配置手順](#op-teeのlinux側ファイルを追加配置する)
-に従って用意し、supplicantを起動する。
-
-LinuxのfTPMドライバを使う場合は、実機に `tpm2-tools` を用意する。
-ドライバを読み込んでから、起動ログとsysfsでfTPMに対応するデバイスを確認する。
-`TPM_DEVICE` は実際に割り当てられた番号に合わせる。
+外部TAの試験は第6章で配置したTAとsupplicantを使用する。
+fTPMのLinuxドライバをモジュールとして用意した構成では`sudo modprobe tpm_ftpm_tee`を実行する。
+`tpm2-tools`を実機に用意し、sysfsとログでfTPMに対応するTPMデバイスを特定する。
+以下の`TPM_DEVICE`は、実機で割り当てられた番号に合わせる。
 
 ```bash
-sudo modprobe tpm_ftpm_tee
-sudo dmesg | grep -Ei 'optee|ftpm|tpm'
+sudo dmesg | grep -Ei 'op.?tee|ftpm|tpm'
 ls -l /dev/tpmrm*
 TPM_DEVICE=/dev/tpmrm0
 sudo tpm2_getrandom -T "device:$TPM_DEVICE" --hex 16
 ```
 
-16バイトに相当する32桁の16進数が返り、終了コードが0なら、その経路でTAの応答を確認できた。
-LinuxのfTPMドライバがセッションを保持しない構成では、
-[TA直接呼び出し用の試験プログラム](jupiter2-ftpm-ta-test.md#テストコードとtee-supplicantのビルド)
-を実機へ転送し、`sudo ./ftpm-smoke` を実行して `fTPM PASS` と終了コード0を確認する。
+終了コード0で16バイトに相当する32桁の16進数が返れば、fTPM TAの応答を確認できた。
+外部TAを直接確認する場合は、同じCore向けに作成した`ftpm-smoke`を実機へ転送して
+`sudo ./ftpm-smoke`を実行し、`fTPM PASS`と終了コード0を確認する。
+[TA直接呼び出しの準備](jupiter2-ftpm-ta-test.md#テストコードとtee-supplicantのビルド) ·
+[TPMデバイスを使う試験](jupiter2-ftpm-ta-test.md#linuxのtpmリソースマネージャー経由の試験)
 
-### bundle.tar.gzに含まれる記録ファイル
-
-次のファイルはtarを展開した`bundle/`内の説明・検証用ファイルであり、
-`install-linux.sh`によって`/boot`や`/lib/modules`へ配置されるものではない。
-
-| bundle内のファイル | 内容 |
-| --- | --- |
-| `kernelrelease.txt` | 同梱kernelとmodulesのrelease。配置先の名前と実行中kernelの照合に使う |
-| `capacity.json` | 作成時に指定したOpenSBI区画容量、最終ITBのサイズ、容量判定、ITBのSHA-256 |
-| `fit-inspection.txt` | FIT作成・内容表示の出力 |
-| `source-commit.txt` | パッケージ作成時のソースcheckoutのcommit ID |
-| `source-local.patch` | パッケージ作成時の追跡済みファイルとHEADとの差分 |
-| `source-untracked.txt` | パッケージ作成時のGit未追跡ファイルのパス一覧。ファイル本体は含まず、tarの収録ファイル一覧でもない |
-| `SHA256SUMS` | bundle内の通常ファイルを照合するSHA-256一覧 |
-| `README.md`、`docs/` | 実機での操作方法と関連手順書 |
-
-`source-*`は作成時checkoutの記録であり、ソースコード一式を保存するものではない。
-再現可能な配布には必要なソースをcommitし、変更のないcheckoutでbuildする。
-ビルド先を変えた場合は、イメージ作成時に`--k3-build-dir`と`--keystone-build-dir`を指定する。
-
-### 実機OS側で用意するツールと同梱しないもの
-
-Python、Bash、coreutils、kmod等は実機OSの標準パッケージを使う。
-`tools/preflight.sh`が主要コマンドの有無を検査する。
-NOR書込み用mtd-utils等の追加依存は、bundle内の`README.md`を参照する。
-これらのOS標準パッケージはtarに含まれないため、必要なら実機OSへ別途導入する。
-
-DTBは自動同梱・配置しない。実機に適合すると確認したDTBを別途用意し、第7章で参照先を指定する。
-開発PC用のx86バイナリー、QEMU向けguest-overlayのshutdown等も同梱しない。
-
-FITだけを作る場合：
-
-```bash
-python3 scripts/build-jupiter2-install-image.py \
-    --firmware-only --capacity-bytes 393216 \
-    --output work/jupiter2-install/firmware-01
-# 明示的な別BINの場合は、上記に --firmware-bin /absolute/path/fw_dynamic.bin を追加
-```
-
-firmware-only出力にはLinux/modules/apps/kernelrelease.txtは含まれず、第6節のOS配置には使えない。
-容量超過した現行firmwareをこのスクリプトが小さくするわけではない。サイズ削減・対応圧縮・
-区画変更は別作業とし、ITBを切り詰めたり、uboot区画へはみ出して書いたりしない。
-SMの最適化指定による削減実測は[OpenSBIとSMの容量削減調査](jupiter2-firmware-size-reduction.md)を参照。
-通常の`make opensbi`にもSMの`-O2`を組み込んだ。Makefile経由の再buildで最終ITB
-271,903 bytesを確認したが、使用環境で最終容量を再確認し、実機採用には同資料の回帰・適合性確認を行う。
-
-### 転送後に実機容量ともう一度比較する
-
-`bundle.tar.gz`とchecksumをscpまたはUSBで実機へ転送する。
-ホストで表示したSHA-256と照合してから新規directoryへ展開する。
-
-```bash
-sha256sum -c bundle.tar.gz.sha256
-tar -xzf bundle.tar.gz
-cd bundle
-sha256sum -c SHA256SUMS
-python3 tools/check-capacity.py --image firmware/fw_dynamic.itb --mtd mtd5
-```
-
-`mtd5`はその時点の実機の番号に合わせる。省略すれば自動検出する。
-開発PCで再確認する場合は、実機sysfsの代わりに`--capacity-bytes 393216`を指定できる。
-
-容量確認の終了codeは0＝収まる（image省略時は容量取得成功）、1＝容量超過、2＝入力・読取りerror。
-`--json`の`fits`と終了codeを両方確認する。イメージ作成は0＝作成成功、2＝作成失敗。
-FIT magicの検査と容量確認は、署名・完全なFIT構造・実機起動互換性の検証ではない。
-このスクリプトはMTDを読取り参照するだけで、区画が使用中boot元であるとは判定しない。
-
-スクリプトのローカル試験：
-
-```bash
-python3 scripts/tests/test-jupiter2-install-tools.py -v
-```
-
-容量境界、MTD属性、実mkimage/dumpimageによる包装・抽出、超過時cleanup、
-出力の上書き拒否、kernel hash不一致を検査する。テストpayloadは包装用の人工データであり、
-OpenSBI/SM・QEMU guest・実機の動作試験ではない。FIT tool不足時は該当caseがskipされる。
-
-## 5. 実機の現状記録とバックアップ
-
-実機に電源、UART、ネットワークを接続する。UARTは基板資料で電圧・端子を確認し、
-115200/8N1・フロー制御なしで電源投入直後から記録する。
-Jupiter2 SBCにSDスロットはないため、SD起動を前提にしない。
-
-実機Linuxで [READMEの採取手順](../README.md#22-導入前の実機情報を採取) を実行し、
-`INFO_DIR` を設定した同じ端末で続ける。ログと以下のバックアップは同じ
-`INFO_DIR` にまとめ、開発PCの `hardware/jupiter2/captures/<採取ID>/` に保存する。
-
-`/sys/firmware/fdt`がない環境は、`dtc -I fs`等で実行中DTを別途採取する。
-UEFIを使用していれば`efibootmgr -v`、GRUBなら`/etc/default/grub`、`/etc/grub.d/`、
-`/boot/grub/grub.cfg`、extlinuxなら実際に使う`extlinux.conf`も退避する。
-`/boot`、ESP、rootfs上の利用者データもバックアップする。
-
-OpenSBI区画全体と必要なNOR/GPT情報の読取りは
-[置換手順の第4章](milkv-jupiter2-opensbi-replacement.md#4-実機の起動媒体と配置を確定しバックアップする)
-で行う。MTD番号を固定せずname/type/offset/sizeを照合する。
-現在の販売元一式（FSBL、書込み用U-Boot、EDK2、ESOS、bootinfo、JSON等）は同一releaseで保存する。
-
-### Linux起動設定の復旧用バックアップ
-
-第1段階のファイル配置や設定変更より前に、実機Linuxで保存する。
-`ROLLBACK`は以降の各章でも同じ絶対パスを指定する。実機外の作業PCにもコピーしておく。
-
-```bash
-set -euo pipefail
-ROLLBACK="$INFO_DIR/jupiter2-rollback-$(date +%Y%m%d-%H%M%S)"
-mkdir -m 700 "$ROLLBACK"
-uname -r > "$ROLLBACK/original-kernel-release.txt"
-findmnt --target /boot > "$ROLLBACK/boot-mount.txt"
-lsblk -o NAME,PATH,FSTYPE,UUID,PARTUUID,PARTLABEL,MOUNTPOINTS > "$ROLLBACK/storage.txt"
-ENV_BACKUP="/boot/env_k3.txt.$(date +%Y%m%d-%H%M%S)"
-sudo test ! -e "$ENV_BACKUP"
-sudo test ! -L "$ENV_BACKUP"
-sudo cp -a -- /boot/env_k3.txt "$ENV_BACKUP"
-sudo cmp -- /boot/env_k3.txt "$ENV_BACKUP"
-sudo cp -a -- "$ENV_BACKUP" "$ROLLBACK/env_k3.txt"
-sha256sum "$ROLLBACK/env_k3.txt" > "$ROLLBACK/env_k3.txt.sha256"
-```
-
-同じディレクトリの `env_k3.txt.<日付>` と、持ち出し用の復旧ディレクトリの両方に保存する。
-これは今回の`env_k3.txt`方式用。GRUB/extlinux方式では、実際に変更する設定を同様に保存する。
-旧kernel・旧initramfs・旧DTB・旧modulesを残し、新releaseが旧releaseと重複しないことを確認する。
-## 6. 新Linuxとアプリを追加配置する
-
-**第1段階の配置工程。OpenSBIは既存のまま変更しない。**
-
-以降は実機上。旧kernelのboot entry、Image、initramfs、modulesを保持する。
-`BUNDLE`は前節で検証した`bundle/`の絶対パスを指定する（firmware-onlyは不可）。
-第4章の`tools/install-linux.sh`を使う場合は、以下の手動配置を重ねて実行しない。
-同スクリプトで配置した場合も、次のinitramfs生成と第7節以降は必要である。
-
-```bash
-set -euo pipefail
-BUNDLE=/absolute/path/to/bundle
-KREL=$(cat "$BUNDLE/kernelrelease.txt")
-case "$KREL" in ''|*[!A-Za-z0-9._+-]*) exit 1;; esac
-cd "$BUNDLE"
-sha256sum -c SHA256SUMS
-# 同じreleaseの既存modulesを上書きしない。
-test ! -e "/lib/modules/$KREL"
-test ! -e "/boot/Image-$KREL-keystone"
-test ! -e "/opt/keystone/$KREL"
-sudo install -m 0644 linux/Image "/boot/Image-$KREL-keystone"
-sudo install -m 0644 linux/config "/boot/config-$KREL-keystone"
-sudo cp -a "modules/$KREL" /lib/modules/
-sudo depmod -a "$KREL"
-sudo install -d "/opt/keystone/$KREL"
-sudo install -m 0755 apps/hello.ke apps/hello-native.ke "/opt/keystone/$KREL/"
-```
-
-既存kernelとreleaseが同じなら停止する。分離したbuild出力で固有の`CONFIG_LOCALVERSION`を
-設定し、Image・全modules・driverを再buildしてパッケージを作り直す。
-`build-linux-k3.sh`は毎回defconfigを再適用するため、`.config`だけを書き換えてから
-`make keystone`を再実行すると設定が戻る。固有releaseの導入はbuild設定にも反映して固定する。
-
-### OP-TEEのLinux側ファイルを追加配置する
-
-実機用CoreとLinux用DTBに適合するRV64の成果物を実機へ転送する。
-署名済みTAは `tee-supplicant` のTA検索先（通常 `/lib/optee_armtz/`）へ、
-`tee-supplicant` は実機OSの既存サービス設定で使うパスへ配置する。
-既存のファイルやサービス設定は第5章の復旧資料へ退避する。
-実機OSにサービスがなければ、試験時に転送した `tee-supplicant` を別端末で起動する。
-Keystone配布用bundleの `install-linux.sh` はこれらを自動配置しない。
-
-例えば、同じCore向けに作ったfTPM TAとsupplicantを実機の
-`$HOME/jupiter2-optee/` に転送した場合、既存サービスを使わない試験では以下のように配置する。
-既に同じ名前のTAやsupplicantがある場合は、先に既存ファイルと設定を退避する。
-
-```bash
-OPTEE_STAGE="$HOME/jupiter2-optee"
-FTPM_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
-sudo install -D -m 0644 "$OPTEE_STAGE/$FTPM_UUID.ta" "/lib/optee_armtz/$FTPM_UUID.ta"
-sudo install -D -m 0755 "$OPTEE_STAGE/tee-supplicant" /usr/local/sbin/jupiter2-tee-supplicant
-```
-
-起動後、既存の `tee-supplicant` サービスがない場合は別端末で
-`sudo /usr/local/sbin/jupiter2-tee-supplicant` を実行する。
-既存サービスがある場合はそのサービスを使用し、supplicantを二重起動しない。
-
-
-同梱FITから起動した後に `/dev/tee*` を確認し、外部TAのセッションを開いて
-コマンド応答を検査する。fTPMを有効にした場合は `/dev/tpmrmN` の登録と
-対象デバイスでのTPMコマンド応答を確認する。
-[デバイス経由の検査](jupiter2-ftpm-ta-test.md#linuxのtpmリソースマネージャー経由の試験)
-
-### 配置したkernelのreleaseを確認する
-
-**`install-linux.sh`はinitrdを作成しない。次の確認・生成を済ませてから第7章のUART起動試験へ進む。**
-ここで使うreleaseは、現在動作中の旧kernelの`uname -r`ではなく、配置した新kernelのreleaseである。
-
-bundleの記録を確認する。
-
-```bash
-BUNDLE=/absolute/path/to/bundle
-cat "$BUNDLE/kernelrelease.txt"
-ls -l /usr/lib/modules/
-ls -ld /lib/modules /usr/lib/modules
-```
-
-`/lib/modules`と`/usr/lib/modules`はOSのusr統合により同じ場所を指す場合がある。
-initramfs生成時に新releaseのmodulesが`/lib/modules/<release>/`から参照できることを確認する。
-複数releaseがある場合は、一覧の新しさだけで選ばず、bundleの`kernelrelease.txt`と照合する。
-
-今回提示された実機の配置は以下である。
-
-| 項目 | 今回の値 | 意味 |
-| --- | --- | --- |
-| 配置したkernelファイル | `/boot/Image-6.18.3-keystone` | U-Bootがロードするkernel本体 |
-| 新kernel用modules | `/usr/lib/modules/6.18.3/` | 新kernelのreleaseは`6.18.3`。bundleの記録とも一致することを確認 |
-| 旧kernel用modules | `/usr/lib/modules/6.18.3-generic/` | 従来のkernel用。削除しない |
-| 配置したbuild設定 | `/boot/config-6.18.3-keystone` | 新kernelのconfig |
-| これから作るinitrd | `/boot/initrd.img-6.18.3` | 新releaseに対応するinitramfs |
-
-**`Image-6.18.3-keystone`の末尾`-keystone`は配置用のファイル名であり、kernel releaseの一部ではない。**
-今回の`update-initramfs -k`には`6.18.3`を指定する。
-`6.18.3-keystone`や、起動中の旧release `6.18.3-generic`を指定しない。
-
-### 新kernel用initrdを生成する
-
-以下は**実機Linux上**で実行する。Bianbuのinitramfs-toolsを使い、PCのクロス環境では実行しない。
-`update-initramfs`が未導入なら、実機側で`sudo apt-get install initramfs-tools`を行う。
-
-まずkernelとmodulesの存在を確認し、module依存情報を更新する。
-initramfs-tools向けに、同じbuild設定を標準名`/boot/config-6.18.3`でも用意する。
-既存の標準名ファイルがあれば、同じ内容であることを確認し、異なる場合は上書きせず停止する。
-
-```bash
-set -euo pipefail
-KREL=6.18.3
-test -s "/boot/Image-$KREL-keystone"
-test -d "/lib/modules/$KREL"
-test -s "/lib/modules/$KREL/extra/keystone-driver.ko"
-if test -e "/boot/config-$KREL"; then
-    cmp "/boot/config-$KREL-keystone" "/boot/config-$KREL"
-else
-    sudo install -m 0644 "/boot/config-$KREL-keystone" "/boot/config-$KREL"
-fi
-sudo depmod -a "$KREL"
-```
-
-新規にinitrdを作る場合は次を実行する。
-
-```bash
-sudo update-initramfs -c -k 6.18.3
-ls -lh /boot/initrd.img-6.18.3
-test -s /boot/initrd.img-6.18.3
-```
-
-既に`initrd.img-6.18.3`を作成済みで、同じbuildのmodules等を反映して更新する場合は、
-`-c`ではなく`sudo update-initramfs -u -k 6.18.3`を使う。
-生成コマンドが失敗した場合や、出力が空の場合はU-Bootの起動試験へ進まない。
-旧`initrd.img-6.18.3-generic`で新kernelのmodulesを代用しない。
-
-別releaseを導入する場合は上記の`6.18.3`を、検証した`kernelrelease.txt`の値へ置き換える。
-別のinitramfs方式では、そのOSの生成コマンドを使う。
-起動rootfsに必要なUFS/NVMe/USB、ファイルシステム等のdriverがImageまたはinitramfsに
-含まれることを確認する。実機rootfsは既存OSを使い、QEMU用ext4イメージをUFS/NVMe全体へ書かない。
-実機のglibc/libstdc++がrunnerに適合することも確認する。ロード時のGLIBC版不足は
-対応sysrootでrunnerを再buildし、実機libcを手動上書きして解決しない。
+同梱構成では、同じ起動中にKeystoneとOP-TEEの結果を採取する。
+同時実行、再起動後の保持、IMA、PMPなどの追加確認は構成に合う実機検査項目を使用する。
+[同梱構成の実機検査](jupiter2-coexistence-16-pmp-plan.md#2-検証項目と合格条件)
 
 ## 7. 試験用boot entryを追加する
 
-**第1段階の起動確認工程。第6章の新Linuxを、既存OpenSBIのまま起動する。**
-
-使用中のboot経路を第5章の記録から選ぶ。EDK2のBoot ManagerでOSを切り替えても
-M-modeのOpenSBIは置き換わらない。kernel entryとfirmware更新は別工程である。
+第1段階では既存OpenSBIで、配置したLinuxと対応するinitrd・Linux用DTBを一時起動する。
+第5章の記録で特定した起動経路を使う。
 
 ### U-Bootから直接起動する場合
 
-今回のBianbu 4.0.4では、`env_k3.txt`を変更する前にUARTから一度だけ新kernelを起動する。
-試験に失敗しても、再起動すれば従来の`env_k3.txt`から旧kernelを選べるようにする。
+Bianbuの`env_k3.txt`を使う構成では、UARTでU-Bootを止め、試験用のImage、initrd、
+DTBをその起動のRAM上で指定する。起動試験の前に`/boot/env_k3.txt`を編集せず、
+`saveenv`も実行しない。旧ファイルとそのバックアップは保持する。
 
-#### 配置後に旧Linux上で準備する
-
-1. 第5章のバックアップを実機外にも保存し、旧kernel・旧initramfs・旧DTBを残す。
-2. 第6章で新kernel、modules、appsを配置し、新kernel用initramfsを生成する。
-3. `kernelrelease.txt`から新releaseを確認し、実際のkernel名
-   `Image-<release>-keystone`、initramfs名`initrd.img-<release>`を記録する。
-4. 新kernelで使う実機用DTBと、そのdirectoryを確認する。
-   DTBは自動配置されないため、既存DTBを使う場合も新kernelとの適合を確認する。
-5. `findmnt /boot`で、U-Bootが読むbootfsがLinuxの`/boot`にマウントされていることを確認する。
-
-**この時点では`/boot/env_k3.txt`を編集しない。**
-
-#### UARTでU-BootのRAM上だけに新kernelを指定する
-
-配線・PC側ソフト・ログ保存は[UART接続手順](milkv-jupiter2-uart.md)を参照する。
-UARTコンソールを接続し、リセット・電源投入直後から小文字の`s`を押し続け、
-U-Bootプロンプトへ入る。kernelを変更する前に、この操作で停止できることを確認しておく。
-
-まず旧設定と通常の起動処理を表示し、UARTログへ保存する。
-
-```text
-printenv bootcmd autoboot boot_device
-printenv boot_devname boot_devnum bootfs_part
-printenv knl_name ramdisk_name dtb_dir dtb_name
-```
-
-次に、新kernel用の値をRAM上に設定する。
-第6章でinitrd生成に成功し、旧Linux上で次の実ファイル・directoryを確認してから実施する。
-
-```bash
-ls -lh /boot/Image-6.18.3-keystone /boot/initrd.img-6.18.3
-find /boot/spacemit/6.18.3-generic -type f -name '*.dtb'
-```
-
-上記はLinux上の確認コマンド。以下の`setenv`は**UARTで停止したU-Bootプロンプト**で実行する。
-
-| U-Boot変数 | 今回設定する値 | 対応する実機Linux上の場所 |
+| 指定する項目 | U-Bootでの指定例 | 事前に照合する実機上のファイル |
 | --- | --- | --- |
 | `knl_name` | `Image-6.18.3-keystone` | `/boot/Image-6.18.3-keystone` |
-| `ramdisk_name` | `initrd.img-6.18.3` | 第6章で生成した`/boot/initrd.img-6.18.3` |
-| `dtb_dir` | `spacemit/6.18.3-generic` | 継続利用する既存DTBの`/boot/spacemit/6.18.3-generic/` |
+| `ramdisk_name` | `initrd.img-6.18.3` | `/boot/initrd.img-6.18.3` |
+| `dtb_dir`と`fdtfile` | `spacemit/6.18.3-generic`と`k3-pico-itx-keystone.dtb` | `/boot/`以下に配置した実際のディレクトリとLinux用DTB |
 
-```text
-setenv knl_name Image-6.18.3-keystone
-setenv ramdisk_name initrd.img-6.18.3
-setenv dtb_dir spacemit/6.18.3-generic
-printenv knl_name ramdisk_name dtb_dir
-```
-
-U-Bootのファイル指定はbootfsを基準とするため、上記変数に`/boot/`は付けない。
-今回のkernelとinitrdのreleaseは`6.18.3`だが、DTB directoryは既存の`6.18.3-generic`を使う。
-このDTBの継続利用は新kernelとの適合確認が前提であり、動作確認済みという意味ではない。
-新release名のDTB directoryが自動作成されるわけではない。
-`dtb_name`を機種情報から決定する既存処理を維持し、実際に読み込むDTBをUARTログで確認する。
-
-別releaseのkernelを使う場合も、kernelファイル名、modulesのrelease、生成したinitrd名、
-実在するDTB directoryをこの表のように照合して指定する。
-
-**`saveenv`は実行しない。** NOR上の環境やbootfsのファイルへ保存せず、その起動だけに適用する。
-表示した`bootcmd`が通常のK3起動処理で、途中で設定を再読込み・上書きしないことを確認してから：
-
-```text
-run bootcmd
-```
-
-ベンダーK3の標準経路では`env_k3.txt`はU-Boot初期化中に読み込まれ、
-通常の起動処理はその時点のRAM上の変数を使う。実機の`bootcmd`が独自変更されている場合は、
-その内容に合わせる。新kernelの起動に失敗した場合は、第10章のRAM試験時のrollbackへ進む。
+Imageとinitrdのリリースは`kernelrelease.txt`、DTBのパスは第6章の配置結果に合わせる。
+bootfsのデバイス番号とrootfsのPARTUUIDは採取記録およびU-Bootの一覧で確認する。
+U-Bootのプロンプトでは、RAM起動ガイドの第4〜5節に従いUFSとファイルを確認し、
+Image・initrd・DTBを読み込んで`booti`で起動する。各`load`が成功してから次へ進む。
+[UFSと起動ファイルの確認](jupiter2-ram-boot-guide.md#4-ufsと起動ファイルを確認するuart) ·
+[U-Bootでの一時起動](jupiter2-ram-boot-guide.md#5-linuxを一時起動するuartでコマンドを直接入力)
 
 #### 正常起動後にenv_k3.txtへ永続化する
 
-RAM上の指定で新Linuxが起動したら、下記の第1段階の合格条件を確認する。
-合格するまでは`env_k3.txt`を変更しない。
+新Linuxを通常起動でも使用する場合は、第1段階の合格条件を確認してから保存する。
+Bianbuの標準U-Boot構成では、試験に成功した`knl_name`、`ramdisk_name`、`dtb_dir`を
+`/boot/env_k3.txt`の既存行に反映する。使用するLinux用DTBが通常起動で
+選ばれる設定かどうかも確認する。機種情報で自動選択する設定では、その設定で
+読まれるDTB名を起動ログで確認する。
 
-**今回の標準U-Boot直起動構成では、正常起動した値を永続化するためのboot設定変更は
-`/boot/env_k3.txt`だけでよい。`saveenv`やNORのenv区画更新は不要。**
-
-`env_k3.txt`の既存の`knl_name`、`ramdisk_name`、`dtb_dir`を、
-試験に成功した値へ変更する。同じ変数の行を末尾に重複追加せず、既存行を編集する。
-kernel・initramfs・DTBの実ファイル配置は、それ以前に完了していることが前提となる。
-もし試験で他の起動変数も変更した場合は、必要性を確認し、その設定も別途反映する。
-
-`ramdisk_addr`、`loglevel`、`commonargs`は今回のkernel選択のためには変更しない。
-ファイルを保存後に`sync`し、次はUARTで変数を上書きせずに通常再起動する。
-新kernelが自動選択されて同じ条件で正常起動することを確認して、第2段階へ進む。
-今回の成功後の永続設定例は次のとおり。
-
-```text
-knl_name=Image-6.18.3-keystone
-ramdisk_name=initrd.img-6.18.3
-dtb_dir=spacemit/6.18.3-generic
-```
-永続化後の起動失敗は、第10章の永続化後のrollbackで戻す。
-
-[SpacemiT K3起動資料](https://github.com/spacemit-com/docs-buildroot/blob/main/en/k3_buildroot/device/boot.md)、
-[K3 U-Boot環境定義](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/board/spacemit/k3/k3.env)、
-[設定読込み処理](https://github.com/spacemit-com/uboot-2022.10/blob/k3-br-v1.0.y/board/spacemit/k3/k3.c)も参照。
+設定を保存して`sync`し、UARTで変数を指定せずに通常再起動して同じLinuxが選ばれることを確認する。
+失敗時は第10章の元の起動設定への復旧を行う。
+[K3の起動と設定の資料](https://github.com/spacemit-com/docs-buildroot/blob/main/en/k3_buildroot/device/boot.md)
 
 ### EDK2からGRUBを使っている場合
 
@@ -881,159 +573,102 @@ GRUB/extlinuxで別entryを追加する場合は、既定entryを旧環境のま
 
 ### 第1段階の合格条件
 
-既存OpenSBIのまま新Linuxを起動し、`uname -r`がbundleの`kernelrelease.txt`と一致すること、
-全16 CPU、storage、network、UART、通常のtimer動作を確認する。
-今回、新kernelでの`uname -r`の期待値は`6.18.3`であり、`6.18.3-keystone`ではない。
-Keystone driverを自動loadする設定は作らず、`insmod`・`modprobe keystone_driver`・
-`tools/run-hello.sh`・Enclave実行はまだ行わない。
-
-起動ログと結果を保存する。U-Boot方式ではRAM上の試験成功後に上記の永続化と通常再起動確認まで行う。
-第1段階が合格したら新Linuxの指定を維持し、第8章へ進む。
-失敗したら第2段階には進まず、[第1段階のrollback](#第1段階のrollback)で元の起動設定へ戻す。
+既存OpenSBIで新Linuxが起動し、`uname -r`がbundleの`kernelrelease.txt`と一致することを確認する。
+今回のPico-ITX例では全16 CPU、ストレージ、ネットワーク、UART、通常のタイマー動作を確認する。
+この段階のログを保存してから、第8章の新ファームウェアの確認へ進む。
 
 ## 8. ブートイメージの導入
 
-ブートイメージを永続更新する場合は、[OpenSBIの区画バックアップ・導入・復旧手順](milkv-jupiter2-opensbi-replacement.md#capture-opensbi-partition)を使用する。
-OP-TEE同梱イメージの確認は、[実機向けビルド手順](jupiter2-build-install-test.md#ram-boot-images)と
-[USB RAM起動手順](jupiter2-ram-boot-guide.md)に従う。
+**USB RAM起動**。構成に合う`FSBL.bin`と統合FITを開発PCから転送する。
+同じLinux Imageとinitrdを使い、使用するファームウェアに対応するLinux用DTBを選ぶ。
+OP-TEE入りのFITは第6章で配置した同じビルドのLinux用DTBを選び、
+U-Bootで`/firmware/optee`を確認してから起動する。
+[USB RAM起動手順](jupiter2-ram-boot-guide.md)
+
+**KeystoneのNOR永続導入**。第1段階とRAM起動の確認を済ませ、対象のOpenSBI区画と
+元のイメージのバックアップを確認する。実機への書き込み、読み戻し、再起動は
+ブートイメージの専用手順に従う。
+[通常bundleのNOR書き込み](milkv-jupiter2-opensbi-replacement.md#keystone配布用bundleからspi-norを更新する) ·
+[元のOpenSBIへ復旧](milkv-jupiter2-opensbi-replacement.md#restore-stack-opensbi)
 
 ## 9. 実機での基本確認
 
-新firmware＋trial kernelで、実機Linux上から実行する。
-`KREL`は転送パッケージのreleaseとし、driverとアプリはその組だけを使う。
+試験対象のファームウェアと対応するImage、initrd、Linux用DTBで実機Linuxが起動したら、
+UARTログにCoreやSMなど選んだファームウェアの初期化が記録されていることを確認する。
+次に、Linuxのリリース、全CPUの起動、rootfsと起動引数を確認する。
 
 ```bash
 uname -r
 cat /sys/devices/system/cpu/online
 cat /proc/cmdline
-sudo dmesg | tail -n 100
+findmnt /
 ```
 
-`uname -r`の一致、全16 CPU、UART/ネットワーク/storageの正常動作を確認してから：
-
-```bash
-set -e
-BUNDLE=/absolute/path/to/bundle
-KREL=$(cat "$BUNDLE/kernelrelease.txt")
-test "$(uname -r)" = "$KREL"
-modinfo "/lib/modules/$KREL/extra/keystone-driver.ko"
-sudo modprobe keystone_driver
-ls -l /dev/keystone_enclave
-sudo /opt/keystone/"$KREL"/hello.ke
-sudo /opt/keystone/"$KREL"/hello-native.ke
-```
-
-driverを自動loadする`modules-load.d`設定は、この段階では作らない。
-device nodeがあるだけで成功とせず、CREATE/RUN/OCALL/RESUME/EXIT/DESTROYの完了、
-runnerの終了status、実行後のLinux応答を記録する。失敗やhang後に無条件で再試行しない。
-
-安定したらhelloを繰り返し、X100/A100それぞれで実行する。
-Linux CPU番号とhart IDの対応を確認してから、例として`taskset -c 0`、`taskset -c 8`で
-runnerを実行し、timer中断・復帰と同じ結果になることを確かめる。
-CPU affinityは隔離の代替ではなく、混成CPUの経路確認に使う。
-Keystone構成のSTOP/SUSPEND制限を踏まえ、初期確認でCPU hotplug・suspendは試さない。
-
-| 段階 | 合格条件 |
-| --- | --- |
-| 第1段階：新Linux＋既存OpenSBI | 指定した新releaseで起動し、storage/network/全CPUが動作。復旧用の旧設定を保持 |
-| 第2段階：同じ新Linux＋新OpenSBI／SM | 新firmwareを識別でき、第1段階と同じkernelが起動。SM初期化・全hart・timer/IPIを確認 |
-| hello | 両サンプルが正常終了し、Linuxのclock・I/O・割込みが動作し続ける |
-| 再実行・混成CPU | lifecycle反復と両CPU種類で同じ期待値。PMP資源の回収を確認 |
-| 隔離・大容量 | 別工程でCPU/DMA保護、CMA、負荷・異常系を実機検証 |
-| 終了 | 最後に実機OS本来のshutdown/rebootでRPMI等の実経路を確認 |
-
-既存`verifications/run-all.sh`はQEMU guest専用という運用規約があるため、
-実機へコピーしてそのまま実行する手順にはしない。まず対応QEMU guestで回帰を取り、
-実機のPMP probe・故障注入は復旧可能な専用試験として別途準備する。
-hello成功をattestation/sealing、乱数品質、DMA隔離の成功に読み替えない。
-`qemu-dev`鍵やcounter疑似乱数を製品用providerとして導入しない。
+構成に該当する試験を実行し、使用したImageとDTB、UARTログと結果を保存する。
+[KeystoneとOP-TEEの試験コマンド](#実機linux上でkeystoneとop-teeをテストする)
 
 ## 10. 復旧と正式採用
 
 ### 第1段階のrollback
 
-目標は**元のLinux＋既存OpenSBI**へ戻すこと。第1段階ではOpenSBIを書き換えていないので、
-OpenSBI区画の復元は不要である。
+起動設定を保存する前の失敗は、元の設定で再起動して復帰する。
+配置やinitrdの作成中に失敗した場合はエラーと配置先を確認し、旧Linuxの起動設定を使う。
 
-| 失敗した時点 | 対処 |
-| --- | --- |
-| ファイル配置／initramfs生成中、起動設定を変更する前 | 旧起動設定を維持する。部分配置を確認し、新kernelを選ばない |
-| UARTのRAM試験中に新kernelが起動しない／正常動作しない | env_k3.txtは未変更なので、リセットしてRAM設定を破棄し、旧kernelを通常起動する |
-| RAM試験成功後、env_k3.txtへ永続化したが再起動前 | 下記の元設定復元を行い、元kernel指定に戻す |
-| 永続化後、新kernelは起動したがI/O等に問題がある | 動作中Linuxから元設定を復元し、旧kernelで再起動する |
-| 永続化後、新kernelが起動せず通常Linuxを使えない | UARTから旧kernelを一時起動して元設定を復元する。それでも起動できない場合だけ復旧用Linuxを使う |
+`env_k3.txt`へ永続化した後は、第5章の復旧ディレクトリから元の設定を復元する。
+現在のLinuxで操作できなければ、UARTで旧kernel・旧initrd・旧DTBを指定して一時起動する。
+販売元Linuxの一時起動手順を使うときは、保存した`env_k3.txt.<日付>`を読み込むパスに指定する。
+[販売元Linuxの一時起動](jupiter2-vendor-linux-ram-boot.md#販売元の設定を取り込む)
 
-**RAM上だけで試験し、`env_k3.txt`を編集していない場合：**
-再起動するとRAM上の変更は消え、元のファイルに記録された旧kernelが選ばれる。
-この場合はkernel選択設定を復元するためにbootfsを修復する必要はない。
-Linuxが応答する場合は通常のshutdown/rebootを使い、起動途中で停止して応答しない場合は
-基板のリセットで再起動する。
-
-**正常起動後に`env_k3.txt`へ永続化した場合：**
-起動しなくなってもUARTからU-Bootで旧kernel名・旧initramfs名・旧DTB directoryをRAM上に指定し、
-`saveenv`を使わず通常の起動処理を実行すれば、旧Linuxから元設定を復元できる。
-今回保存した旧値は次のとおり。実際のバックアップ内容と一致することを確認して使う。
-
-```text
-setenv knl_name vmlinuz-6.18.3-generic
-setenv ramdisk_name initrd.img-6.18.3-generic
-setenv dtb_dir spacemit/6.18.3-generic
-run bootcmd
-```
-
-今回の`env_k3.txt`方式で、通常Linuxが使える場合は次を実行する。
-`ROLLBACK`には第5章で保存したdirectoryを指定する。
+復旧ディレクトリの実際のパスを`ROLLBACK`に設定してから実行する。
 
 ```bash
-set -euo pipefail
-ROLLBACK=/absolute/path/to/jupiter2-rollback-TIMESTAMP
-sha256sum -c "$ROLLBACK/env_k3.txt.sha256"
-sudo cp -a "$ROLLBACK/env_k3.txt" /boot/env_k3.txt
-sudo cmp "$ROLLBACK/env_k3.txt" /boot/env_k3.txt
-sync
+(
+    set -eu
+    cd "${ROLLBACK:?復旧ディレクトリを設定してください}"
+    read -r ENV_HASH _ < env_k3.txt.sha256
+    printf '%s  env_k3.txt\n' "$ENV_HASH" | sudo sha256sum -c -
+    sudo cp -a -- env_k3.txt /boot/env_k3.txt
+    sudo cmp -- env_k3.txt /boot/env_k3.txt
+    sync
+)
 ```
 
-復元が成功してから再起動し、
-`uname -r`が`original-kernel-release.txt`の値へ戻ったことを確認する。
-GRUB/extlinux方式では旧entryを選び、追加したtrial entryを削除または無効化し、
-変更した既定値も保存済み設定へ戻す。GRUBは元の設定から`update-grub`で再生成する。
+次の再起動で`uname -r`が`original-kernel-release.txt`の値へ戻ることを確認する。
+GRUB・extlinux方式では保存した設定と元のエントリーを使う。GRUBの設定を戻した後は
+`update-grub`で再生成する。
 
-**旧kernelの一時起動でも復旧できない場合：** 作業前に用意した、K3のUFS/NVMe等へアクセスできる復旧用Linuxを起動する。
-第5章のPARTUUIDと照合して、実際のbootfsをマウントする。
-以下は復旧用Linux上での例で、deviceとバックアップのパスは実物へ置き換える。
+旧kernelを一時起動できない場合は、実機のストレージへアクセスできる復旧用Linuxを使う。
+第5章の採取結果でbootfsのPARTUUIDを確認し、対象パーティションをマウントして
+元の`env_k3.txt`を戻す。復旧用Linuxではマウント先の直下に配置する。
 
 ```bash
-set -euo pipefail
-BOOTFS_DEV=/dev/disk/by-partuuid/ACTUAL-BOOTFS-PARTUUID
-ROLLBACK=/absolute/path/to/jupiter2-rollback-TIMESTAMP
-sudo mkdir -p /mnt/jupiter2-bootfs
-sudo mount "$BOOTFS_DEV" /mnt/jupiter2-bootfs
-sudo cp -a "$ROLLBACK/env_k3.txt" /mnt/jupiter2-bootfs/env_k3.txt
-sudo cmp "$ROLLBACK/env_k3.txt" /mnt/jupiter2-bootfs/env_k3.txt
-sync
-sudo umount /mnt/jupiter2-bootfs
+(
+    set -eu
+    cd "${ROLLBACK:?復旧ディレクトリを設定してください}"
+    read -r ENV_HASH _ < env_k3.txt.sha256
+    printf '%s  env_k3.txt\n' "$ENV_HASH" | sudo sha256sum -c -
+    sudo mkdir -p /mnt/jupiter2-bootfs
+    sudo mount "${BOOTFS_DEV:?実機のbootfsデバイスを設定してください}" /mnt/jupiter2-bootfs
+    sudo cp -a -- env_k3.txt /mnt/jupiter2-bootfs/env_k3.txt
+    sudo cmp -- env_k3.txt /mnt/jupiter2-bootfs/env_k3.txt
+    sync
+    sudo umount /mnt/jupiter2-bootfs
+)
 ```
 
-bootfsをLinuxの`/boot`へマウントしていた構成では、マウント先直下が`env_k3.txt`の置き場所となる。
-FDLでOpenSBIを書き戻すだけでは、bootfs上の誤ったkernel指定は直らない。
-UARTのU-Bootから旧kernelを一時起動する方法を使う場合も、実機のboot変数・deviceに合わせ、
-元ファイルを読み込む手順を事前確認しておく。
-
-旧kernelで正常復旧するまでは、新規配置ファイルを削除しない。
-復旧後、不要な新releaseのImage/config/initramfs/modules/appsだけを個別に退避または削除できる。
-削除対象は第6章の配置先と実際の生成物を照合し、実行中kernelや旧releaseを対象にしない。
-部分配置が残ると再実行が拒否されるため、再インストール前に整理する。
+旧Linuxが起動してから、退避した旧ファイルと今回の配置先を照合し、不要な試験用ファイルを個別に整理する。
 
 ### OpenSBIを復旧する場合
 
-[ブートイメージの復旧手順](milkv-jupiter2-opensbi-replacement.md#restore-stack-opensbi)を参照する。
+NORを更新した後に問題が起きた場合は、元のOpenSBIを専用手順で復旧する。
+Linux起動設定も変更した場合は、必要に応じて上のrollbackを実施する。
+[ブートイメージの復旧](milkv-jupiter2-opensbi-replacement.md#restore-stack-opensbi)
 
 ### 正式採用
 
-第1段階、第2段階、Enclave試験の結果を別々に保存する。
-基本動作・回帰・隔離試験の結果を確認してからdriverの自動load等を設定する。
-旧firmware、旧kernel、元の起動設定、復旧用一式は残し、新旧のhash、config、DT、toolchain、
-buildログ、UARTログ、case別結果を一つの導入記録にまとめる。
+新Linux、対象ファームウェア、Keystone・OP-TEEの試験結果を区別して保存する。
+使用したコミット、Image・DTB・FITのハッシュ、起動ログ、試験結果と復旧用ファイルを
+導入記録にまとめる。
 
 ## 関連資料
 
