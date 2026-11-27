@@ -502,9 +502,21 @@ struct k3_root_pmp_layout {
     unsigned int regular;
 };
 
+struct k3_pmp_entry {
+    const struct sbi_domain_memregion *region;
+    unsigned long permissions;
+};
+
+struct k3_optee_pmp_policy {
+    struct k3_pmp_entry entries[K3_BOOT_PMP_COUNT];
+    unsigned int switch_mask;
+    unsigned int retarget_mask;
+};
+
 static const struct sbi_domain *k3_optee_host;
 static const struct sbi_domain *k3_optee_tee;
 static bool k3_optee_shared_fallback;
+static unsigned int k3_optee_retarget_mask;
 
 static bool k3_root_firmware_pair(const struct sbi_scratch *scratch,
 				  const struct sbi_domain_memregion *rx)
@@ -601,6 +613,14 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
     return 0;
 }
 
+static bool k3_region_overlaps(const struct sbi_domain_memregion *reg,
+			       unsigned long base, unsigned long size)
+{
+    return reg->order >= __riscv_xlen ||
+	(base <= reg->base ? reg->base - base < size :
+	 base - reg->base < (1UL << reg->order));
+}
+
 bool sbi_hart_keystone_optee_overlaps(unsigned long base, unsigned long size)
 {
     const struct sbi_domain_memregion *reg;
@@ -612,24 +632,83 @@ bool sbi_hart_keystone_optee_overlaps(unsigned long base, unsigned long size)
 	if (!(reg->flags & SBI_DOMAIN_MEMREGION_SU_ACCESS_MASK)) {
 	    continue;
 	}
-	if (reg->order >= __riscv_xlen ||
-	    (base <= reg->base ? reg->base - base < size :
-	     base - reg->base < (1UL << reg->order))) {
+	if (k3_region_overlaps(reg, base, size)) {
 	    return true;
 	}
     }
     return false;
 }
 
-static int k3_optee_pmp_plan(const struct k3_root_pmp_layout *layout,
+static bool k3_region_matches(const struct sbi_domain_memregion *region,
+			      const struct sbi_domain_memregion *expected)
+{
+    return region->base == expected->base && region->order == expected->order &&
+	region->flags == expected->flags;
+}
+
+/*
+ * QEMU layout for the K3 GEU model. The Linux deny covers the whole window.
+ * OP-TEE gets only the GEU page and its closed fallback protects the rest.
+ * The registered domains must agree with these firmware-owned definitions.
+ */
+static int k3_qemu_geu_pmp_slot(const struct k3_root_pmp_layout *layout,
+				const struct sbi_domain *tee,
+				const struct sbi_domain_memregion *geu,
+				unsigned int gran)
+{
+    static const struct sbi_domain_memregion guard = {
+	.base = 0xf0700000UL,
+	.order = 14,
+	.flags = SBI_DOMAIN_MEMREGION_MMIO,
+    };
+    static const struct sbi_domain_memregion grant = {
+	.base = 0xf0702000UL,
+	.order = 12,
+	.flags = SBI_DOMAIN_MEMREGION_MMIO | SBI_DOMAIN_MEMREGION_SU_READABLE |
+		 SBI_DOMAIN_MEMREGION_SU_WRITABLE,
+    };
+    const struct sbi_domain_memregion *reg;
+    unsigned int i, slot;
+    unsigned long size = 1UL << guard.order;
+
+    if (layout->slots.keystone_mask != K3_BOOT_SHARED_SM_MASK ||
+	gran > grant.order || !k3_region_matches(geu, &grant)) {
+	return SBI_EDENIED;
+    }
+    for (slot = 0; slot < layout->regular; slot++) {
+	if (k3_region_matches(layout->region[slot], &guard)) {
+	    break;
+	}
+    }
+    if (slot == layout->regular) {
+	return SBI_EDENIED;
+    }
+
+    /* Reject any competing rule over the window in either state. */
+    for (i = 0; i < layout->regular; i++) {
+	if (i != slot && k3_region_overlaps(layout->region[i], guard.base, size)) {
+	    return SBI_EDENIED;
+	}
+    }
+    sbi_domain_for_each_memregion(tee, reg) {
+	if (reg != geu && k3_region_overlaps(reg, guard.base, size)) {
+	    return SBI_EDENIED;
+	}
+    }
+    return slot;
+}
+
+static int k3_optee_pmp_plan(struct sbi_scratch *scratch,
+			    const struct k3_root_pmp_layout *layout,
 			    const struct sbi_domain *tee,
-			    unsigned long permissions[K3_BOOT_PMP_COUNT],
-			    unsigned int *available)
+			    bool allow_qemu_geu,
+			    struct k3_optee_pmp_policy *policy)
 {
     const struct sbi_domain_memregion *reg, *slot;
     unsigned int i;
+    int geu_slot;
 
-    *available = 0;
+    sbi_memset(policy, 0, sizeof(*policy));
     sbi_domain_for_each_memregion(tee, reg) {
 	if (!(reg->flags & SBI_DOMAIN_MEMREGION_SU_ACCESS_MASK)) {
 	    continue;
@@ -644,20 +723,34 @@ static int k3_optee_pmp_plan(const struct k3_root_pmp_layout *layout,
 		break;
 	    }
 	}
-	if (i == layout->regular || slot == layout->carrier ||
+	if (i == layout->regular && allow_qemu_geu) {
+	    geu_slot = k3_qemu_geu_pmp_slot(layout, tee, reg,
+					  sbi_hart_pmp_log2gran(scratch));
+	    if (geu_slot < 0) {
+		return geu_slot;
+	    }
+	    i = geu_slot;
+	    policy->retarget_mask |= 1U << i;
+	}
+	if (i == layout->regular || (policy->switch_mask & (1U << i))) {
+	    return SBI_EDENIED;
+	}
+	slot = layout->region[i];
+	if (slot == layout->carrier ||
 	    (slot->flags & (SBI_DOMAIN_MEMREGION_M_ACCESS_MASK |
 			    SBI_DOMAIN_MEMREGION_ENF_PERMISSIONS))) {
 	    return SBI_EDENIED;
 	}
-	permissions[i] = k3_root_pmp_permissions(reg);
-	*available |= 1U << i;
+	policy->entries[i].region = reg;
+	policy->entries[i].permissions = k3_root_pmp_permissions(reg);
+	policy->switch_mask |= 1U << i;
     }
-    return *available ? 0 : SBI_EINVAL;
+    return policy->switch_mask ? 0 : SBI_EINVAL;
 }
 
 /* The first PMP entry covering any log byte must cover the whole log. */
 static int k3_check_measured_boot_pmp(const struct k3_root_pmp_layout *layout,
-				     const unsigned long *permissions)
+				     const struct k3_pmp_entry *tee)
 {
     unsigned int i;
 
@@ -672,7 +765,9 @@ static int k3_check_measured_boot_pmp(const struct k3_root_pmp_layout *layout,
 	}
 	if (reg->base != K3_MB_PRIVATE_BASE ||
 	    reg->order != K3_MB_PRIVATE_ORDER ||
-	    k3_root_pmp_permissions(reg) || !(permissions[i] & PMP_R)) {
+	    k3_root_pmp_permissions(reg) || !(tee[i].permissions & PMP_R) ||
+	    !tee[i].region || tee[i].region->base != reg->base ||
+	    tee[i].region->order != reg->order) {
 	    return SBI_EDENIED;
 	}
 	return 0;
@@ -684,11 +779,11 @@ static int k3_check_measured_boot_pmp(const struct k3_root_pmp_layout *layout,
 int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
 				    const struct sbi_domain *host,
 				    const struct sbi_domain *tee,
-				    bool measured_boot)
+				    bool measured_boot, bool allow_qemu_geu)
 {
     struct k3_root_pmp_layout layout;
-    unsigned long permissions[K3_BOOT_PMP_COUNT] = {0};
-    unsigned int bits, available, i;
+    struct k3_optee_pmp_policy tee_policy;
+    unsigned int bits, i;
     int rc;
 
     if (!host || !tee || host == tee || k3_optee_host ||
@@ -706,7 +801,7 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     if (rc) {
 	return rc;
     }
-    rc = k3_optee_pmp_plan(&layout, tee, permissions, &available);
+    rc = k3_optee_pmp_plan(scratch, &layout, tee, allow_qemu_geu, &tee_policy);
     if (rc) {
 	return rc;
     }
@@ -721,7 +816,7 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     }
 
     if (measured_boot) {
-	rc = k3_check_measured_boot_pmp(&layout, permissions);
+	rc = k3_check_measured_boot_pmp(&layout, tee_policy.entries);
 	if (rc) {
 	    return rc;
 	}
@@ -732,8 +827,10 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     k3_optee_tee = tee;
     k3_optee_shared_fallback =
 	layout.slots.keystone_mask == K3_BOOT_SHARED_SM_MASK;
+    k3_optee_retarget_mask = tee_policy.retarget_mask;
     sbi_printf("K3 OP-TEE PMP: fixed=0x%x Keystone=0x%x fallback=%u\n",
-	       available, layout.slots.keystone_mask, layout.slots.fallback_index);
+	       tee_policy.switch_mask, layout.slots.keystone_mask,
+	       layout.slots.fallback_index);
     return 0;
 }
 
@@ -779,16 +876,29 @@ void sbi_hart_keystone_trace_pmp(enum k3_pmp_trace_state state)
     K3_PMP_TRACE("shared CSR hart=%lu state=%s implemented=%u gran=%u "
 		 "active=%u mask=0x%x\n", csr_read(CSR_MHARTID), state_names[state], count,
 		 sbi_hart_pmp_log2gran(scratch), __builtin_popcount(active), active);
+    for (i = 0; i < K3_BOOT_FALLBACK; i++) {
+	if (!(k3_optee_retarget_mask & (1U << i))) {
+	    continue;
+	}
+	if (pmp_get(i, &prot, &base, &order)) {
+	    K3_PMP_TRACE("shared readback failed hart=%lu slot=%u\n",
+			 csr_read(CSR_MHARTID), i);
+	    return;
+	}
+	K3_PMP_TRACE("retarget CSR hart=%lu state=%s slot=%u base=0x%lx "
+		     "order=%lu prot=0x%lx\n", csr_read(CSR_MHARTID),
+		     state_names[state], i, base, order, prot);
+    }
 #else
     (void)state;
 #endif
 }
 
 static int k3_pmp_check_entry(unsigned int index,
-			      const struct sbi_domain_memregion *reg,
-			      unsigned long permissions,
+			      const struct k3_pmp_entry *entry,
 			      unsigned int full_range_order)
 {
+    const struct sbi_domain_memregion *reg = entry->region;
     unsigned long prot, base, order;
     int rc;
 
@@ -796,7 +906,10 @@ static int k3_pmp_check_entry(unsigned int index,
     if (rc) {
 	return rc;
     }
-    if (prot != (PMP_A_NAPOT | permissions) || base != reg->base ||
+    if (!reg) {
+	return prot ? SBI_EFAIL : 0;
+    }
+    if (prot != (PMP_A_NAPOT | entry->permissions) || base != reg->base ||
 	(reg->order == __riscv_xlen ? order < full_range_order :
 	 order != reg->order)) {
 	return SBI_EFAIL;
@@ -805,70 +918,76 @@ static int k3_pmp_check_entry(unsigned int index,
 }
 
 static int k3_pmp_write_checked(unsigned int index,
-				const struct sbi_domain_memregion *reg,
-				unsigned long permissions,
+				const struct k3_pmp_entry *entry,
 				unsigned int full_range_order)
 {
+    const struct sbi_domain_memregion *reg = entry->region;
     int rc;
 
-    rc = pmp_set(index, permissions, reg->base, reg->order);
+    if (reg) {
+	rc = pmp_set(index, entry->permissions, reg->base, reg->order);
+    } else {
+	rc = pmp_disable(index);
+    }
     if (rc) {
 	return rc;
     }
-    return k3_pmp_check_entry(index, reg, permissions, full_range_order);
+    return k3_pmp_check_entry(index, entry, full_range_order);
 }
 
 /* Keep fallback closed while updating earlier slots. This function is used
  * for both applying a policy and restoring the verified source policy.
  */
-static int k3_optee_pmp_apply(const struct k3_root_pmp_layout *layout,
-			     unsigned int available,
-			     const unsigned long permissions[K3_BOOT_PMP_COUNT],
-			     unsigned int full_range_order)
+static int k3_pmp_policy_apply(const struct k3_pmp_entry policy[K3_BOOT_PMP_COUNT],
+			       unsigned int available, unsigned int moving,
+			       unsigned int full_range_order)
 {
-    unsigned int i, fallback = layout->slots.fallback_index;
+    const struct k3_pmp_entry disabled = {0};
+    const struct k3_pmp_entry closed = {
+	.region = policy[K3_BOOT_FALLBACK].region,
+    };
+    unsigned int i;
     int rc;
 
-    rc = k3_pmp_write_checked(fallback, layout->fallback, 0, full_range_order);
+    rc = k3_pmp_write_checked(K3_BOOT_FALLBACK, &closed, full_range_order);
     if (rc) {
 	return rc;
     }
-    for (i = 0; i < layout->regular; i++) {
+    for (i = 0; i < K3_BOOT_FALLBACK; i++) {
 	if (!(available & (1U << i))) {
 	    continue;
 	}
-	rc = k3_pmp_write_checked(i, layout->region[i], permissions[i],
-				   full_range_order);
+	/* Do not carry the old address matching mode across an address write. */
+	if ((moving & (1U << i)) && policy[i].region) {
+	    rc = k3_pmp_write_checked(i, &disabled, full_range_order);
+	    if (rc) {
+		return rc;
+	    }
+	}
+	rc = k3_pmp_write_checked(i, &policy[i], full_range_order);
 	if (rc) {
 	    return rc;
 	}
     }
-    if (permissions[fallback]) {
-	rc = k3_pmp_write_checked(fallback, layout->fallback,
-				   permissions[fallback], full_range_order);
+    if (policy[K3_BOOT_FALLBACK].permissions) {
+	rc = k3_pmp_write_checked(K3_BOOT_FALLBACK, &policy[K3_BOOT_FALLBACK],
+				  full_range_order);
     }
     return rc;
 }
 
-static int k3_optee_pmp_verify(const struct k3_root_pmp_layout *layout,
-			      unsigned int available,
-			      const unsigned long permissions[K3_BOOT_PMP_COUNT],
-			      unsigned int full_range_order)
+static int k3_pmp_policy_verify(const struct k3_pmp_entry policy[K3_BOOT_PMP_COUNT],
+				unsigned int available, unsigned int full_range_order)
 {
-    const struct sbi_domain_memregion *reg;
-    unsigned int fallback = layout->slots.fallback_index;
     unsigned int i;
     int rc;
 
-    for (i = 0; i <= fallback; i++) {
-	if (i == fallback) {
-	    reg = layout->fallback;
-	} else if (available & (1U << i)) {
-	    reg = layout->region[i];
-	} else {
+    available |= 1U << K3_BOOT_FALLBACK;
+    for (i = 0; i < K3_BOOT_PMP_COUNT; i++) {
+	if (!(available & (1U << i))) {
 	    continue;
 	}
-	rc = k3_pmp_check_entry(i, reg, permissions[i], full_range_order);
+	rc = k3_pmp_check_entry(i, &policy[i], full_range_order);
 	if (rc) {
 	    return rc;
 	}
@@ -876,12 +995,14 @@ static int k3_optee_pmp_verify(const struct k3_root_pmp_layout *layout,
     return 0;
 }
 
-static int k3_optee_pmp_transition(
-	struct sbi_scratch *scratch, const struct k3_root_pmp_layout *layout,
-	unsigned int available, const unsigned long source[K3_BOOT_PMP_COUNT],
-	const unsigned long target[K3_BOOT_PMP_COUNT])
+static int k3_pmp_policy_transition(
+	struct sbi_scratch *scratch, unsigned int available,
+	const struct k3_pmp_entry source[K3_BOOT_PMP_COUNT],
+	const struct k3_pmp_entry target[K3_BOOT_PMP_COUNT])
 {
-    unsigned int full_range_order;
+    const struct sbi_domain_memregion *fallback =
+	source[K3_BOOT_FALLBACK].region;
+    unsigned int full_range_order, i, moving = 0;
     int rc;
 
     if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV)) {
@@ -889,15 +1010,42 @@ static int k3_optee_pmp_transition(
 		     csr_read(CSR_MSTATUS));
 	return SBI_EDENIED;
     }
+    if (available >= (1U << K3_BOOT_FALLBACK) || !fallback ||
+	target[K3_BOOT_FALLBACK].region != fallback ||
+	fallback->base || fallback->order != __riscv_xlen) {
+	return SBI_EINVAL;
+    }
+    if ((source[K3_BOOT_FALLBACK].permissions |
+	 target[K3_BOOT_FALLBACK].permissions) & PMP_L) {
+	return SBI_EDENIED;
+    }
     full_range_order = sbi_hart_pmp_addrbits(scratch) + PMP_SHIFT;
-    rc = k3_optee_pmp_verify(layout, available, source, full_range_order);
+    rc = k3_pmp_policy_verify(source, available, full_range_order);
     if (rc) {
 	return rc;
     }
 
-    rc = k3_optee_pmp_apply(layout, available, target, full_range_order);
-    if (rc && k3_optee_pmp_apply(layout, available, source, full_range_order)) {
-	sbi_printf("K3 domain PMP: unable to restore source permissions\n");
+
+    /* Every entry we write must be restorable on a failed transition. */
+    for (i = 0; i < K3_BOOT_FALLBACK; i++) {
+	const struct sbi_domain_memregion *from = source[i].region;
+	const struct sbi_domain_memregion *to = target[i].region;
+
+	if (!(available & (1U << i))) {
+	    continue;
+	}
+	if ((source[i].permissions | target[i].permissions) & PMP_L) {
+	    return SBI_EDENIED;
+	}
+	if (from != to && (!from || !to || from->base != to->base ||
+			   from->order != to->order)) {
+	    moving |= 1U << i;
+	}
+    }
+
+    rc = k3_pmp_policy_apply(target, available, moving, full_range_order);
+    if (rc && k3_pmp_policy_apply(source, available, moving, full_range_order)) {
+	sbi_printf("K3 domain PMP: unable to restore source policy\n");
 	sbi_hart_hang();
     }
     __asm__ __volatile__("sfence.vma" ::: "memory");
@@ -908,19 +1056,25 @@ static int k3_optee_pmp_switch_policy(struct sbi_scratch *scratch,
 				      const struct k3_root_pmp_layout *layout,
 				      bool enter)
 {
-    unsigned long host[K3_BOOT_PMP_COUNT] = {0};
-    unsigned long tee[K3_BOOT_PMP_COUNT] = {0};
+    struct k3_pmp_entry host[K3_BOOT_PMP_COUNT] = {0};
+    struct k3_optee_pmp_policy tee;
     unsigned long prot, addr, order;
-    unsigned int i, available;
+    unsigned int i;
     int rc;
 
-    rc = k3_optee_pmp_plan(layout, k3_optee_tee, tee, &available);
+    rc = k3_optee_pmp_plan(scratch, layout, k3_optee_tee,
+			   k3_optee_retarget_mask != 0, &tee);
     if (rc) {
 	return rc;
     }
+    if (tee.retarget_mask != k3_optee_retarget_mask) {
+	return SBI_EDENIED;
+    }
     for (i = 0; i < layout->regular; i++) {
-	host[i] = k3_root_pmp_permissions(layout->region[i]);
-	if (!(available & (1U << i)) && (host[i] & (PMP_R | PMP_W | PMP_X))) {
+	host[i].region = layout->region[i];
+	host[i].permissions = k3_root_pmp_permissions(layout->region[i]);
+	if (!(tee.switch_mask & (1U << i)) &&
+	    (host[i].permissions & (PMP_R | PMP_W | PMP_X))) {
 	    return SBI_EDENIED;
 	}
     }
@@ -935,10 +1089,13 @@ static int k3_optee_pmp_switch_policy(struct sbi_scratch *scratch,
 	    return SBI_EDENIED;
 	}
     }
-    host[layout->slots.fallback_index] = k3_root_pmp_permissions(layout->fallback);
+    host[K3_BOOT_FALLBACK].region = layout->fallback;
+    host[K3_BOOT_FALLBACK].permissions = k3_root_pmp_permissions(layout->fallback);
+    tee.entries[K3_BOOT_FALLBACK].region = layout->fallback;
 
-    return k3_optee_pmp_transition(scratch, layout, available,
-				   enter ? host : tee, enter ? tee : host);
+    return k3_pmp_policy_transition(scratch, tee.switch_mask,
+				    enter ? host : tee.entries,
+				    enter ? tee.entries : host);
 }
 
 /* Keep the SM-owned full-range OS entry off while OP-TEE runs. */
@@ -1025,8 +1182,8 @@ int sbi_hart_keystone_switch_enclave_pmp(bool enter)
 {
     struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
     struct k3_root_pmp_layout layout;
-    unsigned long host[K3_BOOT_PMP_COUNT] = {0};
-    unsigned long enclave[K3_BOOT_PMP_COUNT] = {0};
+    struct k3_pmp_entry host[K3_BOOT_PMP_COUNT] = {0};
+    struct k3_pmp_entry enclave[K3_BOOT_PMP_COUNT] = {0};
     unsigned int bits, i, available = 0;
     int rc;
 
@@ -1051,20 +1208,23 @@ int sbi_hart_keystone_switch_enclave_pmp(bool enter)
 	return rc;
     }
     for (i = 0; i < layout.regular; i++) {
-	host[i] = k3_root_pmp_permissions(layout.region[i]);
-	if (host[i] & (PMP_R | PMP_W | PMP_X)) {
+	host[i].region = layout.region[i];
+	host[i].permissions = k3_root_pmp_permissions(layout.region[i]);
+	if (host[i].permissions & (PMP_R | PMP_W | PMP_X)) {
+	    enclave[i].region = layout.region[i];
 	    available |= 1U << i;
 	}
     }
-    host[layout.slots.fallback_index] = k3_root_pmp_permissions(layout.fallback);
+    host[K3_BOOT_FALLBACK].region = layout.fallback;
+    host[K3_BOOT_FALLBACK].permissions = k3_root_pmp_permissions(layout.fallback);
+    enclave[K3_BOOT_FALLBACK].region = layout.fallback;
 
     /* Entry rollback can reach here after the host policy was restored. */
-    if (!enter && !k3_optee_pmp_verify(&layout, available, host,
-				       bits + PMP_SHIFT)) {
+    if (!enter && !k3_pmp_policy_verify(host, available, bits + PMP_SHIFT)) {
 	return 0;
     }
-    return k3_optee_pmp_transition(scratch, &layout, available,
-				   enter ? host : enclave, enter ? enclave : host);
+    return k3_pmp_policy_transition(scratch, available, enter ? host : enclave,
+				    enter ? enclave : host);
 }
 
 const struct sbi_domain *sbi_hart_keystone_optee_host(void)

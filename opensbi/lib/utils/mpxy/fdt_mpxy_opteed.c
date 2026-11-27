@@ -269,7 +269,7 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	u32 channel_id;
 	int rc, len, i;
 #ifdef CONFIG_K3_KEYSTONE_SM
-    bool measured_boot;
+    bool measured_boot, allow_qemu_geu;
 #endif
 
 	/* Setup domain for OP-TEE dispatcher */
@@ -286,8 +286,10 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	sbi_printf("K3 measured boot: DT event log rejected (%d)\n", rc);
 	return rc;
     }
+    allow_qemu_geu = !fdt_node_check_compatible(fdt, 0, "riscv-virtio");
     rc = sbi_hart_keystone_check_optee_pmp(sbi_scratch_thishart_ptr(),
-					  udomain, tdomain, measured_boot);
+					  udomain, tdomain, measured_boot,
+					  allow_qemu_geu);
     if (rc) {
 	sbi_printf("K3 OP-TEE PMP: fixed slot plan rejected (%d)\n", rc);
 	return rc;

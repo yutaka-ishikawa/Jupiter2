@@ -21,6 +21,17 @@ PMP容量不足を報告する。各CPUからのMPXY呼び出しと、別hartで
 `Record baseline before Keystone and OP-TEE PMP slot adjustment` を、同梱構成のPMP枠数調整を
 始める前の基準コミットとする。実装はこのコミットの次から進め、調整前の状態に戻る際はこのコミットを参照する。
 
+## 状態別PMPアドレスの定義先
+
+2026-11-27（JST）にB案を選択した。Linux・OP-TEE・Enclaveで共用するPMP枠の物理アドレスを
+OpenSBIのK3用コードで定義する。起動時には登録済みのドメイン領域を固定の定義と照合し、
+切替後は実際のPMP CSRからアドレス・サイズ・権限を読み戻す。
+
+B案で対象機のI/Oと保護を両立できる配置を確認できなかった場合は、再現条件、制約と試験結果を
+KSB-092に記録し、実機情報から生成するDTBに状態別の配置を定義するA案へ変更する。
+A案でも起動時の領域照合、16枠の上限、切替後のCSR読み戻しと失敗時の復元を受入条件とする。
+切り戻し時は枠15の共用を検証済みの `e01f41a4d` と、この節の判断記録を参照する。
+
 ## 1. 実装順序
 
 枠切替の実装はOpenSBIとKeystone SMが担当する。Linux側は生成DTBとカーネル設定の確認を基本とし、
@@ -95,7 +106,7 @@ PMP容量不足を報告する。各CPUからのMPXY呼び出しと、別hartで
 | Keystone SMのPMP管理 | `keystone/sm/src/pmp.c`、`keystone/sm/src/pmp.h`、`keystone/sm/src/sm.c` | 同居時のEPM・UTMの枠予約と枠15の共用を実装する |
 | Keystone SMのEnclave管理 | `keystone/sm/src/enclave.c` | CREATEの範囲・容量検査、EPMの全hart同期、RUN・RESUME・復帰時のUTM設定を接続する |
 | OpenSBIのHSM（条件付き） | `opensbi/lib/sbi/sbi_hsm.c` | 既存の起動・復帰経路への接続が必要な場合に、S-mode移行前のPMP確認を追加する |
-| QEMU起動スクリプト・試験用DT設定 | `verifications/crypto/run-qemu.py`、`verifications/optee-coexistence/boot.dts` | 混在PMPで同居試験を起動し、PMP読み戻しと枠不足を確認する入力を揃える |
+| QEMU起動スクリプト・試験用DT設定 | `verifications/crypto/run-qemu.py`、`verifications/optee-coexistence/boot.dts`、`verifications/optee-coexistence/boot-pmp16-geu.dtso` | 混在PMPの同居試験で、PMP枠数、アドレス切替と枠不足を確認する |
 | QEMUのゲスト試験コード（条件付き） | `verifications/optee-coexistence/coexist-init.c`、`verifications/optee-coexistence/host.cpp` | 既存試験で不足するEPM同期・容量エラーの確認を追加する |
 
 OpenSBIのビルドは `opensbi/platform/generic/configs/k3_keystone_audit_defconfig` の
@@ -121,7 +132,7 @@ OpenSBIのビルドは `opensbi/platform/generic/configs/k3_keystone_audit_defco
 | OpenSBIのDTB引き渡し | `opensbi/lib/utils/mpxy/fdt_mpxy_opteed.c` | OP-TEE起動前に私有DTBを用意して引き渡す |
 | OpenSBIのDT設定読み取り（条件付き） | `opensbi/lib/utils/fdt/fdt_domain.c` | 私有コピー領域の情報をDTから受け取る場合に、その読み取りと検査を追加する |
 | OP-TEE Coreのリンカー設定・起動コード | 外部 `optee_os` の `core/arch/riscv/kernel/kern.ld.S`、`core/arch/riscv/kernel/boot.c` | Coreのメモリ配置に私有DTBを予約し、起動時に既存のDT処理から使えるようにする。Jupiter2側に `patches/optee/k3-private-boot-dtb.patch` を新規追加する案 |
-| OpenSBI用DTBとFITの生成スクリプト | `scripts/prepare-jupiter2-optee-opensbi-dtb.py`、`scripts/build-jupiter2-reference-ram-boot.py`、`scripts/build-jupiter2-ram-boot-image.py` | 実機用の状態別設定、予約領域、Coreの配置とFIT選択構成を生成・照合する |
+| OpenSBI用DTBとFITの生成スクリプト | `scripts/prepare-jupiter2-optee-opensbi-dtb.py`、`scripts/build-jupiter2-reference-ram-boot.py`、`scripts/build-jupiter2-ram-boot-image.py` | 実機の領域定義をK3コードの状態別配置と照合し、予約領域、Coreの配置とFIT選択構成を生成する |
 | Linux用DTBの生成スクリプト | `scripts/prepare-jupiter2-optee-linux-dtb.py` | `/firmware/optee`、MPXY、`reserved-memory` の整合をビルド時に確認する |
 | Coreのビルドスクリプト・実機手順 | `scripts/build-k3-optee-coexist.sh`、`doc/jupiter2-build-install-test.md` | QEMU用と実機用の各ビルドでOP-TEEのパッチを適用する手順を整える |
 | FIT生成のホスト側試験 | `scripts/tests/jupiter2-ram-boot/test_fit_packaging.py` | 私有DTB、予約範囲とFIT内の入力の整合を検査する |
@@ -230,8 +241,24 @@ ESOS・RPMI、IOPMP、RTC、TE200の検査結果は、それぞれの実行環�
 4 KiB粒度の一律16枠・混在16/32枠で、Enclave実行時に枠0–15を読み戻した。
 通常枠を14個にした入力は、合計17枠が必要になるためLinux起動前に拒否された。
 
-QEMUは現在の仮想デバイス構成で、LinuxとOP-TEEが同じアドレス範囲を使うPMP配置を検査した。
-実機用のアドレス切替、DCIUとUTMの枠共用、私有DTB、クロック仲介とIOPMPの確認は後続の工程で行う。
+従来の同居試験では、LinuxとOP-TEEで同じアドレス範囲を使うPMP配置を検査した。
+[CSR読み戻しとUARTの試験記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+### K3コードで定義したGEU枠の切替試験
+
+B案の最初の実装では、GEUを含むLinuxの拒否窓と、OP-TEEがRWで使うGEUページをK3コードに定義した。
+
+混在16/32枠は、QEMUのhart 0–7に16枠、hart 8–15に32枠を実装し、実機のX100とA100で
+PMPの実装数が異なる条件を再現する構成である。使用する枠を全hartで0–15に揃え、
+32枠側の枠16–31が無効であることをCSRで確認した。
+
+一律16枠と混在16/32枠のQEMUで、起動時に全16 hartの枠7を読み戻した。Linux起動後には同じhartで、
+`0xf0700000`・16 KiBの拒否から `0xf0702000`・4 KiBのRWへの切替と、Linux復帰時の復元を確認した。
+両構成とも最大16枠で、Enclave 16回とTA呼び出し33回が成功した。
+
+試験にはQEMUの空のeFuseモデルと開発用HUKを使った。実機の配置表全体、DCIUとUTMの枠共用、
+私有DTB、クロック仲介とIOPMPは後続の工程で検証する。
+[再試験手順](../verifications/optee-coexistence/README.md#geuのアドレス切替) ·
 [CSR読み戻しとUARTの試験記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
 ## 3. 完了時の記録

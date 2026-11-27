@@ -76,6 +76,25 @@ python3 verifications/crypto/run-qemu.py --sstc on \
 UARTは `verifications/crypto/results/optee-coexistence.log`、状態ごとの最大枠数は同じ場所の
 `manifest.json` に保存する。[QEMUの試験結果](../../doc/evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
+### GEUのアドレス切替
+
+`make optee-coexist-test` は `boot-pmp16-geu.dtb` も生成する。LinuxではGEUを含む
+`0xf0700000` の16 KiBを拒否し、OP-TEEでは同じ枠を `0xf0702000` の4 KiBのRWに切り替える。
+組み合わせはOpenSBIのK3用コードで定義する。DTBで宣言した各ドメインの領域を起動時に照合する。
+
+```sh
+WORK=.build-k3/optee-coexist
+python3 verifications/crypto/run-qemu.py --sstc on \
+    --optee-coexistence "$WORK/out/core/tee.elf" "$WORK/boot-pmp16-geu.dtb" "$WORK/coexist.cpio" \
+    --optee-pmp16 mixed --optee-pmp16-geu
+```
+
+一律16枠の場合は `--optee-pmp16 uniform16` を指定する。通常の16枠試験の合格条件に加え、
+全16 hartの初期値と、Linux起動後に同じhartでOP-TEEへ切り替えてLinuxへ復帰したときの
+アドレス・サイズ・権限を、UARTの `retarget CSR` 行から確認する。
+`manifest.json` の `geu_pmp` に枠番号と往復を確認したhartを記録する。
+[配置の方針](../../doc/jupiter2-coexistence-16-pmp-plan.md#状態別pmpアドレスの定義先)
+
 ## K3 QEMUでのS-mode引き渡し試験
 
 Linuxの代わりに小さなRV64ペイロードを使い、OpenSBIとKeystone SMの

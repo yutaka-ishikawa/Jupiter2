@@ -508,11 +508,14 @@ hartだけ枠14でUTMを許可する。EPMとUTMが各1枠のNAPOTに収まる�
 固定領域の4 KiB粒度、NAPOT境界と重複を静的に照合した。EPMのあるLinuxは16枠、OP-TEEとEnclaveは
 各15枠を使う。両クラスタで枠0–15を使い、A100の追加枠16–31は無効とする。
 実装では、現行のホストとOP-TEEで同じアドレスを要求する固定枠検査を状態別の表の検査に変更する。
+状態別のアドレスは、まずOpenSBIのK3用コードに定義するB案で進める。
+[決定とA案へ変更する条件](jupiter2-coexistence-16-pmp-plan.md#状態別pmpアドレスの定義先)
+
 OpenSBIとSMは末尾の枠15を共用し、閉じた状態で対象hartの可変枠を切り替える。全枠を読み戻してから
 新しい状態へ移り、失敗時は検証済みの状態を復元する。ロック済みESOS枠と他hartのPMP状態は維持する。
 [現行の同居用PMP検査](../opensbi/lib/sbi/sbi_hart.c#L619) · [現行のKeystone枠数](../opensbi/include/sbi/k3_keystone_boot_slots.h#L12)
 
-確認済みの範囲は、DTB・実機ログ・採用版ソースと、各状態の枠数・境界・優先順位の静的な照合まで。
+上表の実機配置は、DTB・実機ログ・採用版ソースと、枠数・境界・優先順位を静的に照合した。
 IOPMPの設定はCPUのPMPと独立している。採用版の `INT2` ポリシーにはCoreをRWとする規則があるため、
 実機でのDMA要求元との対応とCoreへの実効権限を確認する。Keystoneの動的EPMにも既存IOPMP設定で保護が
 及ぶかを調べ、必要な保護を設定してから両TEEの隔離を判定する。
@@ -520,7 +523,8 @@ IOPMPの設定はCPUのPMPと独立している。採用版の `INT2` ポリシ�
 
 実装後は両クラスタのPMP読み戻しと起動時FDT、LinuxのI²C・クロック・公開eFuse、
 ESOS/RPMIの起動・復帰、IOPMPの実効権限、eFuseを使うfTPMとKeystoneの同時実行を確認する。
-コード変更とQEMU・実機での動作確認は未実施。
+K3 QEMUでは、B案で定義したGEU枠のアドレス・サイズ・権限の切替を確認した。
+上表全体の実装と実機試験は後続の工程で行う。
 [実装の順序と受入条件](jupiter2-coexistence-16-pmp-plan.md)
 
 関連資料：

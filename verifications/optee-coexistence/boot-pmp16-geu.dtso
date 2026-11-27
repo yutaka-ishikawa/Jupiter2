@@ -1,0 +1,22 @@
+/dts-v1/;
+/plugin/;
+
+/* Apply after boot-pmp16.dtso. The K3 firmware matches these domain ranges. */
+&{/chosen/opensbi-domains/geu} {
+	base = <0x0 0xf0700000>;
+	order = <14>;
+};
+
+&{/chosen/opensbi-domains} {
+	optee_geu: optee-geu {
+		compatible = "opensbi,domain,memregion";
+		mmio;
+		base = <0x0 0xf0702000>;
+		order = <12>;
+	};
+};
+
+&{/chosen/opensbi-domains/optee-domain} {
+	regions = <0x1010 0x38 0x1011 0x18 0x1020 0x18
+		   &optee_geu 0x18 0x1031 0x18 0x1032 0x18>;
+};

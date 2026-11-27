@@ -133,6 +133,38 @@ def check_optee_pmp16(output, profile):
     return max_active
 
 
+def check_optee_pmp16_geu(output):
+    host = (0xf0700000, 14, 0x18)
+    tee = (0xf0702000, 12, 0x1b)
+    expected = {b'boot-host': host, b'host': host, b'enclave': host, b'optee': tee}
+    boot_harts = set()
+    entered = set()
+    returned = set()
+    indices = set()
+    linux_smp = output.index(b'smp: Brought up 1 node, 16 CPUs')
+    rows = re.finditer(
+        rb'\[K3-PMP\] retarget CSR hart=(\d+) state=(boot-host|host|optee|enclave) '
+        rb'slot=(\d+) base=0x([0-9a-f]+) order=(\d+) prot=0x([0-9a-f]+)',
+        output)
+    for row in rows:
+        hart, state, slot, base, order, prot = row.groups()
+        hart, slot = int(hart), int(slot)
+        actual = (int(base, 16), int(order), int(prot, 16))
+        if hart >= 16 or slot >= 13 or actual != expected[state]:
+            raise RuntimeError(f'Unexpected GEU PMP readback: {row[0].decode()}')
+        indices.add(slot)
+        if state == b'boot-host':
+            boot_harts.add(hart)
+        elif row.start() > linux_smp:
+            if state == b'optee':
+                entered.add(hart)
+            elif state == b'host' and hart in entered:
+                returned.add(hart)
+    if boot_harts != set(range(16)) or len(indices) != 1 or not returned:
+        raise RuntimeError('Missing GEU boot readback or runtime OP-TEE/host round trip')
+    return {'slot': indices.pop(), 'runtime_round_trip_harts': sorted(returned)}
+
+
 def run_optee(args):
     tee, dtb, initrd = (path.resolve() for path in args.optee_coexistence)
     qemu = args.prefix / 'bin/qemu-system-riscv64'
@@ -179,6 +211,8 @@ def run_optee(args):
         else:
             if args.optee_pmp16:
                 record['pmp_peak_by_state'] = check_optee_pmp16(output, args.optee_pmp16)
+            if args.optee_pmp16_geu:
+                record['geu_pmp'] = check_optee_pmp16_geu(output)
             record['pass'] = True
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         record['error'] = str(exc)
@@ -198,9 +232,13 @@ def main():
                         help='also run the 16-hart OP-TEE/Keystone guest integration')
     parser.add_argument('--optee-pmp16', nargs='?', const='mixed', choices=['mixed', 'uniform16'],
                         help='verify 16-slot PMP usage with boot-pmp16.dtb (default profile: mixed)')
+    parser.add_argument('--optee-pmp16-geu', action='store_true',
+                        help='verify GEU address changes with boot-pmp16-geu.dtb')
     args = parser.parse_args()
     if args.optee_pmp16 and not args.optee_coexistence:
         parser.error('--optee-pmp16 requires --optee-coexistence')
+    if args.optee_pmp16_geu and not args.optee_pmp16:
+        parser.error('--optee-pmp16-geu requires --optee-pmp16')
     # Guest metadata paths use the repository's standard installation.
     if args.prefix.resolve() != (ROOT / 'install/keystone').resolve():
         parser.error('This runner currently requires the standard install/keystone prefix; custom boot can be tested manually')
