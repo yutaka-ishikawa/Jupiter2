@@ -315,18 +315,41 @@ OP-TEE入り構成は1.5節のDTBの条件を満たしたイメージを使い�
 
 ## 2. NOR導入用のbundle
 
-[READMEのNOR区画採取手順](../README.md#capture-nor)で
-保存したJSONを指定し、開発PCのリポジトリルートで実行します。
+`--capacity-bytes` には、対象実機の `opensbi` NOR区画で測定した容量をバイト単位で指定します。
+`20261124-165032/spl-fastboot.log` にある値は、RAM起動時のUSB転送上限です。
+
+開発PCのリポジトリルートで、対象実機の容量を `CAPACITY` に設定します。
+対象実機の区画が採取記録 `20261120-101205` と一致する場合は、その
+`size.txt` を使えます。記録値は393216バイト（384 KiB）です。
 
 ```bash
-CAPTURE_ID=20261124-165032  # 実機で採取したIDに置き換える
-CAPTURE_DIR="$PWD/hardware/jupiter2/captures/$CAPTURE_ID"
-make opensbi keystone JOBS=20
+CAPACITY=$(cat hardware/jupiter2/captures/20261120-101205/opensbi-partition-info-20261120-102404/size.txt)
+```
+
+対象実機で採取したJSONを使う場合は、そのJSONを
+`hardware/jupiter2/captures/<採取ID>/jupiter2-nor-capacity.json` に保存し、
+`CAPTURE_ID` に該当する採取IDを設定して実行します。
+[READMEのNOR区画採取手順](../README.md#capture-nor)
+
+```bash
 CAPACITY=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["capacity_bytes"])' \
-  < "$CAPTURE_DIR/jupiter2-nor-capacity.json")
+  < "hardware/jupiter2/captures/${CAPTURE_ID:?対象実機の採取IDを設定してください}/jupiter2-nor-capacity.json")
+```
+
+容量を指定してbundleを作ります。すでに同じ構成のビルドが完了している場合は、
+`make opensbi keystone JOBS=20` の行を省略できます。
+
+```bash
 OUT="$PWD/work/jupiter2-release-$(date +%Y%m%d-%H%M%S)"
-python3 scripts/build-jupiter2-install-image.py --capacity-bytes "$CAPACITY" --output "$OUT"
-(cd "$OUT" && sha256sum -c bundle.tar.gz.sha256)
+(
+    set -eu
+    python3 scripts/check-jupiter2-install-capacity.py \
+      --capacity-bytes "${CAPACITY:?先に実機のNOR区画容量を設定してください}"
+    make opensbi keystone JOBS=20
+    python3 scripts/build-jupiter2-install-image.py --capacity-bytes "$CAPACITY" --output "$OUT"
+    cd "$OUT"
+    sha256sum -c bundle.tar.gz.sha256
+)
 ```
 
 出力は `bundle/firmware/fw_dynamic.itb`、Linux・モジュール・Keystoneアプリを含む
