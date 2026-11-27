@@ -118,11 +118,23 @@ CROSS_COMPILE=riscv64-linux-gnu-
 make qemu linux JOBS="$JOBS" CROSS_COMPILE="$CROSS_COMPILE"
 make install-qemu install-linux PREFIX="$OPTEE_PREFIX"
 make optee-coexist JOBS="$JOBS" CROSS_COMPILE="$CROSS_COMPILE"
-make -C opensbi -j"$JOBS" O="$OPEN_SBI_OUT" PLATFORM=generic \
-  PLATFORM_DEFCONFIG=k3_defconfig CROSS_COMPILE="$CROSS_COMPILE"
+
+OPEN_SBI_CONFIG="$OPEN_SBI_OUT/platform/generic/kconfig/.config"
+OPEN_SBI_ARGS=(O="$OPEN_SBI_OUT" PLATFORM=generic PLATFORM_DEFCONFIG=k3_defconfig
+  CROSS_COMPILE="$CROSS_COMPILE")
+mkdir -p "$OPEN_SBI_OUT"
+make -C opensbi "${OPEN_SBI_ARGS[@]}" "$OPEN_SBI_CONFIG"
+OPENSBI_SRC_DIR="$PWD/opensbi" OPENSBI_PLATFORM=generic \
+  OPENSBI_PLATFORM_SRC_DIR="$PWD/opensbi/platform/generic" \
+  KCONFIG_CONFIG="$OPEN_SBI_CONFIG" \
+  python3 opensbi/scripts/Kconfiglib/setconfig.py --kconfig opensbi/Kconfig \
+    FDT_REGMAP=y FDT_REGMAP_SYSCON=y FDT_RESET_SYSCON=y
+make -C opensbi -j"$JOBS" "${OPEN_SBI_ARGS[@]}"
 install -D -m 0644 "$OPEN_SBI_OUT/platform/generic/firmware/fw_dynamic.bin" \
   "$OPTEE_PREFIX/firmware/k3/fw_dynamic.bin"
 ```
+
+syscon設定は下のDTSにある `syscon-poweroff` でQEMUを正常終了させるために使います。
 
 16 hartの検証用initramfsを作ります。Linuxには `CONFIG_TEE=y`、
 `CONFIG_OPTEE=y`、`CONFIG_RISCV_SBI_MPXY_MBOX=y` が必要です。
@@ -160,14 +172,15 @@ timeout 90 "$OPTEE_PREFIX/bin/qemu-system-riscv64" \
   -dtb "$TEST_OUT/boot.dtb" -initrd "$TEST_OUT/init.cpio" \
   -device "loader,file=$WORK/out/core/tee.elf" \
   -append 'console=ttyS0,115200 earlycon=sbi keep_bootcon printk.devkmsg=on rdinit=/init cma=512M@4G-16G' \
-  </dev/null >"$TEST_OUT/uart.log" 2>&1
-grep -aF 'PASS: parallel OP-TEE TA calls on all 16 CPUs' "$TEST_OUT/uart.log"
+  </dev/null >"$TEST_OUT/uart.log" 2>&1 &&
+  grep -aF 'PASS: parallel OP-TEE TA calls on all 16 CPUs' "$TEST_OUT/uart.log" &&
+  grep -aF 'reboot: Power down' "$TEST_OUT/uart.log"
 ```
 
-既存の単独QEMU試験では16 CPUの並行TA呼び出しに成功し、その後の電源断が
-タイムアウトした記録があります。TAの合格マーカーとQEMUの終了状態を両方確認します。
-上記のDTSを使ったコマンド一式は、この手順書の作成時点ではQEMUで未検証です。
-[単独試験の記録](jupiter2-optee-ftpm-porting-plan.md)と[検証プログラムの仕様](../verifications/optee-coexistence/README.md#k3-qemuでのop-tee単独16-hart試験)
+全16 CPUのTA合格、ゲストの電源断、QEMUの終了コード0を確認します。
+並行TA試験でタイムアウトした環境では、単独用OpenSBIをビルドし直して配置し、
+LinuxのMPXYドライバーに既存の `-EAGAIN` 再試行が入ったImageを使います。
+[不具合記録 KSB-095](keystone-bug-report.md)
 
 ## カスタマイズできる変数
 
