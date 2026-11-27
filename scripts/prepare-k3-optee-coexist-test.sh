@@ -38,6 +38,8 @@ make -C "$VERIFY" "$tmp/optee-coexistence" OUT="$tmp" \
 "${CROSS_COMPILE}gcc" -static -O2 -Wall -Wextra -Werror \
   -o "$tmp/init" "$VERIFY/coexist-init.c"
 dtc -q -I dts -O dtb -o "$tmp/boot.dtb" "$VERIFY/boot.dts"
+dtc -q -@ -I dts -O dtb -o "$tmp/boot-pmp16.dtbo" "$VERIFY/boot-pmp16.dtso"
+fdtoverlay -i "$tmp/boot.dtb" -o "$tmp/boot-pmp16.dtb" "$tmp/boot-pmp16.dtbo"
 
 cat > "$tmp/initramfs.list" <<LIST
 dir /dev 0755 0 0
@@ -50,5 +52,5 @@ file /eyrie-rt $runtime/eyrie-rt 0755 0 0
 file /loader.bin $runtime/loader.bin 0644 0 0
 LIST
 "$KERNEL_OUT/usr/gen_init_cpio" "$tmp/initramfs.list" > "$tmp/coexist.cpio"
-mv "$tmp/boot.dtb" "$tmp/coexist.cpio" "$WORK/"
-printf '%s\n' "$WORK/boot.dtb" "$WORK/coexist.cpio"
+mv "$tmp/boot.dtb" "$tmp/boot-pmp16.dtb" "$tmp/coexist.cpio" "$WORK/"
+printf '%s\n' "$WORK/boot.dtb" "$WORK/boot-pmp16.dtb" "$WORK/coexist.cpio"

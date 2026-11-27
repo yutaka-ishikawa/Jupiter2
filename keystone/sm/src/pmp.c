@@ -15,6 +15,7 @@
 #include <sbi/riscv_locks.h>
 #include <sbi/riscv_atomic.h>
 #ifdef KEYSTONE_K3_PMP_N_REG
+#include <sbi/k3_keystone_boot_slots.h>
 #include <sbi/k3_pmp_partition_evidence.h>
 #endif
 
@@ -66,12 +67,15 @@ int k3_pmp_boot_partition_admit(uint16_t opensbi_mask, uint16_t keystone_mask,
                                  int cold_boot)
 {
   const uint16_t full = 0xffffU;
+  bool shared = sbi_hart_keystone_shared_fallback();
   if (!opensbi_mask || !keystone_mask ||
       (opensbi_mask & keystone_mask) ||
       (uint16_t)(opensbi_mask | keystone_mask) != full ||
       !(opensbi_mask & 0x8000U) || (keystone_mask & 0x8000U) ||
-      __builtin_popcount((unsigned int)keystone_mask) < 3)
+      (shared ? keystone_mask != K3_BOOT_SHARED_SM_MASK :
+       __builtin_popcount((unsigned int)keystone_mask) < K3_BOOT_MIN_KEYSTONE)) {
     return -1;
+  }
   if (!cold_boot)
     return k3_pmp_partition_prepared &&
            k3_pmp_allowed == keystone_mask ? 0 : -1;

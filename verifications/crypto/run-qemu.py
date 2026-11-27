@@ -103,6 +103,36 @@ def run(args, name, provider):
     return record
 
 
+def check_optee_pmp16(output, profile):
+    if b'[K3-PMP] shared readback failed' in output:
+        raise RuntimeError('PMP CSR readback failed')
+    rows = re.findall(
+        rb'\[K3-PMP\] shared CSR hart=(\d+) state=(boot-host|host|optee|enclave) '
+        rb'implemented=(\d+) gran=(\d+) active=(\d+) mask=0x([0-9a-f]+)', output)
+    expected_masks = {'boot-host': {0x9fff}, 'host': {0x9fff, 0xbfff},
+                      'optee': {0x9fff, 0xbfff}, 'enclave': {0xffff}}
+    harts = {state: set() for state in expected_masks}
+    max_active = {}
+    for hart, state, implemented, gran, active, mask in rows:
+        hart, implemented, gran, active = map(int, (hart, implemented, gran, active))
+        state = state.decode()
+        mask = int(mask, 16)
+        expected_count = 32 if profile == 'mixed' and hart >= 8 else 16
+        if (hart >= 16 or implemented != expected_count or gran != 12
+                or mask not in expected_masks[state] or active != mask.bit_count()):
+            raise RuntimeError(f'Unexpected PMP CSR on hart {hart} in {state}: {mask:#x}')
+        harts[state].add(hart)
+        max_active[state] = max(max_active.get(state, 0), active)
+    missing_boot = sorted(set(range(16)) - harts['boot-host'])
+    if missing_boot:
+        raise RuntimeError(f'Missing boot PMP readback on harts {missing_boot}')
+    # During runtime, OP-TEE and OpenSBI can interleave UART bytes.
+    missing_states = [state for state in expected_masks if not harts[state]]
+    if missing_states:
+        raise RuntimeError(f'Missing PMP readback for {missing_states}')
+    return max_active
+
+
 def run_optee(args):
     tee, dtb, initrd = (path.resolve() for path in args.optee_coexistence)
     qemu = args.prefix / 'bin/qemu-system-riscv64'
@@ -111,10 +141,16 @@ def run_optee(args):
     log = args.logs / 'optee-coexistence.log'
     record = {'case': 'optee-coexistence', 'sstc': args.sstc,
               'pass': False, 'log': str(log)}
+    machine = 'jupiter2,wtm-rng=on'
+    if args.optee_pmp16 == 'mixed':
+        machine += ',mixed-pmp=on'
+    if args.optee_pmp16:
+        record['pmp_profile'] = args.optee_pmp16
+    granularity = 4096 if args.optee_pmp16 else 16
     command = [
-        str(qemu), '-accel', 'tcg,thread=multi', '-M', 'jupiter2,wtm-rng=on',
+        str(qemu), '-accel', 'tcg,thread=multi', '-M', machine,
         '-cpu', 'rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,'
-                f'pmp-granularity=16,sstc={args.sstc}',
+                f'pmp-granularity={granularity},sstc={args.sstc}',
         '-smp', '16', '-m', '2G', '-display', 'none', '-monitor', 'none',
         '-serial', 'stdio', '-bios', str(bios), '-kernel', str(kernel),
         '-dtb', str(dtb), '-initrd', str(initrd),
@@ -141,8 +177,10 @@ def run_optee(args):
         if process.returncode or missing:
             record['error'] = f'QEMU exit {process.returncode}; missing markers: {missing}'
         else:
+            if args.optee_pmp16:
+                record['pmp_peak_by_state'] = check_optee_pmp16(output, args.optee_pmp16)
             record['pass'] = True
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         record['error'] = str(exc)
     return record
 
@@ -158,7 +196,11 @@ def main():
     parser.add_argument('--optee-coexistence', type=Path, nargs=3,
                         metavar=('TEE_ELF', 'BOOT_DTB', 'INITRAMFS'),
                         help='also run the 16-hart OP-TEE/Keystone guest integration')
+    parser.add_argument('--optee-pmp16', nargs='?', const='mixed', choices=['mixed', 'uniform16'],
+                        help='verify 16-slot PMP usage with boot-pmp16.dtb (default profile: mixed)')
     args = parser.parse_args()
+    if args.optee_pmp16 and not args.optee_coexistence:
+        parser.error('--optee-pmp16 requires --optee-coexistence')
     # Guest metadata paths use the repository's standard installation.
     if args.prefix.resolve() != (ROOT / 'install/keystone').resolve():
         parser.error('This runner currently requires the standard install/keystone prefix; custom boot can be tested manually')

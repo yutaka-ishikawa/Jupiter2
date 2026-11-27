@@ -115,7 +115,7 @@
 | KSB-089 | OP-TEE同居ゲストの `/init` が命令アクセスフォルトで停止 | 起動DTB用PMP領域のLinux予約漏れを確認。報告時のフォルト物理アドレスは未確認 | 予約を追加し、既存の同居試験で回帰確認 |
 | KSB-090 | 既定の同居DTBでfTPMデバイスが作られない | `microsoft,ftpm` のノードが未定義 | 同居用DTSにfTPMノードを追加 |
 | KSB-091 | fTPM・IMAゲストの初期化がタイムアウトする | 固定DTSで起動時の乱数シード欠落を確認。タイムアウトとの因果は未確定 | 試験ごとに新しいシードを供給 |
-| KSB-092 | 実機の同居RAM起動がOpenSBIのPMP初期化で停止 | 同梱FITとUARTから現行規則で21枠相当を確認 | Secure AIAの統合を含む共通16枠案を静的に照合。未実装 |
+| KSB-092 | 実機の同居RAM起動がOpenSBIのPMP初期化で停止 | 同梱FITとUARTから現行規則で21枠相当を確認 | 全域枠の共用を実装しQEMUで最大16枠を確認。実機用の割り当ては検討中 |
 | KSB-093 | 実機同居用のOP-TEE起動DTBが読み取り専用 | OP-TEEの外部DTB初期化と領域のR権限が不整合 | Core内のDTBコピーを検討。ソースで確認、実機未試験 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
@@ -1860,6 +1860,20 @@ PMU MAINと公開eFuse値にはLinuxのアクセス経路が必要であり、QE
 1枠で拒否してI²C3を先行規則で許可し、実行状態ごとに枠を切り替えると、既定機能を有効にする
 CPUのPMP配置も最大16枠で表せる。クロック・リセットの仲介とIOPMPの実効権限の確認が残る。
 [既定機能を維持する枠の表](keystone-optee-coexistence-design.md#103-実機のop-tee既定機能を維持する割り当て)
+
+#### QEMUでの全域枠共用の確認
+
+同居時に通常枠13個を使う構成では、OpenSBIとSMが全域枠15を共用するようにした。
+枠13・14をEPMとUTMに割り当て、Enclaveへの移行時には全域規則を先に閉じ、ホスト用の
+個別許可も解除する。Linuxへ戻る際は個別規則を復元した後に全域許可を戻す。
+OP-TEE起動後のセカンダリhartの停止は、全域枠を拒否にした状態でHSMへ進む。
+
+16 hart・2 GiBのK3 QEMUで、4 KiB粒度の各hartのPMPを読み戻した。13通常枠の同居試験で
+起動直後のLinuxは14枠、LinuxとOP-TEEの実行時は最大15枠、Enclave実行時は16枠だった。
+混在構成では32枠を持つhartの上位16枠も無効だった。既定の同居構成も回帰試験に通過した。
+通常枠を14個にしたDTBは、全域枠とKeystone用2枠を加えると17枠になるため、Linux起動前に拒否された。
+実機のMMIOアドレス切替とDMAの実効権限は未検証。
+[QEMUのUART・CSR記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
 ### KSB-093: 実機同居用のOP-TEE起動DTBが読み取り専用
 

@@ -92,11 +92,21 @@ context_switch_to_enclave(struct sbi_trap_regs *regs, enclave_id eid,
 	goto restore_host_pmp;
     }
     for (memid = 0; memid < ENCLAVE_REGIONS_MAX; memid++) {
-	if (enclaves[eid].regions[memid].type != REGION_INVALID &&
-	    pmp_set_keystone(enclaves[eid].regions[memid].pmp_rid,
-			     enclaves[eid].regions[memid].type == REGION_BACKING
-				 ? PMP_R | PMP_W
-				 : PMP_ALL_PERM)) {
+	struct enclave_region *region = &enclaves[eid].regions[memid];
+	uint8_t permissions = PMP_ALL_PERM;
+
+	if (region->type == REGION_INVALID) {
+	    continue;
+	}
+	if (region->type == REGION_BACKING) {
+	    permissions = PMP_R | PMP_W;
+	}
+#ifdef KEYSTONE_K3_PMP_N_REG
+	if (region->type == REGION_UTM && sbi_hart_keystone_shared_fallback()) {
+	    permissions = PMP_R | PMP_W;
+	}
+#endif
+	if (pmp_set_keystone(region->pmp_rid, permissions)) {
 	    goto restore_host_pmp;
 	}
     }
@@ -130,6 +140,7 @@ context_switch_to_enclave(struct sbi_trap_regs *regs, enclave_id eid,
     cpu_enter_enclave_context(eid);
 #ifdef KEYSTONE_K3_PMP_N_REG
     k3_keystone_timer_arm();
+    sbi_hart_keystone_trace_pmp(K3_PMP_TRACE_ENCLAVE);
 #endif
     SM_TRACE_STAGE("RUN switch end");
     return SBI_ERR_SM_ENCLAVE_SUCCESS;
@@ -168,6 +179,9 @@ static inline void context_switch_to_host(struct sbi_trap_regs *regs,
     if (osm_pmp_set(PMP_ALL_PERM)) {
 	sbi_hart_hang();
     }
+#ifdef KEYSTONE_K3_PMP_N_REG
+    sbi_hart_keystone_trace_pmp(K3_PMP_TRACE_HOST);
+#endif
     interrupts = MIP_SSIP | MIP_STIP | MIP_SEIP;
     csr_write(mideleg, interrupts);
     swap_prev_state(&enclaves[eid].threads[0], regs, return_on_resume);

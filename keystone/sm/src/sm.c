@@ -89,6 +89,14 @@ byte dev_public_key[PUBLIC_KEY_SIZE] = { 0, };
 
 int osm_pmp_set(uint8_t perm)
 {
+#ifdef KEYSTONE_K3_PMP_N_REG
+  if (sbi_hart_keystone_shared_fallback()) {
+    if (perm != PMP_NO_PERM && perm != PMP_ALL_PERM) {
+      return SBI_ERR_SM_PMP_REGION_INVALID;
+    }
+    return sbi_hart_keystone_switch_enclave_pmp(perm == PMP_NO_PERM);
+  }
+#endif
   /* in case of OSM, PMP cfg is exactly the opposite.*/
   return pmp_set_keystone(os_region_id, perm);
 }
@@ -194,8 +202,11 @@ void sm_print_cert()
 
 int sm_init(bool cold_boot)
 {
+  bool private_os_entry = true;
+
   if (cold_boot) SM_TRACE_STAGE("boot trace enabled; built " __DATE__ " " __TIME__);
 #if defined(KEYSTONE_K3_PMP_N_REG)
+  private_os_entry = !sbi_hart_keystone_shared_fallback();
   /* K3 PMP-only SM bootstrap. Keys and DMA are deliberately not
    * prerequisites, but no enclave is admitted until PMP ownership and the
    * protected SM physical placement have actually been established. */
@@ -236,10 +247,12 @@ int sm_init(bool cold_boot)
     /* Merged K3 SM: firmware PMP is exclusively OpenSBI-owned. */
 #endif
 
-    os_region_id = osm_init();
-    if(os_region_id < 0) {
-      sbi_printf("[SM] OS PMP region allocation failed\n");
-      return SBI_ERR_SM_ENCLAVE_PMP_FAILURE;
+    if (private_os_entry) {
+      os_region_id = osm_init();
+      if (os_region_id < 0) {
+	sbi_printf("[SM] OS PMP region allocation failed\n");
+	return SBI_ERR_SM_ENCLAVE_PMP_FAILURE;
+      }
     }
 
     if (platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS) {
@@ -280,7 +293,7 @@ int sm_init(bool cold_boot)
 #ifndef KEYSTONE_K3_PMP_N_REG
       pmp_set_keystone(sm_region_id, PMP_NO_PERM) ||
 #endif
-      pmp_set_keystone(os_region_id, PMP_ALL_PERM)) {
+      (private_os_entry && pmp_set_keystone(os_region_id, PMP_ALL_PERM))) {
     sbi_printf("[SM] PMP initialization failed; denying admission\n");
     return SBI_ERR_SM_ENCLAVE_PMP_FAILURE;
   }

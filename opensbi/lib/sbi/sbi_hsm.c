@@ -409,8 +409,11 @@ void __noreturn sbi_hsm_optee_boot_stop(struct sbi_scratch *scratch)
     extern int k3_keystone_set_os_pmp(bool enabled);
     struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch, hart_data_offset);
 
-    /* Preserve the verified OpenSBI layout for the Linux warm start. */
-    if (hdata->optee_restart || k3_keystone_set_os_pmp(false) ||
+    /* The shared fallback is already closed in the OP-TEE policy. A
+     * separate SM OS entry, when present, must remain off at warm start.
+     */
+    if (hdata->optee_restart ||
+	(!sbi_hart_keystone_shared_fallback() && k3_keystone_set_os_pmp(false)) ||
 	!__sbi_hsm_hart_change_state(hdata, SBI_HSM_STATE_STARTED,
 				     SBI_HSM_STATE_STOP_PENDING)) {
 	sbi_hart_hang();

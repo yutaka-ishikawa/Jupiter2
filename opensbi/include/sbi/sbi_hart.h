@@ -141,6 +141,16 @@ unsigned int sbi_hart_mhpm_bits(struct sbi_scratch *scratch);
 int sbi_hart_keystone_verify_extra_pmp(struct sbi_scratch *scratch);
 /* Treat every OP-TEE-accessible range as reserved for enclave allocation. */
 bool sbi_hart_keystone_optee_overlaps(unsigned long base, unsigned long size);
+bool sbi_hart_keystone_shared_fallback(void);
+int sbi_hart_keystone_switch_enclave_pmp(bool enter);
+enum k3_pmp_trace_state {
+	K3_PMP_TRACE_BOOT_HOST,
+	K3_PMP_TRACE_HOST,
+	K3_PMP_TRACE_OPTEE,
+	K3_PMP_TRACE_ENCLAVE,
+	K3_PMP_TRACE_STATE_COUNT,
+};
+void sbi_hart_keystone_trace_pmp(enum k3_pmp_trace_state state);
 
 #ifdef CONFIG_K3_KEYSTONE_SM
 /* Read-only local PMP inventory. Called only from trusted M-mode code.

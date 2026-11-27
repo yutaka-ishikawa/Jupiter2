@@ -502,6 +502,10 @@ struct k3_root_pmp_layout {
     unsigned int regular;
 };
 
+static const struct sbi_domain *k3_optee_host;
+static const struct sbi_domain *k3_optee_tee;
+static bool k3_optee_shared_fallback;
+
 static bool k3_root_firmware_pair(const struct sbi_scratch *scratch,
 				  const struct sbi_domain_memregion *rx)
 {
@@ -533,10 +537,11 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
 				    unsigned int count, unsigned int gran,
 				    unsigned long addr_max,
 				    struct k3_root_pmp_layout *layout,
-				    bool trace_regions)
+				    bool trace_regions, bool allow_shared)
 {
     struct sbi_domain_memregion *reg;
     unsigned int broad = 0;
+    bool share_fallback;
 
     sbi_memset(layout, 0, sizeof(*layout));
     if (!dom || !dom->regions || !k3_pmp_count_supported(count)) {
@@ -584,7 +589,10 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
 	layout->region[layout->regular++] = reg;
     }
 
-    if (k3_boot_plan_slots(count, layout->regular, broad, &layout->slots)) {
+    share_fallback = allow_shared &&
+	layout->regular == K3_BOOT_FALLBACK - K3_BOOT_SHARED_MIN_KEYSTONE;
+    if (k3_boot_plan_slots(count, layout->regular, broad, share_fallback,
+			   &layout->slots)) {
 	K3_PMP_TRACE(
 	    "REJECT root PMP capacity/order regular=%u broad=%u count=%u\n",
 	    layout->regular, broad, count);
@@ -592,9 +600,6 @@ static int k3_root_pmp_layout_build(struct sbi_scratch *scratch,
     }
     return 0;
 }
-
-static const struct sbi_domain *k3_optee_host;
-static const struct sbi_domain *k3_optee_tee;
 
 bool sbi_hart_keystone_optee_overlaps(unsigned long base, unsigned long size)
 {
@@ -683,7 +688,7 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
 {
     struct k3_root_pmp_layout layout;
     unsigned long permissions[K3_BOOT_PMP_COUNT] = {0};
-    unsigned int bits, available;
+    unsigned int bits, available, i;
     int rc;
 
     if (!host || !tee || host == tee || k3_optee_host ||
@@ -697,13 +702,22 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
     rc = k3_root_pmp_layout_build(scratch, host,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
-				  (1UL << bits) - 1, &layout, true);
+				  (1UL << bits) - 1, &layout, true, true);
     if (rc) {
 	return rc;
     }
     rc = k3_optee_pmp_plan(&layout, tee, permissions, &available);
     if (rc) {
 	return rc;
+    }
+    if (layout.slots.keystone_mask == K3_BOOT_SHARED_SM_MASK) {
+	for (i = 0; i < layout.regular; i++) {
+	    unsigned long prot = k3_root_pmp_permissions(layout.region[i]);
+
+	    if ((prot & PMP_L) && (prot & (PMP_R | PMP_W | PMP_X))) {
+		return SBI_EDENIED;
+	    }
+	}
     }
 
     if (measured_boot) {
@@ -716,9 +730,58 @@ int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
 
     k3_optee_host = host;
     k3_optee_tee = tee;
+    k3_optee_shared_fallback =
+	layout.slots.keystone_mask == K3_BOOT_SHARED_SM_MASK;
     sbi_printf("K3 OP-TEE PMP: fixed=0x%x Keystone=0x%x fallback=%u\n",
 	       available, layout.slots.keystone_mask, layout.slots.fallback_index);
     return 0;
+}
+
+bool sbi_hart_keystone_shared_fallback(void)
+{
+    return k3_optee_shared_fallback;
+}
+
+void sbi_hart_keystone_trace_pmp(enum k3_pmp_trace_state state)
+{
+#if defined(K3_PMP_BOOT_TRACE) && K3_PMP_BOOT_TRACE
+    static const char *const state_names[] = {
+	[K3_PMP_TRACE_BOOT_HOST] = "boot-host",
+	[K3_PMP_TRACE_HOST] = "host",
+	[K3_PMP_TRACE_OPTEE] = "optee",
+	[K3_PMP_TRACE_ENCLAVE] = "enclave",
+    };
+    static unsigned int last_mask[SBI_HARTMASK_MAX_BITS][K3_PMP_TRACE_STATE_COUNT];
+    struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+    unsigned int count, i, hartindex;
+    unsigned long prot, base, order;
+    unsigned int active = 0;
+
+    if (!k3_optee_shared_fallback) {
+	return;
+    }
+    count = sbi_hart_pmp_count(scratch);
+    for (i = 0; i < count; i++) {
+	if (pmp_get(i, &prot, &base, &order)) {
+	    K3_PMP_TRACE("shared readback failed hart=%lu slot=%u\n",
+			 csr_read(CSR_MHARTID), i);
+	    return;
+	}
+	if (prot & PMP_A) {
+	    active |= 1U << i;
+	}
+    }
+    hartindex = current_hartindex();
+    if (last_mask[hartindex][state] == active) {
+	return;
+    }
+    last_mask[hartindex][state] = active;
+    K3_PMP_TRACE("shared CSR hart=%lu state=%s implemented=%u gran=%u "
+		 "active=%u mask=0x%x\n", csr_read(CSR_MHARTID), state_names[state], count,
+		 sbi_hart_pmp_log2gran(scratch), __builtin_popcount(active), active);
+#else
+    (void)state;
+#endif
 }
 
 static int k3_pmp_check_entry(unsigned int index,
@@ -787,22 +850,16 @@ static int k3_optee_pmp_apply(const struct k3_root_pmp_layout *layout,
     return rc;
 }
 
-static int k3_optee_pmp_transition(
-	struct sbi_scratch *scratch, const struct k3_root_pmp_layout *layout,
-	unsigned int available, const unsigned long source[K3_BOOT_PMP_COUNT],
-	const unsigned long target[K3_BOOT_PMP_COUNT])
+static int k3_optee_pmp_verify(const struct k3_root_pmp_layout *layout,
+			      unsigned int available,
+			      const unsigned long permissions[K3_BOOT_PMP_COUNT],
+			      unsigned int full_range_order)
 {
     const struct sbi_domain_memregion *reg;
     unsigned int fallback = layout->slots.fallback_index;
-    unsigned int i, full_range_order;
+    unsigned int i;
     int rc;
 
-    if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV)) {
-	K3_PMP_TRACE("OP-TEE transition rejected mstatus=0x%lx\n",
-		     csr_read(CSR_MSTATUS));
-	return SBI_EDENIED;
-    }
-    full_range_order = sbi_hart_pmp_addrbits(scratch) + PMP_SHIFT;
     for (i = 0; i <= fallback; i++) {
 	if (i == fallback) {
 	    reg = layout->fallback;
@@ -811,15 +868,36 @@ static int k3_optee_pmp_transition(
 	} else {
 	    continue;
 	}
-	rc = k3_pmp_check_entry(i, reg, source[i], full_range_order);
+	rc = k3_pmp_check_entry(i, reg, permissions[i], full_range_order);
 	if (rc) {
 	    return rc;
 	}
     }
+    return 0;
+}
+
+static int k3_optee_pmp_transition(
+	struct sbi_scratch *scratch, const struct k3_root_pmp_layout *layout,
+	unsigned int available, const unsigned long source[K3_BOOT_PMP_COUNT],
+	const unsigned long target[K3_BOOT_PMP_COUNT])
+{
+    unsigned int full_range_order;
+    int rc;
+
+    if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV)) {
+	K3_PMP_TRACE("domain transition rejected mstatus=0x%lx\n",
+		     csr_read(CSR_MSTATUS));
+	return SBI_EDENIED;
+    }
+    full_range_order = sbi_hart_pmp_addrbits(scratch) + PMP_SHIFT;
+    rc = k3_optee_pmp_verify(layout, available, source, full_range_order);
+    if (rc) {
+	return rc;
+    }
 
     rc = k3_optee_pmp_apply(layout, available, target, full_range_order);
     if (rc && k3_optee_pmp_apply(layout, available, source, full_range_order)) {
-	sbi_printf("K3 OP-TEE PMP: unable to restore source permissions\n");
+	sbi_printf("K3 domain PMP: unable to restore source permissions\n");
 	sbi_hart_hang();
     }
     __asm__ __volatile__("sfence.vma" ::: "memory");
@@ -871,6 +949,10 @@ static int k3_optee_pmp_switch_with_os_slot(
     extern int k3_keystone_check_os_pmp(bool enabled);
     extern int k3_keystone_set_os_pmp(bool enabled);
     int rc;
+
+    if (k3_optee_shared_fallback) {
+	return k3_optee_pmp_switch_policy(scratch, layout, enter);
+    }
 
     if (csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV) ||
 	k3_keystone_check_os_pmp(enter)) {
@@ -924,7 +1006,7 @@ int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target)
     rc = k3_root_pmp_layout_build(scratch, k3_optee_host,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
-				  (1UL << bits) - 1, &layout, false);
+				  (1UL << bits) - 1, &layout, false, true);
     if (rc) {
 	return rc;
     }
@@ -932,7 +1014,57 @@ int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target)
     if (rc) {
 	return rc;
     }
-    return k3_optee_pmp_switch_with_os_slot(scratch, &layout, enter);
+    rc = k3_optee_pmp_switch_with_os_slot(scratch, &layout, enter);
+    if (!rc) {
+	sbi_hart_keystone_trace_pmp(enter ? K3_PMP_TRACE_OPTEE : K3_PMP_TRACE_HOST);
+    }
+    return rc;
+}
+
+int sbi_hart_keystone_switch_enclave_pmp(bool enter)
+{
+    struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+    struct k3_root_pmp_layout layout;
+    unsigned long host[K3_BOOT_PMP_COUNT] = {0};
+    unsigned long enclave[K3_BOOT_PMP_COUNT] = {0};
+    unsigned int bits, i, available = 0;
+    int rc;
+
+    if (!k3_optee_shared_fallback ||
+	sbi_domain_thishart_ptr() != k3_optee_host ||
+	(csr_read(CSR_MSTATUS) & (MSTATUS_MIE | MSTATUS_MPRV))) {
+	return SBI_EDENIED;
+    }
+    bits = sbi_hart_pmp_addrbits(scratch);
+    if (!bits || bits >= __riscv_xlen) {
+	return SBI_ENOTSUPP;
+    }
+    rc = sbi_hart_keystone_verify_extra_pmp(scratch);
+    if (rc) {
+	return rc;
+    }
+    rc = k3_root_pmp_layout_build(scratch, k3_optee_host,
+				  sbi_hart_pmp_count(scratch),
+				  sbi_hart_pmp_log2gran(scratch),
+				  (1UL << bits) - 1, &layout, false, true);
+    if (rc) {
+	return rc;
+    }
+    for (i = 0; i < layout.regular; i++) {
+	host[i] = k3_root_pmp_permissions(layout.region[i]);
+	if (host[i] & (PMP_R | PMP_W | PMP_X)) {
+	    available |= 1U << i;
+	}
+    }
+    host[layout.slots.fallback_index] = k3_root_pmp_permissions(layout.fallback);
+
+    /* Entry rollback can reach here after the host policy was restored. */
+    if (!enter && !k3_optee_pmp_verify(&layout, available, host,
+				       bits + PMP_SHIFT)) {
+	return 0;
+    }
+    return k3_optee_pmp_transition(scratch, &layout, available,
+				   enter ? host : enclave, enter ? enclave : host);
 }
 
 const struct sbi_domain *sbi_hart_keystone_optee_host(void)
@@ -957,11 +1089,15 @@ int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch)
     rc = k3_root_pmp_layout_build(scratch, k3_optee_host,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch),
-				  (1UL << bits) - 1, &layout, true);
+				  (1UL << bits) - 1, &layout, true, true);
     if (rc) {
 	return rc;
     }
-    return k3_optee_pmp_switch_with_os_slot(scratch, &layout, true);
+    rc = k3_optee_pmp_switch_with_os_slot(scratch, &layout, true);
+    if (!rc) {
+	sbi_hart_keystone_trace_pmp(K3_PMP_TRACE_OPTEE);
+    }
+    return rc;
 }
 
 /* Exercise both directions with lower privilege modes stopped. */
@@ -1073,7 +1209,7 @@ int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
     rc = k3_root_pmp_layout_build(scratch, tee_active ? k3_optee_host : domain,
 				  sbi_hart_pmp_count(scratch),
 				  sbi_hart_pmp_log2gran(scratch), addr_max,
-				  &layout, true);
+				  &layout, true, tee_active || domain == k3_optee_host);
     if (rc) {
 	return rc;
     }
@@ -1093,7 +1229,8 @@ static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
     int rc;
 
     rc = k3_root_pmp_layout_build(scratch, tee_active ? k3_optee_host : domain,
-				  count, gran, addr_max, &layout, true);
+				  count, gran, addr_max, &layout, true,
+				  tee_active || domain == k3_optee_host);
     if (rc) {
 	return rc;
     }
@@ -1141,6 +1278,7 @@ static int k3_keystone_root_pmp_configure(struct sbi_scratch *scratch,
 		 "extra-off=%u root=%u Keystone-free=%u\n",
 		 csr_read(CSR_MHARTID), count, K3_PMP_COMMON_REGS,
 		 count - K3_PMP_COMMON_REGS, layout.regular + 1, free_slots);
+    sbi_hart_keystone_trace_pmp(K3_PMP_TRACE_BOOT_HOST);
     return 0;
 }
 

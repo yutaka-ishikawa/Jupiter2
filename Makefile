@@ -75,6 +75,6 @@ help:
 	@echo 'make qemu|opensbi|sm|eyrie|keystone|crypto|verifications|linux|rng|samples'
 	@echo 'make install-qemu|install-opensbi|install-eyrie|install-keystone|install-crypto|install-verifications'
 	@echo 'make optee-coexist JOBS=20   Build the OP-TEE Core, coexistence TA and RV64 libteec'
-	@echo 'make optee-coexist-test     Generate boot.dtb and coexist.cpio after install (OPTEE_CLIENT_OUT overrides client path)'
+	@echo 'make optee-coexist-test     Generate boot.dtb, boot-pmp16.dtb and coexist.cpio (OPTEE_CLIENT_OUT overrides client path)'
 	@echo 'make ftpm-ima JOBS=20      Build the fTPM TA, supplicant and IMA test kernel/guest program'
 	@echo 'Stop QEMU/unmount rootfs before install-keystone. See doc/make-build-install.md.'

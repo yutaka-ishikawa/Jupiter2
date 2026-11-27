@@ -7,6 +7,7 @@
 #ifndef __K3_A1_CSR_PREFLIGHT_H__
 #define __K3_A1_CSR_PREFLIGHT_H__
 #include <stdint.h>
+#include <sbi/k3_keystone_boot_slots.h>
 #include <sbi/k3_pmp_contract.h>
 #define K3_A1_CSR_MAX K3_PMP_COMMON_REGS
 #define K3_A1_CSR_A 0x18U
@@ -56,7 +57,8 @@ struct k3_a1_local_candidate {
 static inline int
 k3_a1_preflight_local_with_root_locks(const struct k3_a1_csr_measured *m,
 				      struct k3_a1_local_candidate *out,
-				      uint16_t verified_root_locks)
+				      uint16_t verified_root_locks,
+				      bool share_fallback)
 {
     unsigned int i, old = K3_A1_CSR_MAX, fallback;
     uint16_t fw = 0, free_mask = 0, actual_locks = 0;
@@ -132,7 +134,8 @@ k3_a1_preflight_local_with_root_locks(const struct k3_a1_csr_measured *m,
 		free_mask |= (uint16_t)(1U << i);
 	    }
 	}
-	if (!fw || __builtin_popcount((unsigned int)free_mask) < 3) {
+	if (!fw || (share_fallback ? free_mask != K3_BOOT_SHARED_SM_MASK :
+	    __builtin_popcount((unsigned int)free_mask) < K3_BOOT_MIN_KEYSTONE)) {
 	    return K3_A1_PF_NO_SLOTS;
 	}
 	out->old_allow = old;
@@ -182,6 +185,6 @@ k3_a1_preflight_local_with_root_locks(const struct k3_a1_csr_measured *m,
 static inline int k3_a1_preflight_local(const struct k3_a1_csr_measured *m,
 					struct k3_a1_local_candidate *out)
 {
-    return k3_a1_preflight_local_with_root_locks(m, out, 0);
+    return k3_a1_preflight_local_with_root_locks(m, out, 0, false);
 }
 #endif

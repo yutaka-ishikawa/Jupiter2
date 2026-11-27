@@ -8,7 +8,7 @@ A100の枠16–31は無効とする。実機のOP-TEEはRTC・TE200・PRNG・IOP
 基準は `captures/20261108-075700/` の実機Linux DTB、販売元のPico-ITX用DTB、
 同梱FIT `keystone-optee-geu-20261126-184408` と、領域の設定が一致する実機UART記録とする。
 現行の初期化経路は21枠相当を要求して停止した。新しい表は実機資料と静的に照合済みで、
-ここで扱う配置の実装とQEMU・実機での検証はこれから行う。
+全域規則の共用はQEMUで確認済み。実機では各装置に合わせた枠の切替と検証を行う。
 [KSB-092の調査記録](keystone-bug-report.md#ksb-092-実機の同居ram起動でopensbiのドメイン初期化が停止する)
 
 初期の対応範囲は、EPMとUTMをそれぞれ1つのNAPOT枠で表せるEnclave 1個とする。
@@ -219,6 +219,20 @@ Linuxの `linux-k3/drivers/tee/optee/mpxy_sbi.c` と `linux-k3/drivers/char/tpm/
 通常の同居QEMUランナーは一律16枠・16バイト粒度で起動する。混在PMPでの結果には、
 起動オプションと実際のCSR読み戻しを添える。QEMUのGEUモデルで確認した内容と、実機のeFuse、
 ESOS・RPMI、IOPMP、RTC、TE200の検査結果は、それぞれの実行環境を明記する。
+
+### 全域枠の共用を確認したQEMU試験
+
+同居構成で通常枠が13個必要な場合、OpenSBIとKeystone SMが枠15の全域規則を共用する。
+枠13はEPM、枠14はUTMに使用する。OP-TEEからLinuxへのセカンダリhartの起動では、
+既存HSMの遷移を使い、共有構成の停止はOP-TEEの拒否規則を適用した状態で行う。
+検証は[同居ゲストの16枠PMP試験](../verifications/optee-coexistence/README.md#k3-qemuでの16枠pmp試験)を参照。
+
+4 KiB粒度の一律16枠・混在16/32枠で、Enclave実行時に枠0–15を読み戻した。
+通常枠を14個にした入力は、合計17枠が必要になるためLinux起動前に拒否された。
+
+QEMUは現在の仮想デバイス構成で、LinuxとOP-TEEが同じアドレス範囲を使うPMP配置を検査した。
+実機用のアドレス切替、DCIUとUTMの枠共用、私有DTB、クロック仲介とIOPMPの確認は後続の工程で行う。
+[CSR読み戻しとUARTの試験記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
 ## 3. 完了時の記録
 

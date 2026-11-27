@@ -7,11 +7,14 @@
  */
 #ifndef __K3_KEYSTONE_BOOT_SLOTS_H__
 #define __K3_KEYSTONE_BOOT_SLOTS_H__
+#include <stdbool.h>
 #include <stdint.h>
 #include <sbi/k3_pmp_contract.h>
 #define K3_BOOT_PMP_COUNT K3_PMP_COMMON_REGS
 #define K3_BOOT_FALLBACK 15U
 #define K3_BOOT_MIN_KEYSTONE 3U
+#define K3_BOOT_SHARED_SM_MASK 0x6000U
+#define K3_BOOT_SHARED_MIN_KEYSTONE 2U
 
 struct k3_boot_pmp_plan {
     uint16_t opensbi_mask;
@@ -23,13 +26,16 @@ struct k3_boot_pmp_plan {
 static inline int k3_boot_plan_slots(unsigned int pmp_count,
 				     unsigned int firmware_entries,
 				     unsigned int broad_allow_entries,
+				     bool share_fallback,
 				     struct k3_boot_pmp_plan *out)
 {
     unsigned int i;
+    unsigned int min_keystone = share_fallback ? K3_BOOT_SHARED_MIN_KEYSTONE :
+						K3_BOOT_MIN_KEYSTONE;
     uint16_t reserved = (uint16_t)(1U << K3_BOOT_FALLBACK);
     if (!out || !k3_pmp_count_supported(pmp_count) || !firmware_entries ||
 	broad_allow_entries != 1U ||
-	firmware_entries + K3_BOOT_MIN_KEYSTONE > K3_BOOT_FALLBACK) {
+	firmware_entries + min_keystone > K3_BOOT_FALLBACK) {
 	return -1;
     }
     for (i = 0; i < firmware_entries; i++) {

@@ -1,0 +1,75 @@
+Jupiter2 OP-TEE and Keystone shared PMP fallback QEMU results
+Baseline 309f57738ae4eff05ad005414de8879528b010e9 with local implementation changes.
+QEMU emulator version 11.1.3
+16 harts, 2 GiB, Sstc on. DTBs generated from boot.dts and boot-pmp16.dtso.
+The Core used the QEMU eFuse model with CFG_K3_EFUSE=y and CFG_K3_HUK_ALLOW_UNFUSED=y.
+
+Artifact SHA-256
+e1ff44032245e8bfc4c1de52741e833864f13e1aab343b6a2960b3a7ae1ed853  QEMU
+f1c6b7d3f11f8410e63dd69d721103c93ee2d82287b811f4cc91926e4ba7e623  OpenSBI with Keystone SM
+23082990058f89834795cc7382b5cec085957164a30566dcbc6341296ef7a311  Linux Image
+227f68b635651bbff8f3c523dd79e5b15822f34c1259a9e865365d7045a7251b  OP-TEE Core ELF with the early test TA
+e36cbbfd9f7c5e382f4fe25a8e0347fdce52bbac703dc895f23e6a8e077139f9  boot DTB at capacity
+a60a31aceb0b750152c4ce168c48930b41331225c9223188d5841a50e7c76de9  ordinary boot DTB
+edad10b84644a165e6eaa6bdbadb053593434417b0e7ef7df4351b20ebc1deeb  initramfs
+
+source-mixed PASS, QEMU exit 0
+Peak active entries boot-host=14, optee=15, host=15, enclave=16
+[K3-PMP] shared CSR hart=0 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=1 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=2 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=3 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=4 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=5 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=6 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=7 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=8 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=9 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=10 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=11 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=12 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=13 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=14 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=15 state=boot-host implemented=32 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=1 state=host implemented=16 gran=12 active=15 mask=0xbfff
+[K3-PMP] shared CSR hart=1 state=optee implemented=16 gran=12 active=15 mask=0xbfff
+[K3-PMP] shared CSR hart=1 state=enclave implemented=16 gran=12 active=16 mask=0xffff
+smp: Brought up 1 node, 16 CPUs
+PASS: 16 enclave runs, 33 TA calls including OCALL
+reboot: Power down
+
+source-uniform PASS, QEMU exit 0
+Peak active entries boot-host=14, optee=15, host=15, enclave=16
+[K3-PMP] shared CSR hart=0 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=1 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=2 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=3 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=4 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=5 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=6 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=7 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=8 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=9 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=10 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=11 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=12 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=13 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=14 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=15 state=boot-host implemented=16 gran=12 active=14 mask=0x9fff
+[K3-PMP] shared CSR hart=2 state=host implemented=16 gran=12 active=15 mask=0xbfff
+[K3-PMP] shared CSR hart=2 state=optee implemented=16 gran=12 active=15 mask=0xbfff
+[K3-PMP] shared CSR hart=2 state=enclave implemented=16 gran=12 active=16 mask=0xffff
+smp: Brought up 1 node, 16 CPUs
+PASS: 16 enclave runs, 33 TA calls including OCALL
+reboot: Power down
+
+source-existing PASS, QEMU exit 0
+smp: Brought up 1 node, 16 CPUs
+PASS: 16 enclave runs, 33 TA calls including OCALL
+reboot: Power down
+
+Over-capacity DTB with 14 regular entries PASS
+[K3-PMP] REJECT root PMP capacity/order regular=14 broad=1 count=16
+K3 OP-TEE PMP: fixed slot plan rejected (-2)
+[K3-PMP] REJECT root PMP capacity/order regular=10 broad=0 count=16
+Linux did not start.

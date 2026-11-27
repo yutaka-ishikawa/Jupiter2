@@ -55,6 +55,27 @@ supplicantのTA検索先（例 `/lib/optee_armtz`）へ配置する。Keystone�
 PMPの隔離や遷移時の故障試験は
 [同居設計の受入試験](../../doc/keystone-optee-coexistence-design.md#7-受入試験)で扱う。
 
+## K3 QEMUでの16枠PMP試験
+
+リポジトリのルートでファームウェアをビルドし、インストール済みの同居試験用の入力を更新する。
+`make optee-coexist-test` は `dtc` と `fdtoverlay` を使い、通常の `boot.dtb` に加えて
+`boot-pmp16.dtb` を生成する。後者はLinuxの割当対象外にした3ページを保護する規則を加え、
+通常枠を13個使う。同居時は枠15を共用し、枠13と14をEPMとUTMに使う。
+
+```sh
+WORK=.build-k3/optee-coexist
+python3 verifications/crypto/run-qemu.py --sstc on \
+    --optee-coexistence "$WORK/out/core/tee.elf" "$WORK/boot-pmp16.dtb" "$WORK/coexist.cpio" \
+    --optee-pmp16
+```
+
+`--optee-pmp16` の既定は `mixed`。QEMUのhart 0–7は16枠、hart 8–15は32枠で、粒度は全hartで4 KiB。
+`--optee-pmp16 uniform16` では4 KiB粒度の16枠を全hartに設定する。
+同居ケースでは、全16 hartの起動時CSR、Linux・OP-TEE・Enclaveの実行時CSR、Enclaveの16枠使用、
+上位枠の無効、Enclave実行16回とTA呼び出し33回、正常電源断を確認する。
+UARTは `verifications/crypto/results/optee-coexistence.log`、状態ごとの最大枠数は同じ場所の
+`manifest.json` に保存する。[QEMUの試験結果](../../doc/evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
 ## K3 QEMUでのS-mode引き渡し試験
 
 Linuxの代わりに小さなRV64ペイロードを使い、OpenSBIとKeystone SMの
