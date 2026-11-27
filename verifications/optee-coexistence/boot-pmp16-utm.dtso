@@ -1,0 +1,19 @@
+/dts-v1/;
+/plugin/;
+
+/* Apply after boot-pmp16-geu.dtso. QEMU checks the DCIU guard in the PMP CSR. */
+&{/chosen/opensbi-domains} {
+	dciu_guard: dciu-guard {
+		compatible = "opensbi,domain,memregion";
+		mmio;
+		base = <0x0 0xd8440000>;
+		order = <16>;
+	};
+};
+
+&{/chosen/opensbi-domains/untrusted-domain} {
+	regions = <0x1010 0x00 0x1011 0x18 0x1012 0x38 0x1020 0x18
+		   0x1030 0x00 0x1031 0x00 0x1032 0x00
+		   &pmp_test_page0 0x00 &pmp_test_page1 0x00 &pmp_test_page2 0x00
+		   &dciu_guard 0x00>;
+};

@@ -13,6 +13,7 @@ VERIFY="$ROOT/verifications/optee-coexistence"
 UUID=c25c295d-8af1-44f7-9f0e-657c39bc22ad
 OPTEE_COMMIT=2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59
 OPTEE_PATCH="$ROOT/patches/optee/k3-map-efuse-clock-registers.patch"
+PRIVATE_DTB_PATCH="$ROOT/patches/optee/k3-private-boot-dtb.patch"
 
 python3 -c 'from elftools.elf.elffile import ELFFile'
 mkdir -p "$WORK"
@@ -34,6 +35,9 @@ if git -C "$OPTEE" apply --reverse --check "$OPTEE_PATCH" 2>/dev/null; then
 else
   git -C "$OPTEE" apply "$OPTEE_PATCH"
 fi
+if ! git -C "$OPTEE" apply --reverse --check "$PRIVATE_DTB_PATCH" 2>/dev/null; then
+  git -C "$OPTEE" apply "$PRIVATE_DTB_PATCH"
+fi
 
 OPTEE_ARGS=(
   O="$OUT" PLATFORM=k3 ARCH=riscv
@@ -41,6 +45,7 @@ OPTEE_ARGS=(
   CROSS_COMPILE_core="$CROSS"
   CROSS_COMPILE_ta_rv64="$CROSS"
   CFG_TEE_CORE_NB_CORE=16 CFG_NUM_THREADS=16
+  CFG_K3_PRIVATE_BOOT_DTB=y
   CFG_K3_EFUSE=y CFG_K3_HUK_ALLOW_UNFUSED=y
   CFG_K3_IOPMP=n CFG_K3_PRNG=n
   CFG_MMP_RTC=n CFG_TE200_CRYPTO_DRIVER=n

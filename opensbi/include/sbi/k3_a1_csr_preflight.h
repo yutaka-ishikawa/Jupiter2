@@ -58,7 +58,8 @@ static inline int
 k3_a1_preflight_local_with_root_locks(const struct k3_a1_csr_measured *m,
 				      struct k3_a1_local_candidate *out,
 				      uint16_t verified_root_locks,
-				      bool share_fallback)
+				      bool share_fallback,
+				      bool verified_utm_guard)
 {
     unsigned int i, old = K3_A1_CSR_MAX, fallback;
     uint16_t fw = 0, free_mask = 0, actual_locks = 0;
@@ -118,13 +119,22 @@ k3_a1_preflight_local_with_root_locks(const struct k3_a1_csr_measured *m,
     if (old == K3_A1_CSR_MAX) {
 	return K3_A1_PF_NO_GLOBAL_ALLOW;
     }
+    if (verified_utm_guard &&
+	(!share_fallback || old != K3_BOOT_FALLBACK ||
+	 m->entry[K3_BOOT_SHARED_UTM].prot != K3_A1_CSR_NAPOT)) {
+	return K3_A1_PF_BAD_INPUT;
+    }
     if (old == K3_PMP_COMMON_REGS - 1U) {
 	unsigned int seen_free = 0;
 
 	for (i = 0; i < old; i++) {
 	    const struct k3_a1_csr_measured_entry *e = &m->entry[i];
 
-	    if (e->prot & K3_A1_CSR_A) {
+	    /* The exact host guard was read back by the caller. This slot
+	     * counts as allocator capacity only for a local Enclave UTM.
+	     */
+	    if ((e->prot & K3_A1_CSR_A) &&
+		!(verified_utm_guard && i == K3_BOOT_SHARED_UTM)) {
 		if (seen_free) {
 		    return K3_A1_PF_SHADOWED;
 		}
@@ -185,6 +195,6 @@ k3_a1_preflight_local_with_root_locks(const struct k3_a1_csr_measured *m,
 static inline int k3_a1_preflight_local(const struct k3_a1_csr_measured *m,
 					struct k3_a1_local_candidate *out)
 {
-    return k3_a1_preflight_local_with_root_locks(m, out, 0, false);
+    return k3_a1_preflight_local_with_root_locks(m, out, 0, false, false);
 }
 #endif

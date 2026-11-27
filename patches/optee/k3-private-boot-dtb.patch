@@ -1,0 +1,19 @@
+diff --git a/core/arch/riscv/kernel/kern.ld.S b/core/arch/riscv/kernel/kern.ld.S
+--- a/core/arch/riscv/kernel/kern.ld.S
++++ b/core/arch/riscv/kernel/kern.ld.S
+@@ -194,6 +194,15 @@ SECTIONS
+ 		__nozi_stack_end = .;
+ 	}
+ 
++#ifdef CFG_K3_PRIVATE_BOOT_DTB
++	. = ALIGN(SMALL_PAGE_SIZE);
++	.k3_boot_dtb (NOLOAD) : {
++		__k3_boot_dtb_start = .;
++		. += CFG_DTB_MAX_SIZE;
++		__k3_boot_dtb_end = .;
++	}
++#endif
++
+ 	. = ALIGN(SMALL_PAGE_SIZE);
+ 	__flatmap_free_start = .;
+ 	__flatmap_rw_size = __flatmap_free_start - __flatmap_rw_start;

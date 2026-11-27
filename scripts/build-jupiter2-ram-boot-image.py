@@ -224,6 +224,18 @@ def validate_optee_dtb(data):
                 and number(opteed.props['opensbi-domain-instance'])
                 == number(domain.props['phandle'])
                 and opteed.props['riscv,sbi-mpxy-channel-id']):
+            buffer = opteed.props.get('spacemit,optee-boot-dtb')
+            profile = opteed.props.get('spacemit,pico-itx-pmp16')
+            if profile is not None and (profile != b'' or buffer is None):
+                fail('Pico-ITX 16-slot profile requires a private OP-TEE boot DTB')
+            if buffer is not None:
+                if len(buffer) != 16:
+                    fail('invalid private OP-TEE boot DTB descriptor')
+                base, capacity = struct.unpack('>QQ', buffer)
+                if (capacity != 0x11000 or base & 0xfff
+                        or base < 0x171001000 or base + capacity > 0x171ff0000
+                        or len(data) > capacity):
+                    fail('private OP-TEE boot DTB is outside its reserved range')
             return
     except KeyError:
         pass

@@ -16,14 +16,20 @@
 #include <sbi/sbi_hsm.h>
 #include <sbi/sbi_ipi.h>
 #include <sbi/sbi_ecall_interface.h>
+#include <sbi/sbi_error.h>
 #include <sbi/sbi_scratch.h>
 #include <sbi/sbi_domain.h>
 #include <sbi/sbi_timer.h>
+#include <sbi/sbi_trap.h>
 #include <sbi/sbi_trap_ldst.h>
+#include <sbi/sbi_unpriv.h>
 #include <sbi_utils/fdt/fdt_helper.h>
 #include <spacemit/spacemit_config.h>
 #include <sbi_utils/cache/cache.h>
 #include <sbi_utils/cci/cci.h>
+#ifdef CONFIG_K3_KEYSTONE_SM
+#include "k3_pico_itx_mmio.h"
+#endif
 
 /* Sv39 page-table walk constants */
 #define SATP64_MODE_SHIFT	60
@@ -34,8 +40,13 @@
 #define SV39_VPN1_SHIFT		21
 #define SV39_VPN0_SHIFT		PAGE_SHIFT
 #define PTE_V			(1UL << 0)	/* valid */
+#define PTE_R			(1UL << 1)
+#define PTE_W			(1UL << 2)
+#define PTE_U			(1UL << 4)
 #define PTE_RWX			(0xeUL)		/* leaf: R|W|X any set */
 #define PTE_PPN_SHIFT		10
+#define PICO_ITX_DRAM_BASE	0x100000000UL
+#define PICO_ITX_DRAM_END	0x900000000UL
 
 static const struct fdt_match spacemit_k3_mach[] = {
 	{ .compatible = "spacemit,k3" },
@@ -279,47 +290,82 @@ static bool spacemit_k3_cold_boot_allowed(u32 hartid, const struct fdt_match *ma
 	return ((hartid == 0) ? true : false);
 }
 
-/*
- * Translate the address from stval to a physical address.
- * If S-mode MMU is off (satp.MODE == Bare), stval already is a physical address.
- * Otherwise walk the Sv39/Sv48 page tables, which M-mode can read directly.
- * Returns 0 on translation failure.
- */
-static unsigned long s_addr_to_pa(unsigned long addr)
+static unsigned long pico_itx_load_pte(unsigned long pa, unsigned long satp)
 {
-	unsigned long satp = csr_read(CSR_SATP);
-	unsigned long mode = (satp & SATP64_MODE) >> SATP64_MODE_SHIFT;
+    struct sbi_trap_info trap;
+    unsigned long pte;
 
-	/* Bare mode: no translation, addr is already physical */
-	if (mode == SATP_MODE_OFF)
-		return addr;
-
-	if (mode != SATP_MODE_SV39)
-		return 0;
-
-	unsigned long ppn = satp & SATP64_PPN;
-	unsigned long vpn[SV39_LEVELS] = {
-		(addr >> SV39_VPN2_SHIFT) & SV39_VPN_MASK,
-		(addr >> SV39_VPN1_SHIFT) & SV39_VPN_MASK,
-		(addr >> SV39_VPN0_SHIFT) & SV39_VPN_MASK,
-	};
-
-	for (int i = 0; i < SV39_LEVELS; i++) {
-		unsigned long *ptep = (unsigned long *)((ppn << PAGE_SHIFT) + vpn[i] * sizeof(unsigned long));
-		unsigned long pte = *ptep;
-
-		if (!(pte & PTE_V))
-			return 0; /* invalid PTE */
-
-		ppn = (pte >> PTE_PPN_SHIFT) & SATP64_PPN;
-
-		if (pte & PTE_RWX) { /* leaf PTE: R|W|X set */
-			unsigned long pg_off_bits = PAGE_SHIFT + SV39_VPN_BITS * (2 - i);
-			unsigned long offset_mask = (1UL << pg_off_bits) - 1;
-			return (ppn << PAGE_SHIFT) | (addr & offset_mask);
-		}
-	}
+    /* Restrict walks to DRAM. MPRV retains the active hart's PMP checks,
+     * including runtime Keystone EPM exclusions.
+     */
+    if (pa < PICO_ITX_DRAM_BASE || pa > PICO_ITX_DRAM_END - sizeof(pte)) {
 	return 0;
+    }
+    csr_write(CSR_SATP, SATP_MODE_OFF);
+    pte = sbi_load_ulong((const unsigned long *)pa, &trap);
+    csr_write(CSR_SATP, satp);
+    return trap.cause ? 0 : pte;
+}
+
+/* Translate the fault address using Bare mode or an Sv39 page table. */
+static unsigned long s_addr_to_pa(unsigned long addr, bool pico, bool store)
+{
+    unsigned long satp = csr_read(CSR_SATP);
+    unsigned long mode = (satp & SATP64_MODE) >> SATP64_MODE_SHIFT;
+    unsigned long ppn = satp & SATP64_PPN;
+    unsigned long vpn[SV39_LEVELS] = {
+	(addr >> SV39_VPN2_SHIFT) & SV39_VPN_MASK,
+	(addr >> SV39_VPN1_SHIFT) & SV39_VPN_MASK,
+	(addr >> SV39_VPN0_SHIFT) & SV39_VPN_MASK,
+    };
+    unsigned long status = 0;
+    int i;
+
+    if (pico) {
+	const struct sbi_trap_context *trap =
+	    sbi_trap_get_context(sbi_scratch_thishart_ptr());
+
+	if (!trap || sbi_mstatus_prev_mode(trap->regs.mstatus) != PRV_S ||
+	    sbi_regs_from_virt(&trap->regs) ||
+	    sbi_mstatus_prev_mode(csr_read(CSR_MSTATUS)) != PRV_S) {
+	    return 0;
+	}
+	status = trap->regs.mstatus;
+    }
+
+    if (mode == SATP_MODE_OFF) {
+	return addr;
+    }
+    if (mode != SATP_MODE_SV39) {
+	return 0;
+    }
+    if (pico && (addr >> 39) != ((addr & (1UL << 38)) ? (-1UL >> 39) : 0)) {
+	return 0;
+    }
+
+    for (i = 0; i < SV39_LEVELS; i++) {
+	unsigned long pa = (ppn << PAGE_SHIFT) + vpn[i] * sizeof(unsigned long);
+	unsigned long pte = pico ? pico_itx_load_pte(pa, satp) :
+	    *(const unsigned long *)pa;
+
+	if (!(pte & PTE_V)) {
+	    return 0;
+	}
+	ppn = (pte >> PTE_PPN_SHIFT) & SATP64_PPN;
+	if (pte & PTE_RWX) {
+	    unsigned long bits = PAGE_SHIFT + SV39_VPN_BITS * (2 - i);
+	    unsigned long mask = (1UL << bits) - 1;
+	    unsigned long base = ppn << PAGE_SHIFT;
+
+	    if (pico && ((base & mask) || !(pte & PTE_R) ||
+			(store && !(pte & PTE_W)) ||
+			((pte & PTE_U) && !(status & MSTATUS_SUM)))) {
+		return 0;
+	    }
+	    return base | (addr & mask);
+	}
+    }
+    return 0;
 }
 
 /*
@@ -363,8 +409,24 @@ static int spacemit_k3_emulate_load(int rlen, unsigned long addr,
 				    union sbi_ldst_data *out_val,
 				    const struct fdt_match *match)
 {
-	unsigned long pa = s_addr_to_pa(addr);
+    unsigned long pa;
+#ifdef CONFIG_K3_KEYSTONE_SM
+    bool pico = sbi_hart_keystone_pico_itx();
 
+    if (pico && rlen != sizeof(u32)) {
+	return SBI_ENODEV;
+    }
+    pa = s_addr_to_pa(addr, pico, false);
+    if (pico && pa) {
+	int rc = k3_pico_itx_mmio(pa, false, &out_val->data_u32);
+
+	if (rc != SBI_ENOENT) {
+	    return rc;
+	}
+    }
+#else
+    pa = s_addr_to_pa(addr, false, false);
+#endif
 	if (!pa || pa < REGISTER_PRESERVATION_BASE ||
 	    pa + rlen > REGISTER_PRESERVATION_BASE + REGISTER_PRESERVATION_SIZE)
 		return SBI_ENODEV;
@@ -398,8 +460,24 @@ static int spacemit_k3_emulate_store(int wlen, unsigned long addr,
 				     union sbi_ldst_data in_val,
 				     const struct fdt_match *match)
 {
-	unsigned long pa = s_addr_to_pa(addr);
+    unsigned long pa;
+#ifdef CONFIG_K3_KEYSTONE_SM
+    bool pico = sbi_hart_keystone_pico_itx();
 
+    if (pico && wlen != sizeof(u32)) {
+	return SBI_ENODEV;
+    }
+    pa = s_addr_to_pa(addr, pico, true);
+    if (pico && pa) {
+	int rc = k3_pico_itx_mmio(pa, true, &in_val.data_u32);
+
+	if (rc != SBI_ENOENT) {
+	    return rc;
+	}
+    }
+#else
+    pa = s_addr_to_pa(addr, false, true);
+#endif
 	if (!pa || pa < REGISTER_PRESERVATION_BASE ||
 	    pa + wlen > REGISTER_PRESERVATION_BASE + REGISTER_PRESERVATION_SIZE)
 		return SBI_ENODEV;

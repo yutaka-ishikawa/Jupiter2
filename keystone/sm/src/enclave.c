@@ -89,7 +89,7 @@ context_switch_to_enclave(struct sbi_trap_regs *regs, enclave_id eid,
 	sbi_hart_hang();
     }
     if (osm_pmp_set(PMP_NO_PERM)) {
-	goto restore_host_pmp;
+	goto restore_host_policy;
     }
     for (memid = 0; memid < ENCLAVE_REGIONS_MAX; memid++) {
 	struct enclave_region *region = &enclaves[eid].regions[memid];
@@ -104,6 +104,13 @@ context_switch_to_enclave(struct sbi_trap_regs *regs, enclave_id eid,
 #ifdef KEYSTONE_K3_PMP_N_REG
 	if (region->type == REGION_UTM && sbi_hart_keystone_shared_fallback()) {
 	    permissions = PMP_R | PMP_W;
+	    if (sbi_hart_keystone_has_utm_guard()) {
+		if (k3_pmp_apply_verified(region->pmp_rid, SBI_PMP_IPI_TYPE_SET,
+					  permissions)) {
+		    goto restore_host_pmp;
+		}
+		continue;
+	    }
 	}
 #endif
 	if (pmp_set_keystone(region->pmp_rid, permissions)) {
@@ -153,6 +160,7 @@ restore_host_pmp:
 	    sbi_hart_hang();
 	}
     }
+restore_host_policy:
     if (osm_pmp_set(PMP_ALL_PERM)) {
 	sbi_hart_hang();
     }
@@ -453,7 +461,8 @@ create_enclave_internal(unsigned long *eidptr,
     int pmp_rc;
     struct runtime_params_t params;
 #ifdef KEYSTONE_K3_PMP_N_REG
-    const enum pmp_priority utm_priority = PMP_PRI_ANY;
+    const enum pmp_priority utm_priority =
+	sbi_hart_keystone_has_utm_guard() ? PMP_PRI_SHARED_UTM : PMP_PRI_ANY;
 #else
     const enum pmp_priority utm_priority = PMP_PRI_BOTTOM;
 #endif

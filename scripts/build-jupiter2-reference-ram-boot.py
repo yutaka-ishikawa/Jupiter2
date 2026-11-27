@@ -357,6 +357,12 @@ def build(args):
         if not args.optee_bin.is_file() or not args.optee_bin.stat().st_size:
             raise ValueError('--optee-bin must point to a nonempty tee.bin')
     generate_optee_dtb = args.optee_bin and not (args.opensbi_dtb or args.opensbi_overlay)
+    if args.optee_elf:
+        if not generate_optee_dtb:
+            raise ValueError('--optee-elf requires the generated DTB with --optee-bin')
+        args.optee_elf = args.optee_elf.resolve(strict=True)
+    if args.pico_itx_pmp16 and (not args.optee_elf or args.variant != 'keystone'):
+        raise ValueError('--pico-itx-pmp16 requires --variant keystone and --optee-elf')
     if generate_optee_dtb and not args.prepare_only and not shutil.which('fdtput'):
         raise ValueError('install device-tree-compiler for fdtput')
     if args.opensbi_overlay:
@@ -505,8 +511,18 @@ def build(args):
         configured = records / 'opensbi-uboot.dtb'
         uboot = uroot.children['images'].children['uboot']
         entry = fit.number(uboot.props.get('entry', uboot.props['load']))
-        run([sys.executable, Path(__file__).with_name('prepare-jupiter2-optee-opensbi-dtb.py'),
-             base_dtb, configured, '--uboot-entry', hex(entry)])
+        command = [sys.executable, Path(__file__).with_name('prepare-jupiter2-optee-opensbi-dtb.py'),
+                   base_dtb, configured, '--uboot-entry', hex(entry)]
+        if args.optee_elf:
+            command += ['--optee-elf', args.optee_elf, '--optee-bin', args.optee_bin]
+        if args.pico_itx_pmp16:
+            command += ['--pico-itx-pmp16']
+        run(command)
+        if args.optee_elf:
+            manifest['optee_elf'] = {
+                'path': str(args.optee_elf), 'sha256': sha(args.optee_elf),
+            }
+        manifest['pico_itx_pmp16'] = args.pico_itx_pmp16
         dtdata = configured.read_bytes()
     verify_rpmi_dtb(fit, dtdata, contract)
     if args.optee_bin:
@@ -581,6 +597,9 @@ def main():
     dtb.add_argument('--opensbi-overlay', type=Path,
                      help='board OP-TEE overlay applied to the reference U-Boot DTB')
     parser.add_argument('--optee-bin', type=Path, help='raw K3 OP-TEE Core tee.bin')
+    parser.add_argument('--optee-elf', type=Path, help='matching Core ELF with a private DTB reservation')
+    parser.add_argument('--pico-itx-pmp16', action='store_true',
+                        help='generate the Pico-ITX 16-slot OP-TEE/Keystone DTB')
     parser.add_argument('--spl-measurement-log', action='store_true',
                         help='emit experimental OpenSBI/U-Boot measurements on UART')
     parser.add_argument('--prepare-only', action='store_true')

@@ -8,7 +8,58 @@ import subprocess
 import tempfile
 
 
-def prepare(source, output, uboot_entry):
+CORE_BASE = 0x171000000
+EVENT_LOG_BASE = 0x171ff0000
+BOOT_DTB_SIZE = 0x11000
+
+
+def private_boot_dtb_buffer(elf_path, bin_path):
+    """Locate the reserved writable section in the ELF paired with tee.bin."""
+    try:
+        from elftools.common.exceptions import ELFError
+        from elftools.elf.elffile import ELFFile
+    except ImportError as error:
+        raise ValueError('install python3-pyelftools to inspect tee.elf') from error
+
+    image = bin_path.read_bytes()
+    with elf_path.open('rb') as stream:
+        try:
+            elf = ELFFile(stream)
+            section = elf.get_section_by_name('.k3_boot_dtb')
+            if (elf.elfclass != 64 or not elf.little_endian
+                    or elf['e_machine'] != 'EM_RISCV' or elf['e_entry'] != CORE_BASE
+                    or section is None or section['sh_type'] != 'SHT_NOBITS'
+                    or section['sh_flags'] != 0x3):
+                raise ValueError('tee.elf needs an allocated RW .k3_boot_dtb reservation')
+            start, size = section['sh_addr'], section['sh_size']
+            end = start + size
+            if (size != BOOT_DTB_SIZE or start & 0xfff
+                    or start < CORE_BASE + 0x1000 or end > EVENT_LOG_BASE):
+                raise ValueError('private boot DTB overlaps another part of the Core')
+            if not any(seg['p_type'] == 'PT_LOAD' and seg['p_flags'] & 2
+                       and seg['p_vaddr'] == seg['p_paddr']
+                       and seg['p_paddr'] + seg['p_filesz'] <= start
+                       and end <= seg['p_paddr'] + seg['p_memsz']
+                       for seg in elf.iter_segments()):
+                raise ValueError('private boot DTB is outside a writable physical ELF segment')
+            last = 0
+            for loaded in elf.iter_sections():
+                if (not loaded['sh_flags'] & 2 or loaded['sh_type'] == 'SHT_NOBITS'
+                        or not loaded['sh_size']):
+                    continue
+                offset = loaded['sh_addr'] - CORE_BASE
+                limit = offset + loaded['sh_size']
+                if offset < 0 or image[offset:limit] != loaded.data():
+                    raise ValueError('tee.bin does not match the loadable bytes in tee.elf')
+                last = max(last, limit)
+            if last != len(image) or len(image) > start - CORE_BASE:
+                raise ValueError('tee.bin length does not match the ELF or overlaps its boot DTB')
+        except ELFError as error:
+            raise ValueError('invalid OP-TEE ELF') from error
+    return start, size
+
+
+def prepare(source, output, uboot_entry, optee_elf=None, optee_bin=None, pico_itx_pmp16=False):
     fit = runpy.run_path(str(Path(__file__).with_name('build-jupiter2-ram-boot-image.py')))
     data = source.read_bytes()
     root, _ = fit['parse_fdt'](data)
@@ -16,6 +67,14 @@ def prepare(source, output, uboot_entry):
         raise ValueError('expected a Jupiter2 Pico-ITX reference U-Boot DTB')
     if uboot_entry != 0x102000000:
         raise ValueError('unexpected reference RAM boot U-Boot entry')
+    if bool(optee_elf) != bool(optee_bin):
+        raise ValueError('--optee-elf and --optee-bin must be supplied together')
+    boot_buffer = private_boot_dtb_buffer(optee_elf, optee_bin) if optee_elf else None
+    if pico_itx_pmp16 and not boot_buffer:
+        raise ValueError('the Pico-ITX 16-slot layout requires a private OP-TEE boot DTB')
+    if pico_itx_pmp16 and (root.props.get('model') != b'spacemit k3 pico itx board\0'
+                            or b'spacemit,k3' not in root.props.get('compatible', b'').split(b'\0')):
+        raise ValueError('the 16-slot layout requires the reference Pico-ITX firmware DTB')
     chosen = root.children.get('chosen')
     if chosen and any(name in chosen.children for name in ('opensbi-domains', 'sbi-mpxy-opteed')):
         raise ValueError('base DTB already contains domain or OP-TEE settings')
@@ -37,18 +96,36 @@ def prepare(source, output, uboot_entry):
     if reserved:
         occupied.extend(extent for node in reserved.children.values()
                         for extent in struct.iter_unpack('>QQ', node.props.get('reg', b'')))
-    # The first stage places the supervisor FDT next to U-Boot in this
-    # reference RAM layout. Keep the window read-only in the trusted domain.
-    regions = (
-        ('core', 0x171000000, 24, 0x38, 0),
-        ('shm', 0x172000000, 24, 0x18, 0x18),
-        ('uboot-fdt', uboot_entry, 21, 0x08, 0x38),
-        # Match the 4 KiB GEU mapping in OP-TEE's K3 platform config.
-        ('geu', 0xf0702000, 12, 0x18, 0),
-        ('pmu-main', 0xd4050000, 14, 0x18, 0),
-        ('pmu-ap', 0xd4282000, 12, 0x18, 0),
+    shared = (
+        ('core', CORE_BASE, 24, 0x38, 0, False),
+        ('shm', 0x172000000, 24, 0x18, 0x18, False),
     )
-    for name, base, order, _, _ in regions[:3]:
+    if pico_itx_pmp16:
+        # Declare domain access only. The K3 firmware fixes the slot indices
+        # and verifies the inherited OpenSBI, ESOS and RPMI protections.
+        regions = shared + (
+            ('i2c3', 0xf0614000, 12, None, 0x18, True),
+            ('protected-mmio', 0xf0000000, 25, None, 0, True),
+            ('pmu-main', 0xd4050000, 14, None, 0, True),
+            ('dciu', 0xd8440000, 16, None, 0, True),
+            ('geu-prng', 0xf0702000, 13, 0x18, None, True),
+            ('te200', 0xf0718000, 14, 0x18, None, True),
+            ('sec-ciu', 0xf0580000, 12, 0x18, None, True),
+            ('rtc', 0xf0615000, 12, 0x18, None, True),
+            ('iopmp0', 0xf0800000, 19, 0x18, None, True),
+            ('iopmp1', 0xf0880000, 16, 0x18, None, True),
+        )
+        ram_regions = shared
+    else:
+        regions = shared + (
+            # The first stage places the original DTB next to U-Boot.
+            ('uboot-fdt', uboot_entry, 21, 0x08, 0x38, False),
+            ('geu', 0xf0702000, 12, 0x18, 0, True),
+            ('pmu-main', 0xd4050000, 14, 0x18, 0, True),
+            ('pmu-ap', 0xd4282000, 12, 0x18, 0, True),
+        )
+        ram_regions = regions[:3]
+    for name, base, order, _, _, _ in ram_regions:
         end = base + (1 << order)
         if not any(start <= base and end <= start + size for start, size in memory):
             raise ValueError(f'{name} lies outside reference RAM')
@@ -71,7 +148,8 @@ def prepare(source, output, uboot_entry):
             yield from handles(child)
 
     first = max(handles(root), default=0) + 1
-    if first + 25 >= 0xffffffff:
+    cpu_handle_start = first + 3 + len(regions)
+    if cpu_handle_start + len(cpus) >= 0xffffffff:
         raise ValueError('insufficient phandles')
     tee, host, all_memory = first, first + 1, first + 2
     domains = '/chosen/opensbi-domains'
@@ -108,7 +186,7 @@ def prepare(source, output, uboot_entry):
         for hart, name, cpu in cpus:
             path = f'/cpus/{name}'
             handle = cpu.props.get('phandle', cpu.props.get('linux,phandle'))
-            cpu_handle = fit['number'](handle) if handle else first + 9 + hart
+            cpu_handle = fit['number'](handle) if handle else cpu_handle_start + hart
             if 'phandle' not in cpu.props:
                 cells(path, 'phandle', cpu_handle)
             cpu_handles.append(cpu_handle)
@@ -118,11 +196,13 @@ def prepare(source, output, uboot_entry):
         string(domains, 'compatible', 'opensbi,domain,config')
         region('all-memory', all_memory, 0, 64)
         trusted_regions, host_regions = [], []
-        for index, (name, base, order, trusted, untrusted) in enumerate(regions):
+        for index, (name, base, order, trusted, untrusted, mmio) in enumerate(regions):
             handle = first + 3 + index
-            region(name, handle, base, order, mmio=index >= 3)
-            trusted_regions.extend((handle, trusted))
-            host_regions.extend((handle, untrusted))
+            region(name, handle, base, order, mmio=mmio)
+            if trusted is not None:
+                trusted_regions.extend((handle, trusted))
+            if untrusted is not None:
+                host_regions.extend((handle, untrusted))
         host_regions.extend((all_memory, 0x38))
         for name, handle, entry, permissions in (
                 ('optee-domain', tee, regions[0][1], trusted_regions),
@@ -142,17 +222,26 @@ def prepare(source, output, uboot_entry):
         string(dispatcher, 'compatible', 'riscv,sbi-mpxy-opteed')
         cells(dispatcher, 'opensbi-domain-instance', tee)
         cells(dispatcher, 'riscv,sbi-mpxy-channel-id', *range(0x1000, 0x1010))
+        if boot_buffer:
+            base, size = boot_buffer
+            cells(dispatcher, 'spacemit,optee-boot-dtb', base >> 32,
+                  base & 0xffffffff, 0, size)
+        if pico_itx_pmp16:
+            flag(dispatcher, 'spacemit,pico-itx-pmp16')
         if reserved is None:
             node('/reserved-memory')
             cells('/reserved-memory', '#address-cells', 2)
             cells('/reserved-memory', '#size-cells', 2)
             flag('/reserved-memory', 'ranges')
-        for name, base, order, _, _ in regions[:2]:
+        for name, base, order, _, _, _ in shared:
             path = f'/reserved-memory/optee-{name}@{base:x}'
             node(path)
             cells(path, 'reg', base >> 32, base & 0xffffffff, 0, 1 << order)
             flag(path, 'no-map')
-        fit['validate_optee_dtb'](staged.read_bytes())
+        blob = staged.read_bytes()
+        if boot_buffer and len(blob) > boot_buffer[1]:
+            raise ValueError('generated firmware DTB exceeds the private boot buffer')
+        fit['validate_optee_dtb'](blob)
         output.hardlink_to(staged)
 
 
@@ -161,9 +250,13 @@ def main():
     parser.add_argument('source', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--uboot-entry', type=lambda value: int(value, 0), required=True)
+    parser.add_argument('--optee-elf', type=Path)
+    parser.add_argument('--optee-bin', type=Path)
+    parser.add_argument('--pico-itx-pmp16', action='store_true')
     args = parser.parse_args()
     try:
-        prepare(args.source, args.output, args.uboot_entry)
+        prepare(args.source, args.output, args.uboot_entry, args.optee_elf,
+                args.optee_bin, args.pico_itx_pmp16)
     except (OSError, ValueError, KeyError, struct.error, subprocess.CalledProcessError) as error:
         parser.exit(1, f'ERROR: {error}\n')
 

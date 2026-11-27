@@ -103,7 +103,7 @@ def run(args, name, provider):
     return record
 
 
-def check_optee_pmp16(output, profile):
+def check_optee_pmp16(output, profile, utm_guard=False):
     if b'[K3-PMP] shared readback failed' in output:
         raise RuntimeError('PMP CSR readback failed')
     rows = re.findall(
@@ -111,6 +111,9 @@ def check_optee_pmp16(output, profile):
         rb'implemented=(\d+) gran=(\d+) active=(\d+) mask=0x([0-9a-f]+)', output)
     expected_masks = {'boot-host': {0x9fff}, 'host': {0x9fff, 0xbfff},
                       'optee': {0x9fff, 0xbfff}, 'enclave': {0xffff}}
+    if utm_guard:
+        expected_masks['boot-host'] = {0xdfff}
+        expected_masks['host'] = {0xdfff, 0xffff}
     harts = {state: set() for state in expected_masks}
     max_active = {}
     for hart, state, implemented, gran, active, mask in rows:
@@ -165,6 +168,42 @@ def check_optee_pmp16_geu(output):
     return {'slot': indices.pop(), 'runtime_round_trip_harts': sorted(returned)}
 
 
+def check_optee_pmp16_utm(output):
+    guard = (0xd8440000, 16, 0x18)
+    boot_harts = set()
+    entered = {b'optee': set(), b'enclave': set()}
+    restored = {b'optee': set(), b'enclave': set()}
+    linux_smp = output.index(b'smp: Brought up 1 node, 16 CPUs')
+    rows = re.finditer(
+        rb'\[K3-PMP\] UTM CSR hart=(\d+) state=(boot-host|host|optee|enclave) '
+        rb'slot=14 base=0x([0-9a-f]+) order=(\d+) prot=0x([0-9a-f]+)',
+        output)
+    for row in rows:
+        hart, state, base, order, prot = row.groups()
+        hart, base, order, prot = int(hart), int(base, 16), int(order), int(prot, 16)
+        if state in (b'boot-host', b'host'):
+            valid = (base, order, prot) == guard
+        elif state == b'optee':
+            valid = prot == 0
+        else:
+            valid = (prot == 0x1b and 12 <= order < 31 and
+                     0x102000000 <= base and base + (1 << order) <= 0x182000000)
+        if hart >= 16 or not valid:
+            raise RuntimeError(f'Unexpected slot 14 readback: {row[0].decode()}')
+        if state == b'boot-host':
+            boot_harts.add(hart)
+        elif row.start() > linux_smp:
+            if state in entered:
+                entered[state].add(hart)
+            elif state == b'host':
+                for source in entered:
+                    if hart in entered[source]:
+                        restored[source].add(hart)
+    if boot_harts != set(range(16)) or not all(restored.values()):
+        raise RuntimeError('Missing slot 14 boot readback or host restoration')
+    return {state.decode(): sorted(harts) for state, harts in restored.items()}
+
+
 def run_optee(args):
     tee, dtb, initrd = (path.resolve() for path in args.optee_coexistence)
     qemu = args.prefix / 'bin/qemu-system-riscv64'
@@ -210,9 +249,12 @@ def run_optee(args):
             record['error'] = f'QEMU exit {process.returncode}; missing markers: {missing}'
         else:
             if args.optee_pmp16:
-                record['pmp_peak_by_state'] = check_optee_pmp16(output, args.optee_pmp16)
+                record['pmp_peak_by_state'] = check_optee_pmp16(
+                    output, args.optee_pmp16, args.optee_pmp16_utm)
             if args.optee_pmp16_geu:
                 record['geu_pmp'] = check_optee_pmp16_geu(output)
+            if args.optee_pmp16_utm:
+                record['utm_pmp'] = check_optee_pmp16_utm(output)
             record['pass'] = True
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         record['error'] = str(exc)
@@ -234,11 +276,15 @@ def main():
                         help='verify 16-slot PMP usage with boot-pmp16.dtb (default profile: mixed)')
     parser.add_argument('--optee-pmp16-geu', action='store_true',
                         help='verify GEU address changes with boot-pmp16-geu.dtb')
+    parser.add_argument('--optee-pmp16-utm', action='store_true',
+                        help='verify DCIU and UTM changes with boot-pmp16-utm.dtb')
     args = parser.parse_args()
     if args.optee_pmp16 and not args.optee_coexistence:
         parser.error('--optee-pmp16 requires --optee-coexistence')
     if args.optee_pmp16_geu and not args.optee_pmp16:
         parser.error('--optee-pmp16-geu requires --optee-pmp16')
+    if args.optee_pmp16_utm and not args.optee_pmp16:
+        parser.error('--optee-pmp16-utm requires --optee-pmp16')
     # Guest metadata paths use the repository's standard installation.
     if args.prefix.resolve() != (ROOT / 'install/keystone').resolve():
         parser.error('This runner currently requires the standard install/keystone prefix; custom boot can be tested manually')

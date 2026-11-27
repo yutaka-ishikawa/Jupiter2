@@ -216,16 +216,25 @@ static region_id get_free_region_idx(void)
 
 static pmpreg_id get_free_reg_idx(void)
 {
+  uint32_t occupied = reg_bitmap;
+
 #ifdef KEYSTONE_K3_PMP_N_REG
-  if (!k3_pmp_partition_prepared) return -1;
+  if (!k3_pmp_partition_prepared) {
+    return -1;
+  }
+  if (sbi_hart_keystone_has_utm_guard()) {
+    SET_BIT(occupied, K3_BOOT_SHARED_UTM);
+  }
 #endif
-  return search_rightmost_unset(reg_bitmap, PMP_N_REG, 0x1);
+  return search_rightmost_unset(occupied, PMP_N_REG, 0x1);
 }
 
 static pmpreg_id get_conseq_free_reg_idx(void)
 {
 #ifdef KEYSTONE_K3_PMP_N_REG
-  if (!k3_pmp_partition_prepared) return -1;
+  if (!k3_pmp_partition_prepared || sbi_hart_keystone_has_utm_guard()) {
+    return -1;
+  }
 #endif
   return search_rightmost_unset(reg_bitmap, PMP_N_REG, 0x3);
 }
@@ -289,6 +298,12 @@ int pmp_unset_global(int region_idx)
   int rc;
   if (!is_pmp_region_valid(region_idx))
     PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index");
+#ifdef KEYSTONE_K3_PMP_N_REG
+  if (sbi_hart_keystone_has_utm_guard() &&
+      region_register_idx(region_idx) == K3_BOOT_SHARED_UTM) {
+    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "UTM requires a local transition");
+  }
+#endif
   if (k3_keystone_pmp_transition_begin())
     PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "HSM Start in progress");
   rc = send_and_sync_pmp_ipi(region_idx, SBI_PMP_IPI_TYPE_UNSET,
@@ -305,6 +320,12 @@ int pmp_set_global(int region_idx, uint8_t perm)
   int rc;
   if (!is_pmp_region_valid(region_idx))
     PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index");
+#ifdef KEYSTONE_K3_PMP_N_REG
+  if (sbi_hart_keystone_has_utm_guard() &&
+      region_register_idx(region_idx) == K3_BOOT_SHARED_UTM) {
+    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "UTM requires a local transition");
+  }
+#endif
   if (k3_keystone_pmp_transition_begin())
     PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "HSM Start in progress");
   rc = send_and_sync_pmp_ipi(region_idx, SBI_PMP_IPI_TYPE_SET, perm);
@@ -336,7 +357,8 @@ int pmp_init(void)
     for (i = 0; i < PMP_N_REG; i++) {
 #ifdef KEYSTONE_K3_PMP_N_REG
 	/* Preserve every OpenSBI-owned PMP entry and its locked state. */
-	if (!k3_pmp_index_allowed(i)) {
+	if (!k3_pmp_index_allowed(i) ||
+	    (i == K3_BOOT_SHARED_UTM && sbi_hart_keystone_has_utm_guard())) {
 	    continue;
 	}
 #endif
@@ -373,6 +395,8 @@ int pmp_set_keystone(int region_idx, uint8_t perm)
     uintptr_t pmpcfg, pmpaddr;
     int n;
 #ifdef KEYSTONE_K3_PMP_N_REG
+    unsigned long flags, base, order;
+
     if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
 	return SBI_ERR_SM_PMP_REGION_INVALID;
     }
@@ -388,6 +412,12 @@ int pmp_set_keystone(int region_idx, uint8_t perm)
 	(region_needs_two_entries(region_idx) &&
 	 !k3_pmp_index_allowed(reg_idx - 1))) {
 	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "PMP slot not Keystone-owned");
+    }
+    if (sbi_hart_keystone_has_utm_guard() && reg_idx == K3_BOOT_SHARED_UTM) {
+	if (!region_is_napot(region_idx) || perm_bits != (PMP_R | PMP_W) ||
+	    pmp_get(reg_idx, &flags, &base, &order) || flags) {
+	    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "UTM slot not available");
+	}
     }
 #endif
     pmpcfg = region_pmpcfg_val(region_idx, reg_idx, perm_bits);
@@ -598,6 +628,8 @@ int pmp_unset(int region_idx)
     pmpreg_id reg_idx;
     int n;
 #ifdef KEYSTONE_K3_PMP_N_REG
+    unsigned long flags, base, order;
+
     if (sbi_hart_keystone_verify_extra_pmp(sbi_scratch_thishart_ptr())) {
 	return SBI_ERR_SM_PMP_REGION_INVALID;
     }
@@ -612,6 +644,15 @@ int pmp_unset(int region_idx)
 	(region_needs_two_entries(region_idx) &&
 	 !k3_pmp_index_allowed(reg_idx - 1))) {
 	PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "PMP slot not Keystone-owned");
+    }
+    if (sbi_hart_keystone_has_utm_guard() && reg_idx == K3_BOOT_SHARED_UTM) {
+	if (pmp_get(reg_idx, &flags, &base, &order) ||
+	    (flags && (flags != (PMP_A_NAPOT | PMP_R | PMP_W) ||
+		       base != region_get_addr(region_idx) ||
+		       order >= __riscv_xlen ||
+		       (1UL << order) != region_get_size(region_idx)))) {
+	    PMP_ERROR(SBI_ERR_SM_PMP_REGION_INVALID, "Unexpected local UTM rule");
+	}
     }
 #endif
     n = reg_idx;
@@ -780,6 +821,16 @@ static int napot_region_init(uintptr_t start, uint64_t size, enum pmp_priority p
 #endif
       break;
     }
+#ifdef KEYSTONE_K3_PMP_N_REG
+    case PMP_PRI_SHARED_UTM: {
+      reg_idx = K3_BOOT_SHARED_UTM;
+      if (!sbi_hart_keystone_has_utm_guard() ||
+          !k3_pmp_index_allowed(reg_idx) || TEST_BIT(reg_bitmap, reg_idx)) {
+        PMP_ERROR(SBI_ERR_SM_PMP_REGION_MAX_REACHED, "UTM slot unavailable");
+      }
+      break;
+    }
+#endif
     default: {
       sm_assert(0);
     }

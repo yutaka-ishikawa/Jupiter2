@@ -109,7 +109,8 @@ static void k3_keystone_a1_post_pmp_before_smode(struct sbi_scratch *scratch,
 		}
 		rc = k3_a1_preflight_local_with_root_locks(&measured, &candidate,
 							 verified_root_locks,
-				sbi_hart_keystone_shared_fallback());
+				sbi_hart_keystone_shared_fallback(),
+				sbi_hart_keystone_has_utm_guard());
 		if (rc) {
 			sbi_printf("K3 A1-E: local PMP shape rejected on Hart %u: %d\n",
 			           hartid, rc);

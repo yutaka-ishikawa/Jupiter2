@@ -93,12 +93,13 @@ static void hart_context_set(struct sbi_domain *dom, u32 hartindex,
  * @param ctx pointer to the current HART context
  * @param dom_ctx pointer to the target domain context
  * @param set_caller whether to record the current context as the caller
+ * @param try_lock whether to acquire both assignment locks without waiting
  *
  * @return 0 on success or an SBI error before committing the switch
  */
 static int switch_to_next_domain_context(struct hart_context *ctx,
 					 struct hart_context *dom_ctx,
-					 bool set_caller)
+					 bool set_caller, bool try_lock)
 {
     u32 hartindex = current_hartindex();
     struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
@@ -116,12 +117,27 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
     current_dom = ctx->dom;
     target_dom = dom_ctx->dom;
 
+    /* A retryable entry must acquire both locks before changing domains. */
+    if (try_lock) {
+	if (!spin_trylock(&current_dom->assigned_harts_lock)) {
+	    return SBI_EINVALID_STATE;
+	}
+	if (!spin_trylock(&target_dom->assigned_harts_lock)) {
+	    spin_unlock(&current_dom->assigned_harts_lock);
+	    return SBI_EINVALID_STATE;
+	}
+    }
+
 #ifdef CONFIG_K3_KEYSTONE_SM
     /* Update only the OpenSBI-owned fixed slots before publishing the
      * new domain. On error the source retains its existing context.
      */
     rc = sbi_hart_keystone_switch_optee_pmp(target_dom);
     if (rc) {
+	if (try_lock) {
+	    spin_unlock(&target_dom->assigned_harts_lock);
+	    spin_unlock(&current_dom->assigned_harts_lock);
+	}
 	return rc;
     }
 #endif
@@ -130,25 +146,34 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
 	dom_ctx->prev_ctx = ctx;
     }
 
-	/* Assign current hart to target domain */
+    /* Assign current hart to target domain */
+    if (!try_lock) {
 	spin_lock(&current_dom->assigned_harts_lock);
+    }
 #ifdef CONFIG_K3_KEYSTONE_SM
-	if (set_caller && dom_ctx->initialized &&
-	    current_dom == sbi_hart_keystone_optee_host()) {
-		sbi_hartmask_set_hartindex(hartindex, &current_dom->optee_caller_harts);
-	}
+    if (set_caller && dom_ctx->initialized &&
+	current_dom == sbi_hart_keystone_optee_host()) {
+	sbi_hartmask_set_hartindex(hartindex, &current_dom->optee_caller_harts);
+    }
 #endif
-	sbi_hartmask_clear_hartindex(hartindex, &current_dom->assigned_harts);
+    sbi_hartmask_clear_hartindex(hartindex, &current_dom->assigned_harts);
+    if (!try_lock) {
 	spin_unlock(&current_dom->assigned_harts_lock);
+    }
 
-	sbi_update_hartindex_to_domain(hartindex, target_dom);
+    sbi_update_hartindex_to_domain(hartindex, target_dom);
 
+    if (!try_lock) {
 	spin_lock(&target_dom->assigned_harts_lock);
+    }
 #ifdef CONFIG_K3_KEYSTONE_SM
-	sbi_hartmask_clear_hartindex(hartindex, &target_dom->optee_caller_harts);
+    sbi_hartmask_clear_hartindex(hartindex, &target_dom->optee_caller_harts);
 #endif
-	sbi_hartmask_set_hartindex(hartindex, &target_dom->assigned_harts);
-	spin_unlock(&target_dom->assigned_harts_lock);
+    sbi_hartmask_set_hartindex(hartindex, &target_dom->assigned_harts);
+    spin_unlock(&target_dom->assigned_harts_lock);
+    if (try_lock) {
+	spin_unlock(&current_dom->assigned_harts_lock);
+    }
 
     /* Generic domains retain the full PMP reconfiguration path. */
 #ifndef CONFIG_K3_KEYSTONE_SM
@@ -223,12 +248,12 @@ int sbi_domain_context_set_mepc(struct sbi_domain *dom, unsigned long entry_poin
 	return 0;
 }
 
-int sbi_domain_context_enter(struct sbi_domain *dom)
+int sbi_domain_context_enter(struct sbi_domain *dom, bool try_lock)
 {
 	struct hart_context *ctx = hart_context_thishart_get();
 	struct hart_context *dom_ctx = hart_context_get(dom, current_hartindex());
 
-    return switch_to_next_domain_context(ctx, dom_ctx, true);
+    return switch_to_next_domain_context(ctx, dom_ctx, true, try_lock);
 }
 
 int sbi_domain_context_exit(void)
@@ -286,7 +311,7 @@ int sbi_domain_context_exit(void)
 	if (!dom_ctx)
 		dom_ctx = hart_context_get(&root, hartindex);
 
-    return switch_to_next_domain_context(ctx, dom_ctx, false);
+    return switch_to_next_domain_context(ctx, dom_ctx, false, false);
 }
 
 #ifdef CONFIG_K3_KEYSTONE_SM

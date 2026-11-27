@@ -16,6 +16,9 @@ enum pmp_priority {
   PMP_PRI_ANY,
   PMP_PRI_TOP,
   PMP_PRI_BOTTOM,
+#ifdef KEYSTONE_K3_PMP_N_REG
+  PMP_PRI_SHARED_UTM,
+#endif
 };
 
 #define PMP_ALL_PERM  (PMP_W | PMP_X | PMP_R)

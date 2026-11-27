@@ -24,10 +24,11 @@ int sbi_domain_context_set_mepc(struct sbi_domain *dom, unsigned long entry_poin
 /**
  * Enter a specific domain context synchronously
  * @param dom pointer to domain
+ * @param try_lock return SBI_EINVALID_STATE if an assignment lock is busy
  *
  * @return 0 on success and negative error code on failure
  */
-int sbi_domain_context_enter(struct sbi_domain *dom);
+int sbi_domain_context_enter(struct sbi_domain *dom, bool try_lock);
 
 /**
  * Exit the current domain context, and then return to the caller

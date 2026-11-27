@@ -420,8 +420,13 @@ static int generic_mpxy_init(void)
 {
 	const void *fdt = fdt_get_address();
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+	/* Stop before S-mode if a configured dispatcher fails initialization. */
+	return fdt_mpxy_init(fdt);
+#else
 	fdt_mpxy_init(fdt);
 	return 0;
+#endif
 }
 
 static int generic_emulate_load(int rlen, unsigned long addr,

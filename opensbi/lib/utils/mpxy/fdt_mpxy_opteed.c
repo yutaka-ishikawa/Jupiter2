@@ -106,7 +106,7 @@ static struct sbi_domain *__get_udomain(void)
 	return NULL;
 }
 
-static int sbi_ecall_tee_domain_enter(unsigned long entry_point)
+static int sbi_ecall_tee_domain_enter(unsigned long entry_point, bool try_lock)
 {
     int rc;
 
@@ -114,7 +114,7 @@ static int sbi_ecall_tee_domain_enter(unsigned long entry_point)
     if (rc) {
 	return rc;
     }
-    return sbi_domain_context_enter(tdomain);
+    return sbi_domain_context_enter(tdomain, try_lock);
 }
 
 static int sbi_ecall_tee_domain_exit(void)
@@ -130,6 +130,7 @@ static int mpxy_opteed_send_message_withresp(
     struct hart_mpxy_state *ms;
     const ulong *words = msgbuf;
     ulong entry_point;
+    bool fast, try_lock = false;
 
 #ifdef CONFIG_K3_KEYSTONE_SM
     extern int k3_keystone_optee_enter(unsigned int hartindex);
@@ -152,10 +153,16 @@ static int mpxy_opteed_send_message_withresp(
 	    return SBI_EINVAL;
 	}
 
-	entry_point = (ulong)&entry_vector_table->yield_abi_entry;
-	if (GET_ABI_ENTRY_TYPE(words[0]) == ABI_ENTRY_TYPE_FAST) {
+	fast = GET_ABI_ENTRY_TYPE(words[0]) == ABI_ENTRY_TYPE_FAST;
+	if (fast) {
 	    entry_point = (ulong)&entry_vector_table->fast_abi_entry;
+	} else {
+	    entry_point = (ulong)&entry_vector_table->yield_abi_entry;
 	}
+#if defined(CONFIG_PLATFORM_SPACEMIT_K3) && !defined(CONFIG_K3_KEYSTONE_SM)
+	/* Linux retries yielding calls when MPXY reports temporary contention. */
+	try_lock = !fast;
+#endif
 #ifdef CONFIG_K3_KEYSTONE_SM
 	rc = k3_keystone_optee_enter(hartidx);
 	if (rc) {
@@ -164,13 +171,13 @@ static int mpxy_opteed_send_message_withresp(
 #endif
 	sbi_memcpy(hart_shmem_base(ms), msgbuf, msg_len);
 #ifdef CONFIG_K3_KEYSTONE_SM
-	rc = sbi_ecall_tee_domain_enter(entry_point);
+	rc = sbi_ecall_tee_domain_enter(entry_point, try_lock);
 	if (rc) {
 	    k3_keystone_optee_leave(hartidx);
 	}
 	return rc;
 #else
-	return sbi_ecall_tee_domain_enter(entry_point);
+	return sbi_ecall_tee_domain_enter(entry_point, try_lock);
 #endif
     }
 
@@ -224,6 +231,56 @@ static int mpxy_opteed_send_message_withresp(
 }
 
 #ifdef CONFIG_K3_KEYSTONE_SM
+/* K3 OP-TEE's CFG_DTB_MAX_SIZE. The address comes from the linked Core. */
+#define K3_OPTEE_BOOT_DTB_SIZE 0x11000UL
+
+static int k3_optee_copy_boot_dtb(const void *fdt, int nodeoff,
+				 struct sbi_scratch *scratch, bool required)
+{
+    const fdt64_t *buffer;
+    unsigned long source = (unsigned long)fdt;
+    unsigned long dest;
+    unsigned int size;
+    int len;
+
+    buffer = fdt_getprop(fdt, nodeoff, "spacemit,optee-boot-dtb", &len);
+    if (!buffer) {
+	return required || len != -FDT_ERR_NOTFOUND ? SBI_EINVAL : 0;
+    }
+    if (len != 2 * sizeof(*buffer) ||
+	fdt64_ld(buffer + 1) != K3_OPTEE_BOOT_DTB_SIZE ||
+	sbi_domain_thishart_ptr() != tdomain ||
+	current_hartid() != tdomain->boot_hartid ||
+	tdomain->next_arg1 != source || scratch->next_arg1 != source ||
+	tdomain->next_addr != K3_MB_PRIVATE_BASE) {
+	return SBI_EINVAL;
+    }
+    dest = fdt64_ld(buffer);
+    if ((dest & (PAGE_SIZE - 1)) || dest < K3_MB_PRIVATE_BASE + PAGE_SIZE ||
+	dest > K3_MB_LOG_BASE - K3_OPTEE_BOOT_DTB_SIZE ||
+	!sbi_domain_check_addr_range(tdomain, dest, K3_OPTEE_BOOT_DTB_SIZE,
+				     PRV_S, SBI_DOMAIN_READ | SBI_DOMAIN_WRITE) ||
+	fdt_check_header(fdt)) {
+	return SBI_EDENIED;
+    }
+    size = fdt_totalsize(fdt);
+    if (size > K3_OPTEE_BOOT_DTB_SIZE ||
+	!sbi_domain_check_addr_range(udomain, source, size,
+				     PRV_S, SBI_DOMAIN_READ) ||
+	(source < dest + K3_OPTEE_BOOT_DTB_SIZE && dest < source + size) ||
+	fdt_check_full(fdt, size)) {
+	return SBI_EINVAL;
+    }
+
+    sbi_memset((void *)dest, 0, K3_OPTEE_BOOT_DTB_SIZE);
+    sbi_memcpy((void *)dest, fdt, size);
+    tdomain->next_arg1 = dest;
+    scratch->next_arg1 = dest;
+    sbi_printf("K3 OP-TEE boot DTB: %u bytes from 0x%lx to 0x%lx\n",
+	       size, source, dest);
+    return 0;
+}
+
 static int k3_measured_boot_log(const void *fdt, bool *present)
 {
     const fdt64_t *address;
@@ -269,7 +326,9 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	u32 channel_id;
 	int rc, len, i;
 #ifdef CONFIG_K3_KEYSTONE_SM
-    bool measured_boot, allow_qemu_geu;
+    bool measured_boot;
+    enum sbi_k3_optee_pmp_profile profile;
+    const char *model;
 #endif
 
 	/* Setup domain for OP-TEE dispatcher */
@@ -286,12 +345,30 @@ static int mpxy_opteed_init(const void *fdt, int nodeoff,
 	sbi_printf("K3 measured boot: DT event log rejected (%d)\n", rc);
 	return rc;
     }
-    allow_qemu_geu = !fdt_node_check_compatible(fdt, 0, "riscv-virtio");
+    profile = !fdt_node_check_compatible(fdt, 0, "riscv-virtio") ?
+	SBI_K3_OPTEE_PMP_QEMU : SBI_K3_OPTEE_PMP_LEGACY;
+    if (fdt_getprop(fdt, nodeoff, "spacemit,pico-itx-pmp16", &len)) {
+	if (len || fdt_node_check_compatible(fdt, 0, "spacemit,k3")) {
+	    return SBI_EINVAL;
+	}
+	model = fdt_getprop(fdt, 0, "model", &len);
+	if (!model || !fdt_stringlist_contains(model, len,
+					       "spacemit k3 pico itx board")) {
+	    return SBI_EINVAL;
+	}
+	profile = SBI_K3_OPTEE_PMP_PICO_ITX;
+    }
     rc = sbi_hart_keystone_check_optee_pmp(sbi_scratch_thishart_ptr(),
 					  udomain, tdomain, measured_boot,
-					  allow_qemu_geu);
+					  profile);
     if (rc) {
 	sbi_printf("K3 OP-TEE PMP: fixed slot plan rejected (%d)\n", rc);
+	return rc;
+    }
+    rc = k3_optee_copy_boot_dtb(fdt, nodeoff, sbi_scratch_thishart_ptr(),
+				profile == SBI_K3_OPTEE_PMP_PICO_ITX);
+    if (rc) {
+	sbi_printf("K3 OP-TEE boot DTB rejected (%d)\n", rc);
 	return rc;
     }
 #endif

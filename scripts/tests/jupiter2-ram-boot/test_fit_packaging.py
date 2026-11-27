@@ -146,7 +146,22 @@ class PackagingTests(unittest.TestCase):
     def test_measured_boot_optee_loadable_precedes_esos(self):
         path = self.base / 'tee.bin'
         path.write_bytes(b'OP-TEE fixture')
-        result = self.build(spl_measurement_log=None, optee_bin=path)
+        dtb = self.base / 'optee.dtb'
+        self.run_tool(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', str(dtb), '-'],
+                      input='''/dts-v1/;
+/ {
+ chosen {
+  opensbi-domains {
+   optee: optee-domain { next-addr = <1 0x71000000>; };
+  };
+  sbi-mpxy-opteed {
+   compatible = "riscv,sbi-mpxy-opteed";
+   opensbi-domain-instance = <&optee>;
+   riscv,sbi-mpxy-channel-id = <0x1000>;
+  };
+ };
+};''')
+        result = self.build(spl_measurement_log=None, optee_bin=path, opensbi_dtb=dtb)
         self.assertEqual(result.returncode, 0, result.stderr)
         fit, blob, total = builder.read_fit(self.base / 'release/images/ram-boot-vendor.itb')
         config = fit.children['configurations'].children['conf_11']

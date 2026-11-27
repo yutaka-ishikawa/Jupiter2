@@ -5,6 +5,7 @@
 carray-platform_override_modules-$(CONFIG_PLATFORM_SPACEMIT_K3) += spacemit_k3
 platform-objs-$(CONFIG_PLATFORM_SPACEMIT_K3) += spacemit/spacemit_k3.o spacemit/k3_corepm.o
 platform-objs-$(CONFIG_K3_KEYSTONE_SM) += spacemit/k3_keystone_timer.o
+platform-objs-$(CONFIG_K3_KEYSTONE_SM) += spacemit/k3_pico_itx_mmio.o
 
 ifeq ($(CONFIG_FIT_SIGNATURE),)
 firmware-its-$(CONFIG_PLATFORM_SPACEMIT_K3) += spacemit/fw_dynamic.its

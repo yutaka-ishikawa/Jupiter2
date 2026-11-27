@@ -42,6 +42,8 @@ dtc -q -@ -I dts -O dtb -o "$tmp/boot-pmp16.dtbo" "$VERIFY/boot-pmp16.dtso"
 fdtoverlay -i "$tmp/boot.dtb" -o "$tmp/boot-pmp16.dtb" "$tmp/boot-pmp16.dtbo"
 dtc -q -@ -I dts -O dtb -o "$tmp/boot-pmp16-geu.dtbo" "$VERIFY/boot-pmp16-geu.dtso"
 fdtoverlay -i "$tmp/boot-pmp16.dtb" -o "$tmp/boot-pmp16-geu.dtb" "$tmp/boot-pmp16-geu.dtbo"
+dtc -q -@ -I dts -O dtb -o "$tmp/boot-pmp16-utm.dtbo" "$VERIFY/boot-pmp16-utm.dtso"
+fdtoverlay -i "$tmp/boot-pmp16-geu.dtb" -o "$tmp/boot-pmp16-utm.dtb" "$tmp/boot-pmp16-utm.dtbo"
 
 cat > "$tmp/initramfs.list" <<LIST
 dir /dev 0755 0 0
@@ -54,5 +56,7 @@ file /eyrie-rt $runtime/eyrie-rt 0755 0 0
 file /loader.bin $runtime/loader.bin 0644 0 0
 LIST
 "$KERNEL_OUT/usr/gen_init_cpio" "$tmp/initramfs.list" > "$tmp/coexist.cpio"
-mv "$tmp/boot.dtb" "$tmp/boot-pmp16.dtb" "$tmp/boot-pmp16-geu.dtb" "$tmp/coexist.cpio" "$WORK/"
-printf '%s\n' "$WORK/boot.dtb" "$WORK/boot-pmp16.dtb" "$WORK/boot-pmp16-geu.dtb" "$WORK/coexist.cpio"
+for name in boot.dtb boot-pmp16.dtb boot-pmp16-geu.dtb boot-pmp16-utm.dtb coexist.cpio; do
+  mv "$tmp/$name" "$WORK/"
+  printf '%s\n' "$WORK/$name"
+done

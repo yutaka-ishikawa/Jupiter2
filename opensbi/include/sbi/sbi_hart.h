@@ -142,6 +142,7 @@ int sbi_hart_keystone_verify_extra_pmp(struct sbi_scratch *scratch);
 /* Treat every OP-TEE-accessible range as reserved for enclave allocation. */
 bool sbi_hart_keystone_optee_overlaps(unsigned long base, unsigned long size);
 bool sbi_hart_keystone_shared_fallback(void);
+bool sbi_hart_keystone_has_utm_guard(void);
 int sbi_hart_keystone_switch_enclave_pmp(bool enter);
 enum k3_pmp_trace_state {
 	K3_PMP_TRACE_BOOT_HOST,
@@ -174,11 +175,19 @@ int sbi_hart_keystone_a1_read_pmp_snapshot(struct sbi_scratch *scratch,
 int sbi_hart_keystone_a1_verify_root_pmp(struct sbi_scratch *scratch,
                                       unsigned short *locked_mask);
 struct sbi_domain;
+enum sbi_k3_optee_pmp_profile {
+    SBI_K3_OPTEE_PMP_LEGACY,
+    SBI_K3_OPTEE_PMP_QEMU,
+    SBI_K3_OPTEE_PMP_PICO_ITX,
+};
 int sbi_hart_keystone_check_optee_pmp(struct sbi_scratch *scratch,
 				    const struct sbi_domain *host,
 				    const struct sbi_domain *tee,
-				    bool measured_boot, bool allow_qemu_geu);
+				    bool measured_boot,
+				    enum sbi_k3_optee_pmp_profile profile);
 const struct sbi_domain *sbi_hart_keystone_optee_host(void);
+const struct sbi_domain *sbi_hart_keystone_optee_domain(void);
+bool sbi_hart_keystone_pico_itx(void);
 int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch);
 int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target);
 void sbi_hart_keystone_pmp_block_opensbi(void);
