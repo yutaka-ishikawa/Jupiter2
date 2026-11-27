@@ -266,3 +266,13 @@ Standalone and coexistence regressions
   profile were disabled.
   These guests used the QEMU DTB. Pico-ITX MMIO mediation requires
   validation with the board firmware and peripherals.
+
+Published firmware validation
+  OpenSBI and Keystone SM were rebuilt from 777eef642b7dbcbdc5f7657b3006eba428eb98d2.
+  f0b1bb22148797312bcfd1af80ee4d1e149f806d5e6eadd62a4c96cd7a1dbf54  tested OpenSBI BIN, PMP trace on
+  Original IMA guest inputs, two host CPUs, all 16 guest CPUs.
+  Full late registration ran in 28.9, 29.4, 27.9 and 28.7 seconds.
+  4/4 verified /ima-probe, unchanged PCR 10 and power down, QEMU exit 0.
+  Mixed 16/32 and uniform 16 GEU cases both passed 16 enclave runs,
+  33 TA calls and GEU address and permission restoration, QEMU exit 0.
+  PMP peaks for each case: boot-host 14, OP-TEE 15, host 15, enclave 16.

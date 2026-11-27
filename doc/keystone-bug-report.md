@@ -1980,5 +1980,16 @@ HSM待機のままで、主hartはOP-TEEの `wait_secondary` に留まってい�
   合格した。同居は各hart一律16枠・16/32枠混在ともEnclave 16回とTA 33回が合格した。
   PMP CSRから読んだ最大使用数は16枠で、32枠側の枠16–31は無効だった。
 
+#### 公開コミットの再検査
+
+修正コミット `777eef642` のクリーンなソースからOpenSBIとKeystone SMをビルドした。
+既存のQEMU・Linux・OP-TEE Coreと各試験のDTB・initramfsを使用した。
+
+- 初回と同じゲスト入力とPMP詳細ログを使い、ホストCPU 2個で遅延登録を4回実行した。
+  全回で16 CPU、`/ima-probe` の測定行、PCR 10が変化しないこと、正常電源断と
+  QEMU終了コード0を確認した。
+- 一律16枠・16/32枠混在の同居検査は両方で合格した。各ゲストでEnclave 16回、
+  TA呼び出し33回、GEUの枠切替と復元を確認した。PMP使用数の上限は16枠だった。
+
 実機での確認は未実施。
 [QEMUの入力と停止時の記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
