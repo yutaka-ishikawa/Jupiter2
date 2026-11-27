@@ -19,8 +19,9 @@ RAM起動用は次の3構成から選びます。
 | OP-TEEのみ | K3標準設定、Keystone SMなし | `tee.bin` | `ram-boot-vendor.itb` |
 | KeystoneとOP-TEEを同梱 | Keystone SM入り | `tee.bin` | `ram-boot-keystone.itb` |
 
-OP-TEE入りの2構成では、既存のビルダーでCoreをFITに格納できます。
-実機向けのドメイン設定を含む起動経路と実機での動作は未検証です。
+OP-TEE入りの2構成では、ビルダーでCoreとOpenSBI用DTBをFITに格納します。
+Pico-ITX向けの同梱構成では実機用FITとLinux用DTBの生成をホストで確認しました。
+実機でのUSB RAM起動と周辺機器の動作確認が残っています。
 NOR導入用bundleはこの手順ではKeystoneのみを対象とします。
 
 ## 開発PCの準備
@@ -163,14 +164,25 @@ if [ ! -e "$OPTEE_SRC" ]; then
     git clone https://github.com/spacemit-com/optee_os.git "$OPTEE_SRC"
     git -C "$OPTEE_SRC" checkout --detach "$OPTEE_REV"
 fi
-test "$(git -C "$OPTEE_SRC" rev-parse HEAD)" = "$OPTEE_REV" &&
-make -C "$OPTEE_SRC" -j20 O="$OPTEE_WORK/out" ARCH=riscv PLATFORM=k3 \
-  CROSS_COMPILE="$CROSS_COMPILE" CROSS_COMPILE_core="$CROSS_COMPILE" \
-  CROSS_COMPILE_ta_rv64="$CROSS_COMPILE" CFG_K3_HUK_ALLOW_UNFUSED=n
+(
+  set -e
+  test "$(git -C "$OPTEE_SRC" rev-parse HEAD)" = "$OPTEE_REV"
+  for patch in "$PWD/patches/optee/"{k3-map-efuse-clock-registers,k3-private-boot-dtb}.patch; do
+    git -C "$OPTEE_SRC" apply --reverse --check "$patch" 2>/dev/null ||
+      git -C "$OPTEE_SRC" apply "$patch"
+  done
+  make -C "$OPTEE_SRC" -j20 O="$OPTEE_WORK/out" ARCH=riscv PLATFORM=k3 \
+    CROSS_COMPILE="$CROSS_COMPILE" CROSS_COMPILE_core="$CROSS_COMPILE" \
+    CROSS_COMPILE_ta_rv64="$CROSS_COMPILE" \
+    CFG_TEE_CORE_NB_CORE=16 CFG_NUM_THREADS=16 CFG_K3_PRIVATE_BOOT_DTB=y \
+    CFG_K3_EFUSE=y CFG_K3_HUK_ALLOW_UNFUSED=n CFG_K3_IOPMP=y CFG_K3_PRNG=y \
+    CFG_MMP_RTC=y CFG_TE200_CRYPTO_DRIVER=y CFG_REE_FS=y CFG_REE_FS_TA=y CFG_RPMB_FS=n
+)
 
 TEE_BIN="$OPTEE_WORK/out/core/tee.bin"
+TEE_ELF="$OPTEE_WORK/out/core/tee.elf"
 test -s "$TEE_BIN"
-"${CROSS_COMPILE}readelf" -h -l "$OPTEE_WORK/out/core/tee.elf"
+"${CROSS_COMPILE}readelf" -h -l "$TEE_ELF"
 ```
 
 Linux側でOP-TEEを使うには、対応する `Image` とLinux DTBを用意します。
@@ -202,7 +214,8 @@ VARIANT=vendor
 ### 1.4 KeystoneとOP-TEEを同梱する
 
 Keystone SM入りOpenSBIと、対応するLinux・ドライバをビルドします。
-OP-TEE Coreは1.2節で作った `TEE_BIN` を使います。
+先に1.2節で同じビルドの `TEE_BIN` と `TEE_ELF` を作ります。
+続く1.5節は `VARIANT=keystone` に対してPico-ITX用の16枠固定配置を指定します。
 
 ```bash
 make opensbi keystone JOBS=20
@@ -213,7 +226,7 @@ VARIANT=keystone
 
 ### 1.5 OP-TEE入りFITを作る（1.3・1.4共通）
 
-選んだ構成で設定した `SBI`、`OUT`、`VARIANT` と、1.2節の `TEE_BIN` を引き継ぎます。
+選んだ構成で設定した `SBI`、`OUT`、`VARIANT` と、1.2節の `TEE_BIN`・`TEE_ELF` を同じシェルで引き継ぎます。
 
 OpenSBI側は参照U-BootのPico-ITX用DTBをベースに、ビルド中に
 OP-TEEドメイン、Coreと共有メモリの予約、MPXY設定を生成します。
@@ -226,10 +239,14 @@ OP-TEEドメイン、Coreと共有メモリの予約、MPXY設定を生成しま
 ```bash
 ESOS_CONFIGURATION=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["esos_configuration"])' \
   < hardware/jupiter2/vendor-fit.json)
+OPTEE_FIT_ARGS=(--optee-bin "$TEE_BIN")
+if [ "$VARIANT" = keystone ]; then
+    OPTEE_FIT_ARGS+=(--optee-elf "$TEE_ELF" --pico-itx-pmp16)
+fi
 python3 scripts/build-jupiter2-reference-ram-boot.py \
   --opensbi-bin "$SBI.bin" --opensbi-elf "$SBI.elf" \
   --esos-itb hardware/jupiter2/vendor/esos.itb --esos-configuration "$ESOS_CONFIGURATION" \
-  --optee-bin "$TEE_BIN" --variant "$VARIANT" --cross-compile "$CROSS_COMPILE" \
+  "${OPTEE_FIT_ARGS[@]}" --variant "$VARIANT" --cross-compile "$CROSS_COMPILE" \
   --jobs 20 --output "$OUT"
 
 FIT="ram-boot-$VARIANT.itb"
@@ -263,6 +280,18 @@ fdtget -t x "$LINUX_OPTEE_DTB" /firmware/optee mboxes
 別のメモリ構成を使う場合は、対象実機用に検証したDTBまたはオーバーレイを指定します。
 
 [実機移植計画](jupiter2-optee-ftpm-porting-plan.md) · [同居設計](keystone-optee-coexistence-design.md)
+
+#### 16枠同梱構成のFIT生成検査
+
+1.4節で指定した `VARIANT=keystone` を使うと、上のコマンドが
+`--optee-elf "$TEE_ELF" --pico-itx-pmp16` を渡します。ビルダーが同じCoreのELFとBINを
+照合し、ELFの `.k3_boot_dtb` から私有DTBのアドレスと容量を取り出します。
+上のLinux用DTB生成で、同じビルドの `records/opensbi-uboot.dtb` を使います。
+
+FSBL・FIT・Linux用DTBの生成とハッシュ照合をホストで確認しました。実機のUSB RAM起動では、
+クロック・リセット仲介と実機I/O・DMAの動作を確認します。
+[16枠の実装計画](jupiter2-coexistence-16-pmp-plan.md#枠14の共用と私有dtbの確認) ·
+[ホストビルドの記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
 ### 1.6 実機への配置と起動確認
 

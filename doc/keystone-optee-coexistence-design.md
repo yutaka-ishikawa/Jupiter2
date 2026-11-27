@@ -523,8 +523,12 @@ IOPMPの設定はCPUのPMPと独立している。採用版の `INT2` ポリシ�
 
 実装後は両クラスタのPMP読み戻しと起動時FDT、LinuxのI²C・クロック・公開eFuse、
 ESOS/RPMIの起動・復帰、IOPMPの実効権限、eFuseを使うfTPMとKeystoneの同時実行を確認する。
-K3 QEMUでは、B案で定義したGEU枠のアドレス・サイズ・権限の切替を確認した。
-上表全体の実装と実機試験は後続の工程で行う。
+上表のPico-ITX用配置はOpenSBIのK3コードに実装した。K3 QEMUでは、GEU枠とDCIU・UTMを共用する
+枠14のアドレス・権限を読み戻し、Linuxへの復帰を確認した。Pico-ITX用のFIT生成と入力の照合を実施した。
+クロック・リセットと公開eFuseの仲介をOpenSBIに追加し、QEMUで単独・同居の回帰を確認した。
+次は修正版のFITで実機をUSB RAM起動し、仲介の動作とIOPMPの実効権限を確認する。
+[Pico-ITXの固定枠定義](../opensbi/lib/sbi/k3_pico_itx_pmp.h) ·
+[Pico-ITXのMMIO許可表](../opensbi/platform/generic/spacemit/k3_pico_itx_mmio.c) ·
 [実装の順序と受入条件](jupiter2-coexistence-16-pmp-plan.md)
 
 関連資料：

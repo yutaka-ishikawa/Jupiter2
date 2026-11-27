@@ -115,8 +115,10 @@
 | KSB-089 | OP-TEE同居ゲストの `/init` が命令アクセスフォルトで停止 | 起動DTB用PMP領域のLinux予約漏れを確認。報告時のフォルト物理アドレスは未確認 | 予約を追加し、既存の同居試験で回帰確認 |
 | KSB-090 | 既定の同居DTBでfTPMデバイスが作られない | `microsoft,ftpm` のノードが未定義 | 同居用DTSにfTPMノードを追加 |
 | KSB-091 | fTPM・IMAゲストの初期化がタイムアウトする | 固定DTSで起動時の乱数シード欠落を確認。タイムアウトとの因果は未確定 | 試験ごとに新しいシードを供給 |
-| KSB-092 | 実機の同居RAM起動がOpenSBIのPMP初期化で停止 | 同梱FITとUARTから現行規則で21枠相当を確認 | 全域枠の共用を実装しQEMUで最大16枠を確認。実機用の割り当ては検討中 |
-| KSB-093 | 実機同居用のOP-TEE起動DTBが読み取り専用 | OP-TEEの外部DTB初期化と領域のR権限が不整合 | Core内のDTBコピーを検討。ソースで確認、実機未試験 |
+| KSB-092 | 実機の同居RAM起動がOpenSBIのPMP初期化で停止 | 同梱FITとUARTから現行規則で21枠相当を確認 | Pico-ITXの固定配置を実装。QEMUで最大16枠を確認し実機用FITを生成。実機未試験 |
+| KSB-093 | 実機同居用のOP-TEE起動DTBが読み取り専用 | OP-TEEの外部DTB初期化と領域のR権限が不整合 | Core内にDTBを複製する構成をQEMUで確認。実機未試験 |
+| KSB-094 | 対応するMPXY初期化が失敗しても起動を継続 | FDTドライバーの失敗がgenericプラットフォームへ返らない | K3 Keystone構成で失敗を返し、QEMUでS-modeへの引き渡し前に停止を確認 |
+| KSB-095 | OP-TEE単独の並行TA試験で停滞 | 16 hartのK3 QEMUでタイマー割り込みによるOP-TEEからの復帰と再試行が続く | OpenSBIが切り替え前の競合を返すよう修正。QEMU単独試験10回合格 |
 | KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
 | KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
@@ -1883,7 +1885,11 @@ OP-TEE起動後のセカンダリhartの停止は、全域枠を拒否にした�
 
 次に、GEUの状態別アドレスをOpenSBIのK3用コードに定義した。混在16/32枠と一律16枠のQEMUで、
 Linuxの16 KiB拒否、OP-TEEの4 KiB RW、Linux復帰後の拒否を枠7のCSRで確認した。
-定義外の窓と範囲が重複するDTBはLinux起動前に拒否された。実機用の全枠配置とDMA保護は検証が残る。
+定義外の窓と範囲が重複するDTBはLinux起動前に拒否された。
+
+Pico-ITXの全枠配置をK3コードに追加した。QEMUでは枠14をLinuxのDCIU拒否、OP-TEEの無効、
+EnclaveのUTM RWで共用し、Linux復帰時の読み戻しを確認した。混在16/32枠と一律16枠で最大16枠だった。
+Pico-ITX向けのFSBL・FIT・Linux DTBを生成し、Coreと予約範囲を照合した。実機の起動とDMA保護は未検査。
 [B案の選択とA案へ変更する条件](jupiter2-coexistence-16-pmp-plan.md#状態別pmpアドレスの定義先)
 [QEMUのUART・CSR記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
@@ -1896,8 +1902,73 @@ OP-TEE起動時に `fdt_open_into()` を同じバッファーに対して呼び�
 起動は先にKSB-092の枠不足で止まっており、この書き込みまで到達した実機ログは未取得。
 [実機用DTBの権限指定](../scripts/prepare-jupiter2-optee-opensbi-dtb.py#L40) · [OP-TEEの外部DTB初期化](https://github.com/spacemit-com/optee_os/blob/2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59/core/kernel/dt.c#L809)
 
-修正候補は、OpenSBIで引き渡しDTBを検査し、CoreのPMP範囲内に確保した書き込み可能なバッファーへ
-複製する。実機・QEMUとも修正と試験は未実施。
+OP-TEEのリンク時に書き込み可能な領域を確保し、OpenSBIが検査済みDTBを複製してCoreの起動引数へ渡す。
+QEMUでは元のDTBをOP-TEEから読み取り専用にした状態で、コピーを使う初期化とTAの実行を確認した。
+実機向けはELFとBINの一致、予約領域、FIT内のDTBをホストで照合した。実機の起動確認が残る。
+[OP-TEEの予約領域](../patches/optee/k3-private-boot-dtb.patch) ·
+[QEMUとホストビルドの記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+### KSB-094　MPXY初期化のエラーがK3 Keystoneの起動元に返らない
+
+FDTのMPXYドライバーが初期化エラーを返しても、genericプラットフォームは成功として返していた。
+K3 Keystoneでは、同居用のPMPや私有DTBの準備が確定する前に後続の初期化へ進む可能性があった。
+K3 Keystone構成で初期化エラーを呼び出し元へ返し、S-modeへの引き渡し前に停止するようにした。
+QEMUで容量が不正な私有DTBを指定し、`mpxy init failed (error -3)` で停止したことを確認した。
+[MPXY初期化の呼び出し](../opensbi/platform/generic/platform.c)
+
+### KSB-095　OP-TEE単独のQEMU並行TA試験で停滞
+
+16 hartのK3 QEMUをマルチスレッドTCG、2 GiB、Sstc有効で起動した。syscon電源断を有効にした
+OP-TEE単独用OpenSBIを使用した。Linuxの16 CPUとOP-TEEドライバーの初期化後、並行TAの試験中に
+初回は `rcu_sched detected stalls` を出力し、80秒でタイムアウトした。
+
+PMP枠調整前の `309f57738` から同じ設定でビルドしたOpenSBIのSHA-256は、当初の失敗時と一致した。
+これと私有DTBバッファー追加前のCoreを組み合わせた試験も80秒でタイムアウトした。
+初回の採取には停止時のレジスタがないため、同じ割り込みの連続を起こしたかは確認できていない。
+
+#### 再現時の原因
+
+- 通常ビルドの反復で、LinuxとOP-TEEを切り替える `switch_to_next_domain_context()` の
+  `assigned_harts_lock` 待ちを複数hartで確認した。UARTが増えない間もロックの解放番号は
+  35秒時点の3,709から55秒時点の5,022、73秒時点の6,154へ進んだ。
+- このQEMUホストは16 vCPUに対してCPU時間の割当てが2 CPU分だった。試験Linuxの周期タイマーは
+  250 Hzで、ドメイン切り替え中にも期限に達する。OP-TEEが保留中のタイマー割り込みを検出すると、
+  `OPTEE_SMC_RETURN_RPC_FOREIGN_INTR` を返し、割り込みを処理するLinuxへ戻る。
+- 診断用OpenSBIで、55秒までに試験が完了しなかった回のhart 0を40秒時点で採取した。
+  209件のMPXY応答中204件が割り込み処理のための復帰で、その204件すべてで
+  `mip.STIP` が立っていた。短い間隔で各hartが再試行すると、ドメイン切り替えが競合し、
+  TA処理が進まないままタイマー割り込みによる復帰が繰り返された。
+
+#### 修正
+
+LinuxのMPXYドライバーで割り込み応答が連続した後に待機を加える試行では、待機時間を変えても
+タイムアウトした。
+
+K3のOP-TEE単独構成では、Linuxが再試行できるyielding呼び出しに限り、OpenSBIが切り替え元と
+切り替え先の所属ロックを `spin_trylock()` で取得する。片方でも競合したら、取得済みのロックを
+解放して `SBI_EINVALID_STATE` を返す。hartの所属とPMPは両方のロックを取得するまで更新しない。
+LinuxのMPXYドライバーはこの結果を `-EAGAIN` に変換し、既存の期限付き再試行を使う。
+fast呼び出し、OP-TEEからの復帰、Keystone同居構成ではロック取得を待って切り替える。
+[OpenSBIのドメイン切り替え](../opensbi/lib/sbi/sbi_domain_context.c)
+・[MPXYディスパッチャー](../opensbi/lib/utils/mpxy/fdt_mpxy_opteed.c)
+
+#### QEMU検証
+
+同じQEMU・Linux・Core・DTB・initramfsを使った16 hartの反復試験は、修正前が4回中2回合格、
+修正後が10回中10回合格。合格は全16 CPUのTA応答検査、ゲストの電源断、QEMU終了コード0で判定した。
+修正後の実行時間は7.1〜9.0秒だった。
+
+- 診断用の修正版では、切り替え元・切り替え先それぞれのロック競合で
+  `SBI_EINVALID_STATE` を返したことをQMPで確認した。2回とも並行TA試験と電源断に成功した。
+- 私有DTBバッファー追加前のCoreでも3回、Sstc無効に合わせたCPU設定とDTBでも2回、全回合格した。
+- Keystone同居構成のPMP 16/32混在試験も合格した。16回のEnclave実行、OCALLを含む33回のTA呼び出し、
+  電源断を確認し、各状態で使用したPMP枠は最大16だった。
+- 単独構成の手順書に記載したQEMU起動コマンドを検証済みの成果物で実行し、合格を確認した。
+
+実機での再現性と修正の効果は未確認。
+
+[起動条件・試験記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+[単独構成のビルド・試験手順](qemu-build-install-test.md#3-op-teeのみを使う)
 
 ### KSB-096 OP-TEE先行起動で副hartのPMP記録が失敗する
 

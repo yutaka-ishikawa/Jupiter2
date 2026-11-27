@@ -154,11 +154,42 @@ OpenSBIのビルドは `opensbi/platform/generic/configs/k3_keystone_audit_defco
 
 [既存のK3 MMIO仲介](../opensbi/platform/generic/spacemit/spacemit_k3.c) · [LinuxのK3クロック](../linux-k3/drivers/clk/spacemit/ccu-k3.c) · [採用版OP-TEEのK3クロック操作](https://github.com/spacemit-com/optee_os/blob/2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59/core/arch/riscv/plat-k3/k3_ccu.c)
 
+#### 接続方式を決めるための照合結果
+
+- Linuxと参照U-BootのAES/WTMクロックは、OP-TEEがeFuse・TE200に使う
+  PLLゲートとAESクロック・リセット制御を操作する。同じ制御を複数の環境が
+  更新するため、共有する設定をM-modeで管理する。
+- 基準機のLinux DTBはI²C3とHDMAを有効にしている。LinuxのDCIUクロック・リセット
+  とOP-TEEのHSDMA起動順序を照合した。共有するDMAのクロック・リセットは、
+  IOPMPの有効状態を保ったまま正規の転送ができるように扱う。
+- LinuxのeFuseドライバーはprobeでバンクをまとめて読み込む。基準機のDTBにある
+  SoC識別のセルと、使用するLinux DTBの温度補正セルを照合して、公開項目の範囲を確定する。
+  鍵の取得はOP-TEEが担当する。
+
+| 方式 | 接続範囲と確認点 |
+| --- | --- |
+| 既存のMMIO仲介を拡張 | OpenSBIが既存のアクセス処理で許可済みのレジスターとマスクを扱う。基準機のLinuxはSv39で、既存仲介はBareとSv39に対応する。既存ドライバーの読み取り・更新・待ち合わせを保てることを確認する。 |
+| 用途別のSBI呼び出し | OpenSBIが用途を限定した要求を受付ける。該当ドライバーを呼び出しに接続し、U-BootではOpenSBIの後に動く本体への適用範囲を確認する。 |
+
+通常の同居QEMUは `riscv-virtio` のDTBで起動する。単独・同居、PMP、fTPM・IMAの回帰を
+ここで確認し、Pico-ITXのクロック・リセットとeFuse・IOPMPの動作は実機の結果を記録する。
+[基準機のLinux DTB](../hardware/jupiter2/captures/20261108-075700/running.dtb) · [LinuxのeFuseドライバー](../linux-k3/drivers/nvmem/spacemit-efuse.c)
+
+#### 採用した方式
+
+2026-11-27（JST）に既存のMMIO仲介を拡張する方式を選択した。Pico-ITX固定PMP構成で、
+OpenSBIがLinux・U-BootとOP-TEEの32ビットアクセスを許可表と照合する。共有クロックと
+リセットは書き込みをレジスターごとの所有ビットに制限する。ホストのeFuse読み取りには、
+SoC識別と温度補正に使う公開ビットを返す。Secure Coreは既存のeFuse経路で初期化する。
+[K3のMMIO仲介](../opensbi/platform/generic/spacemit/spacemit_k3.c) ·
+[Pico-ITXの許可表](../opensbi/platform/generic/spacemit/k3_pico_itx_mmio.c)
+
 #### 変更予定ファイル
 
 | 対象 | ファイル | 変更内容 |
 | --- | --- | --- |
-| OpenSBIのK3プラットフォームコード | `opensbi/platform/generic/spacemit/spacemit_k3.c` | 選択した方式でクロック・リセットおよび公開eFuse値を仲介する |
+| OpenSBIのK3プラットフォームコード | `opensbi/platform/generic/spacemit/spacemit_k3.c`、`opensbi/platform/generic/spacemit/k3_pico_itx_mmio.c`、`opensbi/platform/generic/spacemit/k3_pico_itx_mmio.h`、`opensbi/platform/generic/spacemit/objects.mk` | 既存のアクセスフォルト処理からクロック・リセットと公開eFuse値の許可表を参照する |
+| OpenSBIのPMP配置とドメイン | `opensbi/lib/sbi/sbi_hart.c`、`opensbi/include/sbi/sbi_hart.h` | 検査済みのPico-ITX構成とOP-TEEドメインを仲介処理へ伝える |
 | Linuxのクロック・リセットドライバー（条件付き） | `linux-k3/drivers/clk/spacemit/ccu-k3.c`、`linux-k3/drivers/reset/reset-spacemit.c` | 用途別SBI呼び出しを選んだ場合に、対象のクロック・リセット操作を接続する |
 | LinuxのeFuseドライバー（条件付き） | `linux-k3/drivers/nvmem/spacemit-efuse.c` | 公開eFuseの取得にドライバー側の変更が必要な場合に、公開項目を受け取る経路に接続する |
 | LinuxのDT設定（条件付き） | `scripts/prepare-jupiter2-optee-linux-dtb.py`。元の定義は `linux-k3/arch/riscv/boot/dts/spacemit/k3.dtsi` | クロックやeFuseの供給元を変更する方式の場合に、生成する同居用Linux DTBに反映する |
@@ -256,10 +287,39 @@ PMPの実装数が異なる条件を再現する構成である。使用する�
 `0xf0700000`・16 KiBの拒否から `0xf0702000`・4 KiBのRWへの切替と、Linux復帰時の復元を確認した。
 両構成とも最大16枠で、Enclave 16回とTA呼び出し33回が成功した。
 
-試験にはQEMUの空のeFuseモデルと開発用HUKを使った。実機の配置表全体、DCIUとUTMの枠共用、
-私有DTB、クロック仲介とIOPMPは後続の工程で検証する。
+試験にはQEMUの空のeFuseモデルと開発用HUKを使った。
 [再試験手順](../verifications/optee-coexistence/README.md#geuのアドレス切替) ·
 [CSR読み戻しとUARTの試験記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+### 枠14の共用と私有DTBの確認
+
+Pico-ITXの状態別配置をOpenSBIのK3コードに定義した。起動時に、実機DTBから登録された領域、
+OpenSBIの実行領域、ESOSのロック範囲とRPMIの先行規則を照合する。枠14はLinuxでDCIUを拒否し、
+OP-TEEで無効、EnclaveでUTMをRWにする。Keystoneの全hart PMP更新はEPMの枠13に適用する。
+[Pico-ITXの固定枠定義](../opensbi/lib/sbi/k3_pico_itx_pmp.h)
+
+4 KiB粒度の混在16/32枠と一律16枠のQEMUで、GEUと枠14の切替を実行した。OP-TEEとEnclaveの
+両方からLinuxへ戻る際にDCIUの拒否を読み戻し、最大16枠を確認した。Core内に確保した私有DTBを
+OpenSBIが複製して渡す構成でも、各16 CPU、Enclave 16回とTA呼び出し33回、正常電源断を確認した。
+容量が不正な私有DTBの指定では、S-modeへの引き渡し前にMPXY初期化が停止した。
+[枠14のQEMU試験手順](../verifications/optee-coexistence/README.md#枠14のdciuとutmの切替) ·
+[QEMUのCSRとUART記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+実機向けは既定I/O機能入りのOP-TEE Coreをクロスビルドし、FSBL、統合FITおよびLinux用DTBを生成した。
+組み込んだCore・DTB、私有DTBの位置、RPMI共有キュー、SHA-256を照合した。
+[実機向けFITの生成方法](jupiter2-build-install-test.md#16枠同梱構成のfit生成検査)
+
+### MMIO仲介を追加した状態でのQEMU回帰
+
+Pico-ITXのMMIO仲介を追加したOpenSBIをビルドした。QEMUでKeystone単独、OP-TEE単独、
+同居の一律16枠・16/32枠混在が合格した。両同居構成でPMP CSRの最大使用数は16枠だった。
+fTPM・IMAは早期登録と遅延登録が合格し、NV試験は別のQEMUプロセスへの保存状態の引き継ぎを確認した。
+この回帰で再現した起動台帳とHSM起動要求の競合は、KSB-096・KSB-097に原因と修正を記録した。
+[不具合台帳](keystone-bug-report.md#ksb-096-op-tee先行起動で副hartのpmp記録が失敗する) ·
+[QEMUの試験記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+工程5では修正版の統合FITでUSB RAM起動し、Pico-ITXのMMIO仲介、ESOS・RPMI、eFuseおよび
+IOPMPの実効権限を確認する。今回のQEMUゲストはQEMU用DTBで起動した。
 
 ## 3. 完了時の記録
 

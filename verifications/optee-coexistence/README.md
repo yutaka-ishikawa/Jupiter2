@@ -95,6 +95,24 @@ python3 verifications/crypto/run-qemu.py --sstc on \
 `manifest.json` の `geu_pmp` に枠番号と往復を確認したhartを記録する。
 [配置の方針](../../doc/jupiter2-coexistence-16-pmp-plan.md#状態別pmpアドレスの定義先)
 
+### 枠14のDCIUとUTMの切替
+
+`make optee-coexist-test` で生成した `boot-pmp16-utm.dtb` は、GEU枠の切替に加えて、
+Linuxでは枠14で `0xd8440000` から64 KiBのDCIU窓を拒否する。OP-TEEでは枠14を無効にし、
+Enclaveの実行中はそのEnclaveのUTMをRWにする。
+
+```sh
+WORK=.build-k3/optee-coexist
+python3 verifications/crypto/run-qemu.py --sstc on \
+    --optee-coexistence "$WORK/out/core/tee.elf" "$WORK/boot-pmp16-utm.dtb" "$WORK/coexist.cpio" \
+    --optee-pmp16 mixed --optee-pmp16-geu --optee-pmp16-utm
+```
+
+`--optee-pmp16 uniform16` は全hartを16枠にする。試験では全16 hartの起動時CSRと、OP-TEE・
+EnclaveからLinuxに戻った際の枠14を読み戻す。`manifest.json` の `utm_pmp` に往復を確認したhartを
+記録する。検査範囲はCPU側のPMPで、実機DCIUのI/Oは後続工程で確認する。
+[試験結果](../../doc/evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
 ## K3 QEMUでのS-mode引き渡し試験
 
 Linuxの代わりに小さなRV64ペイロードを使い、OpenSBIとKeystone SMの

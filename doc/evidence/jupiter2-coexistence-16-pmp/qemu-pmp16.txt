@@ -143,6 +143,116 @@ An unsupported 32 KiB GEU guard and an overlapping host rule each produced
 The existing over-capacity DTB still produced the 17-entry rejection (-2).
 The physical-board layout, board HUK, DCIU/UTM reuse and DMA remain to be tested.
 
+Slot 14 switching and private boot DTB, 2026-11-27 JST
+Baseline beee61da33d1b26f6185e38395dd20dc03b232fd with local changes.
+Same QEMU 11.1.3, 16 harts, 2 GiB, Sstc on. Both profiles used 4 KiB PMP granularity.
+e6aa7d4b7c10c64eefe785da0a95d4784d47dbdecc1de78cc12451d697e8870c  OpenSBI with Keystone SM
+df78c9dca73f6c62619c53109801cca4f37a921c1315bbc0dd4f66ea27eab6cf  boot-pmp16-utm.dtb
+def5ec14c62025525b274cb2ef3a79524e5922f48b90c8bd433bec47a19eb30c  QEMU DTB with the private boot buffer and read-only original
+4c0429772cd8b50c664034cc319ed25f9dd6fd387e34c330ea791de053c4cb0f  QEMU OP-TEE Core ELF with private boot buffer
+
+Each guarded profile read back startup CSRs for all 16 harts, including the disabled
+upper bank on the mixed profile. QEMU exit 0 for the mixed and uniform 16-entry runs.
+Peak active entries boot-host=15, host=16, optee=15, enclave=16
+K3 OP-TEE boot DTB: 30922 bytes from 0x181e00000 to 0x17112f000
+I/TC: Non-secure external DT found
+[K3-PMP] UTM CSR hart=8 state=optee slot=14 base=0xd8447000 order=2 prot=0x0
+[K3-PMP] UTM CSR hart=8 state=enclave slot=14 base=0x1046c0000 order=18 prot=0x1b
+[K3-PMP] UTM CSR hart=8 state=host slot=14 base=0xd8440000 order=16 prot=0x18
+PASS: 16 enclave runs, 33 TA calls including OCALL
+reboot: Power down
+
+Same-address standard and GEU-only coexistence regressions passed with the same firmware.
+A mixed run using the UTM DTB and initramfs from make optee-coexist-test passed.
+A mismatched private DTB capacity stopped the boot before S-mode entry.
+K3 OP-TEE boot DTB rejected (-3)
+init_coldboot: mpxy init failed (error -3)
+
+Pico-ITX host build
+OP-TEE Core built with eFuse, IOPMP, PRNG, RTC and TE200 enabled and the unfused HUK fallback disabled.
+790ab79a153036746e40cca760fbfa60079727f8dfb07538945bdc9475bb0f41  hardware Core ELF
+9eb80e24209e710e4edcd6a1fd0432e6c6ad65a53da7551fe62ec9c42ae0f6fe  hardware Core BIN
+ab22aaf37b3f3a430059061beb0a2e4f1664b0ba7917cbf8f36861bafd4c7f7c  FSBL.bin
+138cbe5fa80bfbf00d0eb84cbbe814e681b4381f0e9becc1d377009add973ab2  ram-boot-keystone.itb
+965a3220fc40cc56f9a0ce00d5638e6afbdda81982db2f4c3a1bb0d3d2c8cc1a  embedded firmware DTB
+8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  Linux DTB
+FIT conf_11 includes OpenSBI, U-Boot, OP-TEE and all 27 ESOS payloads.
+Firmware DTB 60294 bytes. Private buffer at 0x171131000, capacity 0x11000.
+RPMI queue base 0x100800000, size 0x4000. Linux DTB contains linaro,optee-tz.
+46 host packaging and preparation tests passed. A mismatched tee.elf/tee.bin pair was rejected.
+Remaining verification covers the board bus and clocks, ESOS/RPMI operation, provisioned HUK and DMA isolation.
+
+Standalone regressions
+Keystone-only passed hello and hello-native with QEMU exit 0.
+326518670e58f1de7e21bf6c75a28e3be6a1d1d7dd1445d4cb2d5d75d3bd5608  OP-TEE-only OpenSBI with syscon
+OP-TEE-only, 16 CPUs and Sstc on, initially timed out at 80 seconds
+after "rcu_sched detected stalls" during parallel TA calls (KSB-095).
+One retry with the original Core and one with the new Core both produced
+"PASS: parallel OP-TEE TA calls on all 16 CPUs" and QEMU exit 0.
+
+KSB-095 follow-up, 2026-11-27 JST
+
+QEMU 11.1.3, -accel tcg,thread=multi -M jupiter2,wtm-rng=on -smp 16 -m 2G.
+CPU rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16,sstc=on.
+Host cgroup cpu.max was 200000 100000. Linux 6.18.3 used CONFIG_HZ=250.
+The initramfs ran verifications/optee-coexistence/optee-16-hart-init.c.
+The boot DTB matched dtc output from verifications/optee-coexistence/boot.dts.
+The plain K3 OpenSBI included FDT_REGMAP, FDT_REGMAP_SYSCON and FDT_RESET_SYSCON.
+
+e1ff44032245e8bfc4c1de52741e833864f13e1aab343b6a2960b3a7ae1ed853  QEMU
+326518670e58f1de7e21bf6c75a28e3be6a1d1d7dd1445d4cb2d5d75d3bd5608  baseline OpenSBI BIN
+fad174f85b044967fcfd13299a122b9aa6af5070d8acc28406c1edb359a56ba9  fixed OpenSBI BIN
+23082990058f89834795cc7382b5cec085957164a30566dcbc6341296ef7a311  Linux Image
+a60a31aceb0b750152c4ce168c48930b41331225c9223188d5841a50e7c76de9  boot DTB
+4c0429772cd8b50c664034cc319ed25f9dd6fd387e34c330ea791de053c4cb0f  Core ELF
+49be767c9f836bedd2e4d50ef7ba64445cca6f3181d3389803952b54ca99daeb  initramfs
+
+Baseline results at an 80-second host timeout
+  01 PASS 10.6s   02 timeout   03 PASS 7.5s   04 timeout
+Both timeout snapshots found waiters at spin_lock called from
+switch_to_next_domain_context and waiting at physical address 0x10208db28.
+A further failed trial kept the same UART length of 92324 bytes at 35, 55
+and 73 seconds. The lock word was 0x0e8d0e7d, 0x13ae139e and 0x181a180a
+respectively. Its low half is the owner ticket and advanced between samples.
+STIP was pending on all 16 harts in those snapshots.
+
+A diagnostic firmware counted the OP-TEE result 0xffff0004
+(OPTEE_SMC_RETURN_RPC_FOREIGN_INTR) and mip.STIP on those returns.
+A separate failure at 55 seconds yielded these QMP counters at 40 seconds
+
+  hart   MPXY completions   foreign interrupt returns   returns with STIP
+     0                209                         204                 204
+     1                220                         204                 204
+     2                166                         161                 161
+
+OpenSBI built at 309f57738, before the PMP slot adjustment, had the same
+SHA-256 as the baseline. With the earlier OP-TEE Core ELF (SHA-256
+227f68b635651bbff8f3c523dd79e5b15822f34c1259a9e865365d7045a7251b),
+it also timed out at 80 seconds after reaching the parallel TA test.
+
+Linux-only retry delays after repeated foreign interrupt returns did not
+eliminate the timeout. The OpenSBI change tries both assignment locks
+before issuing a yielding call and uses the existing -EAGAIN retry on busy.
+
+Fixed OpenSBI with the unchanged baseline Linux, Core, DTB and initramfs
+  01 PASS 8.4s   02 PASS 7.3s   03 PASS 8.3s   04 PASS 8.6s   05 PASS 8.1s
+  06 PASS 7.6s   07 PASS 7.1s   08 PASS 8.6s   09 PASS 9.0s   10 PASS 8.0s
+All ten guests emitted the aggregate 16-CPU TA pass marker and
+"reboot: Power down". QEMU returned 0 each time.
+
+Two diagnostic boots of the fixed code counted busy returns at 7 seconds.
+The source/target lock counts were 64/1 and 42/1. Both boots passed.
+The fixed OpenSBI passed three more runs with the earlier Core.
+It also passed two runs with Sstc off and Sstc removed from the DTB ISA properties.
+The standalone QEMU command block from doc/qemu-build-install-test.md
+also passed with the verified build inputs.
+
+The rebuilt Keystone coexistence firmware passed the mixed 16/32-entry
+regression with Sstc enabled. UART reported 16 enclave runs, 33 TA calls
+including OCALL and power down. QEMU exited 0. PMP peak usage was boot-host
+15, OP-TEE 15, host 16 and enclave 16.
+dd54eee2f21474bd5ffd712d4decf804ed3a5ac3a1a3f6caac4ec562a1d22ff3  coexistence OpenSBI BIN
+
 OP-TEE primary-to-secondary boot regression, 2026-11-27 JST
 
 QEMU 11.1.3, -accel tcg,thread=multi -M jupiter2,wtm-rng=on -smp 16 -m 2G.
@@ -276,3 +386,24 @@ Published firmware validation
   Mixed 16/32 and uniform 16 GEU cases both passed 16 enclave runs,
   33 TA calls and GEU address and permission restoration, QEMU exit 0.
   PMP peaks for each case: boot-host 14, OP-TEE 15, host 15, enclave 16.
+
+Pico-ITX 16-slot publication validation
+  Source 08d9190c6fc0f77817f951f9fa5b96cefeb1491b
+  OpenSBI and Keystone SM rebuilt from that source with LLVM 19.
+  e350c17eb15c778824904ba063d03356b326d9b70166e2cc0103f420bdd89052  OpenSBI BIN with PMP trace
+  Host RAM boot regression suite passed 46/46.
+  QEMU used the existing Linux, OP-TEE Core with early TA and eFuse
+  model enabled, and initramfs. Both the uniform 16-slot and mixed
+  16/32-slot configurations brought up all 16 CPUs and passed 16 enclave
+  runs and 33 TA calls including OCALL, with power down and exit 0.
+  CSR readback peak was boot-host 15, OP-TEE 15, host 16, enclave 16.
+  Both runs verified the GEU round trip and the slot 14 UTM transition.
+  Rebuilt the pinned reference U-Boot and SPL, and packaged the new
+  OpenSBI with the existing board Core ELF/BIN pair, eFuse and IOPMP
+  enabled. The FIT contains optee in conf_11. The Linux DTB generated
+  from capture 20261108-075700 has linaro,optee-tz and 16 MPXY mailboxes.
+  FSBL and FIT checksums and both fastboot dry runs passed.
+  367cfbaa99a747f0774b2467d923d6b4a16fd2f78087908610ef01b73036d8b9  FSBL.bin
+  95524c1a8146d37e68d2c7704a87270f22ad0a10ac0fa94ad96121a2b63ceee5  ram-boot-keystone.itb
+  8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  k3-pico-itx-keystone-optee.dtb
+  USB RAM boot and Pico-ITX peripheral and DMA behavior remain to be tested.
