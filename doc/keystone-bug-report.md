@@ -117,6 +117,8 @@
 | KSB-091 | fTPM・IMAゲストの初期化がタイムアウトする | 固定DTSで起動時の乱数シード欠落を確認。タイムアウトとの因果は未確定 | 試験ごとに新しいシードを供給 |
 | KSB-092 | 実機の同居RAM起動がOpenSBIのPMP初期化で停止 | 同梱FITとUARTから現行規則で21枠相当を確認 | 全域枠の共用を実装しQEMUで最大16枠を確認。実機用の割り当ては検討中 |
 | KSB-093 | 実機同居用のOP-TEE起動DTBが読み取り専用 | OP-TEEの外部DTB初期化と領域のR権限が不整合 | Core内のDTBコピーを検討。ソースで確認、実機未試験 |
+| KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
+| KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1896,3 +1898,87 @@ OP-TEE起動時に `fdt_open_into()` を同じバッファーに対して呼び�
 
 修正候補は、OpenSBIで引き渡しDTBを検査し、CoreのPMP範囲内に確保した書き込み可能なバッファーへ
 複製する。実機・QEMUとも修正と試験は未実施。
+
+### KSB-096 OP-TEE先行起動で副hartのPMP記録が失敗する
+
+#### 発生条件と原因
+
+16 hart、2 GiB、Sstc有効のK3 QEMU同居構成で、fTPM・IMA遅延登録用のゲストが
+Linuxの起動前に180秒でタイムアウトした。初回のUARTでは、hart 4のPMP設定と読み戻しは
+成功し、ほかの14副hartがOP-TEE初期化を完了した。初回のhart 4のレジスターは未採取。
+
+初回UARTを再集計した。主hartのOP-TEE初期化完了後、15副hartすべてで
+`configure-return Hart=... rc=0` が出ていた。Keystone SMの初期化完了は14件で、
+OP-TEEの副hart初期化完了もhart 4を除く14件だった。停止区間はPMP設定完了からSM初期化完了まで。
+KSB-097の拒否点は対象hartの起動前、KSB-083のHSM起動完了処理はSM初期化の後にある。
+同じ詳細ログ付きOpenSBIでLinuxまで起動した48回は、すべてSM初期化完了の行を15件記録した。
+初回の停止区間は、PMPの読み戻し結果を起動台帳に記録するときのKSB-096と最もよく一致する。
+[副hartの起動順序](../opensbi/lib/sbi/sbi_init.c) ·
+[SM初期化完了の出力箇所](../keystone/sm/src/sm.c)
+
+同じCore、DTB、Linux、initramfsを使い、PMP詳細出力を無効にしたOpenSBIで起動したところ、
+10回目でhart 3・8・9が停止した。起動から25秒と50秒のQMP採取を同じOpenSBI ELFと照合した。
+3 hartとも `sbi_hart_hang()` に留まり、`sbi_hsm_k3_e2_note_local_snapshot()` が
+`SBI_EDENIED`（`-4`）を返した状態だった。逆アセンブリと照合すると、ロック読み取り値は1で、
+ロック取得に成功した場合に0となる `sc.w` の結果レジスターも1だった。
+台帳のロックを取得できずに戻った分岐である。
+主hartはOP-TEEの `wait_secondary` で待機していた。
+この回ではLinuxのfTPM登録に到達していない。
+
+K3 Keystone移植の起動台帳は、ロックが使用中だと即時にエラーを返していた。
+PMPを検査済みの副hartが、その結果を台帳に記録する時点で別hartの更新と競合すると、
+OpenSBIはその副hartの起動を打ち切った。KSB-083で対処した共有HSM/PMPゲートの取得より
+前に通る処理である。詳細ログを有効にしてKSB-097のみ適用した版でも、ホストCPU 2個で
+10回すべてLinuxまで起動した。初回のhart 4が通った分岐の確定には至っていない。
+[起動台帳](../opensbi/include/sbi/k3_e2_hart_quarantine.h) ·
+[S-modeへ移る前のPMP読み戻しと記録](../opensbi/lib/sbi/sbi_init.c)
+
+#### 修正
+
+起動台帳にはOpenSBIのチケットロックを使い、取得順に台帳の読み書きを行う。
+ロックの範囲は台帳の短い更新と読み取りに限る。HSMの起動予約、ローカルPMPの読み戻し、
+起動完了の順序と検査を維持する。台帳への記録を拒否した場合は、hart番号とエラーをUARTへ出す。
+[起動台帳の実装](../opensbi/include/sbi/k3_e2_hart_quarantine.h)
+
+[QEMUの入力と停止時の記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+### KSB-097 OP-TEEの副hart起動要求が共有ゲートの競合で失敗する
+
+KSB-096だけを修正したOpenSBIで、5回は全16 CPUでLinuxが起動した。6回目は
+`Error starting secondary hart 2` を出力して停止した。QMPの採取ではhart 2はOpenSBIの
+HSM待機のままで、主hartはOP-TEEの `wait_secondary` に留まっていた。
+
+起動要求側の拒否経路に診断を加えたビルドでは、6回目に `start gate busy for hart 4` と
+`Error starting secondary hart 4` が出た。主hartが次の副hartを起動する間に、すでに
+起動を要求されたhartもHSM起動完了を処理する。発行側は共有HSM/PMPゲートを取得できないと
+`SBI_EINVALID_STATE` を返し、採用版OP-TEEは当該hartの起動を再試行せずに完了を待っていた。
+
+初回の180秒停止と同じ詳細ログ付きの旧バイナリを、ゲスト16 hartのままホストCPU 2個に
+割り当てて再試験した。3回目に `Error starting secondary hart 7` を出力し、
+180秒で試験を終了した。25・55・120・165秒の採取で、hart 7はOpenSBIのHSM起動待機、
+主hartはOP-TEEの `wait_secondary` に留まった。この回の停止点はKSB-097の診断と一致する。
+
+修正版では、対象hartの初回起動またはOP-TEEからLinuxへの初回引き渡しに限り、
+ゲートが空くまで既存の実時間ベースの待機処理で最大100 ms再試行する。待機は起動予約前に行う。
+取得後に異常状態、起動予約、PMPの保護状態を検査し、期限内に取得できない場合は
+起動要求にエラーを返す。この100 msはロックの取得期限であり、再現した回の保持時間は計測していない。
+[OpenSBIのHSM起動経路](../opensbi/lib/sbi/sbi_hsm.c) ·
+[Keystoneの共有ゲート](../keystone/sm/src/ipi.c)
+
+#### KSB-096・KSB-097の修正後のQEMU検査
+
+- 失敗を再現したときと同じCore、Linux、DTB、initramfsで40回起動し、全回でLinuxの
+  16 CPU起動を確認した。起動反復ではその時点でQEMUを終了した。
+- 初回の180秒タイムアウトと同じPMP詳細出力を有効にし、同じ入力でfTPM・IMA遅延登録を
+  最後まで実行した。Linuxの16 CPU、IMA測定、PCR 10が変化しないこと、正常電源断を確認した。
+  追加の反復でも通常のホストCPU割り当てで5回、ホストCPU 2個に限定して4回、全回合格した。
+- 通常の `scripts/tests/jupiter2-ftpm-ima-qemu.sh` は早期・遅延の両方で合格した。
+  早期登録ではPCR 10が独立計算したSHA-256値と一致した。遅延登録ではPCR 10が初期値を維持し、
+  両方で `/ima-probe` の測定行を確認した。
+- fTPMのNV試験は書き込み、別のQEMUプロセスでの復元、空のREE FSの対照試験すべてで合格した。
+- Keystone単独は `hello` と `hello-native`、OP-TEE単独は全16 CPUの並行TA呼び出しが
+  合格した。同居は各hart一律16枠・16/32枠混在ともEnclave 16回とTA 33回が合格した。
+  PMP CSRから読んだ最大使用数は16枠で、32枠側の枠16–31は無効だった。
+
+実機での確認は未実施。
+[QEMUの入力と停止時の記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)

@@ -130,8 +130,13 @@ static void k3_keystone_a1_post_pmp_before_smode(struct sbi_scratch *scratch,
 	/* E2: record local observation only. No STOPPED Hart is an ACK. */
 	{
 		extern int sbi_hsm_k3_e2_note_local_snapshot(unsigned int);
-		if (sbi_hsm_k3_e2_note_local_snapshot(
-				sbi_hartid_to_hartindex(hartid))) sbi_hart_hang();
+		rc = sbi_hsm_k3_e2_note_local_snapshot(
+		    sbi_hartid_to_hartindex(hartid));
+		if (rc) {
+		    sbi_printf("K3 E2: PMP snapshot record failed on Hart %u: %d\n",
+			       hartid, rc);
+		    sbi_hart_hang();
+		}
 	}
 
 	/* The common slot mask is now committed. This is not SM readiness:

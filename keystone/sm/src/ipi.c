@@ -211,28 +211,62 @@ void k3_keystone_hsm_stop_end(void)
   k3_hsm_gate_release(&k3_global_hsm_gate);
 }
 
+#define K3_HSM_GATE_TIMEOUT_MS 100
+
+static bool k3_hsm_try_gate(void *gate)
+{
+    return !k3_hsm_gate_acquire(gate);
+}
+
+static int k3_hsm_acquire_gate(bool retry)
+{
+    if (k3_hsm_try_gate(&k3_global_hsm_gate)) {
+	return 0;
+    }
+    if (!retry || !sbi_timer_get_device()) {
+	return SBI_EINVALID_STATE;
+    }
+    if (!sbi_timer_waitms_until(k3_hsm_try_gate, &k3_global_hsm_gate,
+			       K3_HSM_GATE_TIMEOUT_MS)) {
+	return SBI_ETIMEDOUT;
+    }
+    return 0;
+}
+
 /* Called by vendor HSM before STOPPED -> START_PENDING, under the same gate
  * as STOP and all PMP broadcast. Stage 178 denies a missed-generation start.
  * The next stage must implement replay before permitting admission. */
-int k3_keystone_hsm_start_begin(unsigned int hartindex)
+int k3_keystone_hsm_start_begin(unsigned int hartindex, bool boot_start)
 {
-  int allowed;
-  if (hartindex >= 16U) return SBI_EINVAL;
-  if (__atomic_load_n(&k3_sync_poisoned, __ATOMIC_ACQUIRE)) return SBI_EFAIL;
-  if (k3_hsm_gate_acquire(&k3_global_hsm_gate)) return SBI_EINVALID_STATE;
-  if (k3_policy_lock(&k3_start_policy)) {
+    int rc;
+
+    if (hartindex >= 16U) {
+	return SBI_EINVAL;
+    }
+    if (__atomic_load_n(&k3_sync_poisoned, __ATOMIC_ACQUIRE)) {
+	return SBI_EFAIL;
+    }
+    /* At boot, another hart may be completing its initial HSM Start. */
+    if (k3_hsm_acquire_gate(boot_start)) {
+	return SBI_EINVALID_STATE;
+    }
+    if (__atomic_load_n(&k3_sync_poisoned, __ATOMIC_ACQUIRE)) {
+	k3_hsm_gate_release(&k3_global_hsm_gate);
+	return SBI_EFAIL;
+    }
+    if (k3_policy_lock(&k3_start_policy)) {
+	k3_hsm_gate_release(&k3_global_hsm_gate);
+	return SBI_EINVALID_STATE;
+    }
+    rc = k3_policy_begin_hart_locked(&k3_start_policy, hartindex);
+    if (!rc && sbi_hsm_k3_e2_start_reserve(hartindex)) {
+	/* Both reservations are changed inside one global exclusion gate. */
+	(void)k3_policy_finish_hart_locked(&k3_start_policy, hartindex);
+	rc = SBI_EINVALID_STATE;
+    }
+    k3_policy_unlock(&k3_start_policy);
     k3_hsm_gate_release(&k3_global_hsm_gate);
-    return SBI_EINVALID_STATE;
-  }
-  allowed = k3_policy_begin_hart_locked(&k3_start_policy, hartindex);
-  if (!allowed && sbi_hsm_k3_e2_start_reserve(hartindex)) {
-    /* Both reservations are changed inside one global exclusion gate. */
-    (void)k3_policy_finish_hart_locked(&k3_start_policy,hartindex);
-    allowed=-1;
-  }
-  k3_policy_unlock(&k3_start_policy);
-  k3_hsm_gate_release(&k3_global_hsm_gate);
-  return allowed ? SBI_EINVALID_STATE : 0;
+    return rc ? SBI_EINVALID_STATE : 0;
 }
 /* Boot handoff can quarantine a hart only before dynamic PMP updates. */
 int k3_keystone_hsm_boot_stop_begin(void)
@@ -249,28 +283,16 @@ int k3_keystone_hsm_boot_stop_begin(void)
     return 0;
 }
 
-#define K3_HSM_FINISH_TIMEOUT_MS 100
-
-static bool k3_hsm_try_gate(void *gate)
-{
-    return !k3_hsm_gate_acquire(gate);
-}
-
 /* Hart-specific finish/cancel: only a matching outstanding reservation is released. */
 static int k3_keystone_hsm_release_reservation(unsigned int hartindex,
                                                int completed)
 {
   int rc;
   if (hartindex >= 16U) return SBI_EINVAL;
-  if (k3_hsm_gate_acquire(&k3_global_hsm_gate)) {
-    if (!completed || !sbi_timer_get_device()) {
-	return SBI_EINVALID_STATE;
-    }
-    /* Retry only before touching the ledger or publishing STARTED. */
-    if (!sbi_timer_waitms_until(k3_hsm_try_gate, &k3_global_hsm_gate,
-			       K3_HSM_FINISH_TIMEOUT_MS)) {
-	return SBI_ETIMEDOUT;
-    }
+  /* Retry only before touching the ledger or publishing STARTED. */
+  rc = k3_hsm_acquire_gate(completed);
+  if (rc) {
+    return rc;
   }
   if (k3_policy_lock(&k3_start_policy)) {
     __atomic_store_n(&k3_sync_poisoned, 1, __ATOMIC_RELEASE);

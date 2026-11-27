@@ -74,7 +74,7 @@ int sbi_hsm_k3_e2_start_cancel(unsigned int hartindex)
 })
 
 #ifdef CONFIG_K3_KEYSTONE_SM
-extern int k3_keystone_hsm_start_begin(unsigned int hartindex);
+extern int k3_keystone_hsm_start_begin(unsigned int hartindex, bool boot_start);
 extern int k3_keystone_hsm_start_cancel(unsigned int hartindex);
 #endif
 
@@ -398,9 +398,9 @@ int sbi_hsm_init(struct sbi_scratch *scratch, bool cold_boot)
 bool sbi_hsm_optee_restart(struct sbi_scratch *scratch)
 {
     struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch, hart_data_offset);
-    bool restart = hdata->optee_restart;
+    bool restart = __atomic_load_n(&hdata->optee_restart, __ATOMIC_RELAXED);
 
-    hdata->optee_restart = false;
+    __atomic_store_n(&hdata->optee_restart, false, __ATOMIC_RELAXED);
     return restart;
 }
 
@@ -412,13 +412,13 @@ void __noreturn sbi_hsm_optee_boot_stop(struct sbi_scratch *scratch)
     /* The shared fallback is already closed in the OP-TEE policy. A
      * separate SM OS entry, when present, must remain off at warm start.
      */
-    if (hdata->optee_restart ||
+    if (__atomic_load_n(&hdata->optee_restart, __ATOMIC_RELAXED) ||
 	(!sbi_hart_keystone_shared_fallback() && k3_keystone_set_os_pmp(false)) ||
 	!__sbi_hsm_hart_change_state(hdata, SBI_HSM_STATE_STARTED,
 				     SBI_HSM_STATE_STOP_PENDING)) {
 	sbi_hart_hang();
     }
-    hdata->optee_restart = true;
+    __atomic_store_n(&hdata->optee_restart, true, __ATOMIC_RELAXED);
     sbi_exit(scratch);
 }
 #endif
@@ -434,7 +434,7 @@ void __noreturn sbi_hsm_exit(struct sbi_scratch *scratch)
     extern void k3_keystone_hsm_stop_end(void);
     int rc;
 
-    if (!hdata->optee_restart) {
+    if (!__atomic_load_n(&hdata->optee_restart, __ATOMIC_RELAXED)) {
 	goto fail_exit;
     }
     do {
@@ -518,11 +518,14 @@ int sbi_hsm_hart_start(struct sbi_scratch *scratch,
 	 * before hdata->state is set to SBI_HSM_STATE_START_PENDING.
 	 */
 #ifdef CONFIG_K3_KEYSTONE_SM
-	/* Serialize admission against offline-target selection and generation
-	 * publication; refuse a hart that missed an enclave PMP update. */
-	rc = k3_keystone_hsm_start_begin(hartindex);
-	if (rc)
-		goto err;
+    /* Keep the bounded boot retry confined to the first start and the
+     * OP-TEE-to-Linux handoff. Admission still checks the PMP generation.
+     */
+    rc = k3_keystone_hsm_start_begin(hartindex, !init_count ||
+	__atomic_load_n(&hdata->optee_restart, __ATOMIC_RELAXED));
+    if (rc) {
+	goto err;
+    }
 #endif
 	hstate = atomic_cmpxchg(&hdata->state, SBI_HSM_STATE_STOPPED,
 				SBI_HSM_STATE_START_PENDING);
@@ -577,8 +580,6 @@ err:
 #ifdef CONFIG_K3_KEYSTONE_SM
 extern int k3_keystone_hsm_stop_begin(void);
 extern void k3_keystone_hsm_stop_end(void);
-extern int k3_keystone_hsm_start_begin(unsigned int hartindex);
-extern int k3_keystone_hsm_start_cancel(unsigned int hartindex);
 #endif
 
 int sbi_hsm_hart_stop(struct sbi_scratch *scratch, bool exitnow)

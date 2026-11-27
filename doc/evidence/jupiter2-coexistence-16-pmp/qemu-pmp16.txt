@@ -142,3 +142,127 @@ An unsupported 32 KiB GEU guard and an overlapping host rule each produced
 "K3 OP-TEE PMP: fixed slot plan rejected (-4)" before Linux boot.
 The existing over-capacity DTB still produced the 17-entry rejection (-2).
 The physical-board layout, board HUK, DCIU/UTM reuse and DMA remain to be tested.
+
+OP-TEE primary-to-secondary boot regression, 2026-11-27 JST
+
+QEMU 11.1.3, -accel tcg,thread=multi -M jupiter2,wtm-rng=on -smp 16 -m 2G.
+CPU rva23s64,k3-pmacfg=true,pmp=true,num-pmp-regions=16,pmp-granularity=16,sstc=on.
+Boot arguments matched scripts/tests/jupiter2-ftpm-ima-qemu.sh late mode.
+The host had 3 logical CPUs and a 2 CPU cgroup quota. UART went to a file.
+
+e1ff44032245e8bfc4c1de52741e833864f13e1aab343b6a2960b3a7ae1ed853  QEMU
+4c0429772cd8b50c664034cc319ed25f9dd6fd387e34c330ea791de053c4cb0f  OP-TEE Core ELF
+01daf512f34df90f08f0cdbfb558e72eb9f629280cad002f1d6f7a5cfd72460d  Linux IMA Image
+797c3a73fca3930a5eda82dcef13b2528e76476a1c2e23b840704ee8c2c7c2f3  late DTB
+4b49b63e689fc99df83a63b0ca21fbb2cefffc0350a020ece1435de043733968  IMA initramfs
+dd54eee2f21474bd5ffd712d4decf804ed3a5ac3a1a3f6caac4ec562a1d22ff3  original OpenSBI BIN, PMP trace on
+365e9520a40bc6b80cc3547ab930fd2736940b51358351964ffbd165c3cb2e71  baseline OpenSBI BIN, PMP trace off
+cee0c4f90fed696788f32c3dc0a176ac5ac7ec2d3970bc8f3b629c5ffd90e44c  ledger-only fix BIN, PMP trace off
+b3de1bc132ad0b70997c4b36cea07534fcf952c6fd7248afc54b0b00e04bc79a  HSM diagnostic BIN
+7bf2e34fedecaf898414cd39c164b36aca842aaf8cfa9e1e6268e31341045208  both fixes BIN, PMP trace off
+
+Original IMA run with PMP trace on
+  Early completed the IMA assertion and powered down.
+  Late timed out at 180s. UART contains root-config PASS and configure-return
+  rc=0 on hart 4, then initialization of the other 14 secondary harts.
+  Counting from "Primary CPU initialized", all 15 secondary harts logged
+  configure-return rc=0. Both the opening and closing text of the SM
+  initialization message occurred 14 times. The OP-TEE initialization
+  completion list contained harts 1, 2, 3 and 5–15.
+  Hart 4 was past HSM request delivery and PMP configuration. The missing
+  SM completion precedes initial HSM finish and the entry to OP-TEE.
+  Five exact-input late reruns passed the full IMA assertion.
+  Boot-only checks reached 16 CPUs in 24/24 runs, and in 10/10 additional
+  runs bound to one host CPU. No QMP snapshot was taken during the first
+  failing run.
+
+Follow-up using the original trace-enabled firmware
+  The original QEMU, firmware, Core, late DTB, Linux and initramfs
+  matched the SHA-256 values listed above. The argument order and UART
+  progress reader matched scripts/tests/jupiter2-ftpm-ima-qemu.sh.
+  QMP was connected for register capture if a boot remained pending.
+  All 48 normal-affinity attempts reached the Linux 16-CPU marker.
+  The timing stayed below the first scheduled register capture.
+  Each boot logged configure-return rc=0 and the complete SM marker
+  for all 15 secondary harts. OP-TEE's UART occasionally interleaved
+  messages, so its completion line count alone can undercount.
+  The original failure had all 15 configure-return markers and 14 SM
+  markers. This places it in the interval matched by KSB-096.
+  With affinity restricted to two host CPUs, two boots reached Linux
+  and the third timed out at 180s. UART reported "Error starting secondary
+  hart 7". At 25, 55, 120 and 165 seconds, hart 7 was in
+  sbi_hsm_hart_wait (PC 0x10201759c) and hart 0 in wait_secondary
+  (PC 0x1710001f8). The UART byte count stayed at 63197.
+  The affected hart had no PMP configure-return marker in that run.
+  This matches the failed-start stage observed for KSB-097.
+
+KSB-096 with PMP trace off
+  Attempts 01–09 reached 16 CPUs. Attempt 10 stopped before Linux startup.
+  QMP sampled the same positions at 25s and 50s. QEMU was stopped by the
+  boot harness at 55s.
+
+  hart  function             PC            RA            a0  a1  a4  a5
+     0  wait_secondary       0x1710001f8   0x1710001ba     1   0   0   0
+     3  sbi_hart_hang         0x102014742   0x10200e7b4    -4   3   1   1
+     8  sbi_hart_hang         0x102014742   0x10200e7b4    -4   8   1   1
+     9  sbi_hart_hang         0x102014742   0x10200e7b4    -4   9   1   1
+
+  The secondary return address follows the call to sbi_hart_hang. The
+  call is reached from the failure of sbi_hsm_k3_e2_note_local_snapshot.
+  In the matching ELF, a4=1 and a1 still equal to the hart index match the
+  branch that read the held lock. The store-conditional status in a5 was
+  still 1. The ledger validation branches after lock acquisition require
+  a successful store-conditional (a5=0).
+
+KSB-097 after fixing the ledger lock
+  Attempts 01–05 reached 16 CPUs. Attempt 06 timed out at 55s with
+  "Error starting secondary hart 2". On QMP hart 2 was in the HSM wait
+  loop and hart 0 was in wait_secondary at both 25s and 50s.
+  Firmware with a diagnostic added only to rejection paths reproduced
+  the condition on attempt 06. UART recorded
+    K3 HSM diagnostic: start gate busy for hart 4
+    Error starting secondary hart 4
+
+Trace-enabled comparison with the KSB-097 fix alone
+  Both the original ledger code and the detailed PMP trace were
+  retained. All 10 boots under the same two-CPU affinity reached
+  Linux with 16 CPUs. The initial hart 4 stop has no register capture.
+  6c47b76011e427e73406cdeae2594b62dcdaf86bca7ec59ad6b7f4ea62157ef1  KSB-097 only BIN, trace on
+
+Combined fix
+  40/40 boots reached "smp: Brought up 1 node, 16 CPUs" in 1.1–2.1s.
+  The boot-only harness ended the QEMU process after the marker.
+  The original late inputs with PMP trace on passed the full IMA check
+  in 26.2s. UART showed 16 CPUs, IMA_GUEST_RESULT=0 and Power down.
+  e350c17eb15c778824904ba063d03356b326d9b70166e2cc0103f420bdd89052  both fixes BIN, PMP trace on
+  The trace-enabled firmware then passed 5/5 complete IMA late tests
+  at normal host affinity and 4/4 restricted to two host CPUs.
+  All nine boots used the original guest inputs. The verifier confirmed
+  /ima-probe in the measurement list and unchanged PCR 10 after late
+  registration. Every run ended with 16 CPUs, IMA_GUEST_RESULT=0
+  and Power down and QEMU exit 0.
+
+scripts/tests/jupiter2-ftpm-ima-qemu.sh with both fixes, PMP trace off
+  Early PASS in 16s and late PASS in 18s. Both QEMU processes exited 0.
+  Early PCR 10, SHA-256
+    before bf0d858e3904704b36740bc2ddcf4820b93a9323c1098338b7c38e338735257b
+    after  a70fe73f317011f0b14b721677660d0b85e5b71ce3a841a464aabfcf85c16753
+  Late PCR 10 remained all zero before and after /ima-probe was measured.
+  Early and late logs contained IMA_GUEST_RESULT=0 and Power down.
+
+scripts/tests/jupiter2-ftpm-nv-qemu.sh with both fixes, PMP trace off
+  NV_RESULT seed PASS
+  NV_RESULT read PASS
+  NV_RESULT empty PASS
+  Each boot reported 16 CPUs and Power down. The runner exited 0.
+
+Standalone and coexistence regressions
+  Keystone only: hello and hello-native PASS, power down, QEMU exit 0.
+  OP-TEE only: simultaneous TA calls on all 16 CPUs PASS, power down, exit 0.
+  Uniform 16 and mixed 16/32 with GEU and UTM transitions: each passed
+  16 enclave runs and 33 TA calls including OCALL, followed by power down.
+  QEMU exited 0 in both. PMP peak usage for both was boot-host 15,
+  OP-TEE 15, host 16 and enclave 16. The extra 16 slots on the mixed
+  profile were disabled.
+  These guests used the QEMU DTB. Pico-ITX MMIO mediation requires
+  validation with the board firmware and peripherals.
