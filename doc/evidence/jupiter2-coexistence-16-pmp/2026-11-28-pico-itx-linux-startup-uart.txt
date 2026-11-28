@@ -1,0 +1,65 @@
+Pico-ITX実機の同梱FITによるLinux起動試験（2026-11-28、日本時間）
+元UARTのSHA-256 d1c5c2367dfe7169bf86ef0e51a75bb6f89aca553ae36a6b5208696230a949de
+元UARTのサイズ 483502 バイト、7337 行
+
+対象は4565行からの192 KiB構成のUSB RAM起動と、6674行のbooti以降。
+229、383行は比較用の先行した通常起動。通常起動と同梱FITでLinux 6.18.3 #4の
+ビルド表示が一致する。利用者からImage・モジュールは11月27日のものを継続使用したと報告があった。
+実機で使ったImage・initrd・モジュール・DTB・FIT自体のハッシュは未収集。
+
+hart 1〜15のすべてでOpenSBIのPMP読み戻しに失敗した。CPU 0では組み込みwatchdog
+ドライバのプローブ中に読み出し例外とpanicが発生した。以下は元UARTからの抜粋。
+ 229 [    0.117965] smp: Brought up 1 node, 16 CPUs
+ 383 [    1.738956] System boots up not because of SoC watchdog reset.
+4565 sys: 0x10001200
+4785 Firmware Heap Size          : 192 KB (total), 12 KB (reserved), 28 KB (used), 151 KB (free)
+6520 K3 OP-TEE handoff: PMP rc=0
+6523 K3 OP-TEE handoff: mret hart=0 next=0x102000000 arg1=0x102153cf0
+6557 => scsi scan
+6641 44638208 bytes read in 56 ms (760.2 MiB/s)
+6644 41886779 bytes read in 50 ms (798.9 MiB/s)
+6648 149843 bytes read in 2 ms (71.5 MiB/s)
+6668 => fdt print /firmware/optee
+6671         method = "smc";
+6672         compatible = "linaro,optee-tz";
+6675 Moving Image from 0x140000000 to 0x102200000, end=104d64000
+6678    Loading Ramdisk to 3f957b000, end 3fbd6d43b ... OK
+6679 ERROR: reserving fdt memory region failed (addr=3f9760000 size=261b9c9 flags=0)
+6680 ERROR: reserving fdt memory region failed (addr=3fe000000 size=2000000 flags=0)
+6681 ERROR: reserving fdt memory region failed (addr=100800000 size=200000 flags=4)
+6682 ERROR: reserving fdt memory region failed (addr=100a00000 size=200000 flags=4)
+6686 Starting kernel ...
+6688 [    0.000000] Booting Linux on hartid 0
+6812 [    0.101751] smp: Bringing up secondary CPUs ...
+6833 [K3-PMP] FAIL root readback slot=0 prot=0x0 expected=0x0 addr=0x0 len=2
+6834 K3 A1-E: root PMP readback failed on Hart 1: -1
+6835 [    1.134202] CPU1: failed to come online
+6857 K3 A1-E: root PMP readback failed on Hart 2: -1
+6880 K3 A1-E: root PMP readback failed on Hart 3: -1
+6903 K3 A1-E: root PMP readback failed on Hart 4: -1
+6926 K3 A1-E: root PMP readback failed on Hart 5: -1
+6949 K3 A1-E: root PMP readback failed on Hart 6: -1
+6972 K3 A1-E: root PMP readback failed on Hart 7: -1
+6994 [K3-PMP] FAIL root readback slot=0 prot=0x0 expected=0x0 addr=0x0 len=2
+6995 K3 A1-E: root PMP readback failed on Hart 8: -1
+6996 [    8.304251] CPU8: failed to come online
+7018 K3 A1-E: root PMP readback failed on Hart 9: -1
+7041 K3 A1-E: root PMP readback failed on Hart 10: -1
+7064 K3 A1-E: root PMP readback failed on Hart 11: -1
+7087 K3 A1-E: root PMP readback failed on Hart 12: -1
+7110 K3 A1-E: root PMP readback failed on Hart 13: -1
+7133 K3 A1-E: root PMP readback failed on Hart 14: -1
+7155 [K3-PMP] FAIL root readback slot=0 prot=0x0 expected=0x0 addr=0x0 len=2
+7156 K3 A1-E: root PMP readback failed on Hart 15: -1
+7157 [   15.474305] CPU15: failed to come online
+7158 [   15.475299] smp: Brought up 1 node, 1 CPU
+7298 [   17.381483] Oops - load access fault [#1]
+7299 [   17.381487] Modules linked in:
+7302 [   17.381500] epc : spa_wdt_probe+0xe4/0x47a
+7307 [   17.381520]  s1 : ffffffd605711040 a0 : ffffffc6014da000 a1 : 0000000000000000
+7308 [   17.381523]  a2 : ffffffc6014db028 a3 : 0000000000000000 a4 : 0000000000000000
+7309 [   17.381525]  a5 : 0000000000001028 a6 : 0000000000000000 a7 : 0000000000000000
+7315 [   17.381539] status: 0000000200000120 badaddr: ffffffc6014db028 cause: 0000000000000005
+7327 [   17.381590] [<ffffffff8123ff30>] spa_wdt_driver_init+0x1a/0x24
+7333 [   17.381619] Code: 1b40 e488 e163 28aa 6785 8793 0287 e15a 0633 00f5 (4218) 000f
+7335 [   17.381626] Kernel panic - not syncing: Fatal exception in interrupt

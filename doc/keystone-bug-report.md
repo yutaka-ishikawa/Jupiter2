@@ -122,6 +122,8 @@
 | KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
 | KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
 | KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Bootへ進まない | OpenSBIのドメインコンテキスト確保が `SBI_ENOMEM (-1004)`。QEMUの106 KiB構成で割り当て管理枠の枯渇を確認 | 同梱FITを192 KiBに修正。QEMU同居に合格し、実機USB RAM起動でU-Boot本体のプロンプトまで確認 |
+| KSB-099 | Pico-ITX同梱FITでLinuxの副hart 1〜15が起動しない | OP-TEE終了後にハードウェアHSMで再開。OpenSBIがPMP設定を省略し、枠0の読み戻しに失敗 | 実機UARTと再開処理を照合。PMP再設定の修正待ち |
+| KSB-100 | Pico-ITX同梱FITで組み込みwatchdog初期化がpanic | `spa_wdt_probe()` が保護中のMPMU ARSRを読み出す。現行のMMIO仲介に該当レジスタがない | ソースと実機UARTでアクセスを照合。必要なレジスタの仲介を追加予定 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -2139,8 +2141,8 @@ hart 0が `untrusted-domain` へ復帰した。`PMP rc=0` と `mret` の出力�
 U-Boot本体のバナーと `=>` を確認した。KSB-098の停止点はこの実機試行で通過した。
 [192 KiBの実機UART](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-192k-uart.txt)
 
-今回のログはU-Bootで終了している。次はUFSから同梱用のLinux Image・initrd・DTBを読み込み、
-同じRAM起動中に16 CPU、Keystoneのサンプル、OP-TEEのLinuxドライバとTA呼び出しを確認する。
+この試行に続いて、UFSから同梱用のLinux Image・initrd・DTBを読み込み、Linuxの初期化を確認した。
+副hartの起動失敗とwatchdog初期化のpanicは[KSB-099](#ksb-099)と[KSB-100](#ksb-100)で追跡する。
 HUK導出エラーはこの試行でも出ている。セキュアストレージとfTPMはLinux起動後の試験で確認する。
 [U-BootからLinuxを起動する手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot) ·
 [Linux上のKeystoneとOP-TEEの試験](milkv-jupiter2-stack-install.md#実機linux上でkeystoneとop-teeをテストする)
@@ -2206,3 +2208,46 @@ sha256sum "$SBI.bin" "$SBI.elf" "$TEE_BIN" "$TEE_ELF" \
 | `switch mode next=...` | `sbi_hart_switch_mode()` のレジスタ設定から `mret` 直前まで |
 | `mret hart=...` | `mret` 直前まで到達。次は `mret` の実行とU-Boot入口から最初のUART出力までを調べる |
 | U-Boot本体のバナーまたは `=>` | U-Bootへの引き渡しを確認。対応するDTBを使ったLinux起動へ進む |
+
+
+<a id="ksb-099"></a>
+### KSB-099 Pico-ITX同梱FITでLinuxの副hartがPMP検査に失敗する
+
+192 KiB構成のUSB RAM起動でU-BootからLinux 6.18.3 #4を起動した。利用者は11月27日に使った
+カーネルとモジュールを継続使用。ログ前半の通常起動では同じビルド表示のLinuxで16 CPUが起動した。
+同梱構成ではLinuxのHSM起動要求に続き、hart 1〜15の全てでOpenSBIのPMP枠0が未設定
+（`prot=0x0 addr=0x0 len=2`）と読めた。`K3 A1-E: root PMP readback failed` の後、
+Linuxは副CPUごとに起動失敗を報告し、オンにできたCPUは0のみだった。
+[実機UARTの抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-startup-uart.txt)
+
+OpenSBIの`init_warm_startup()`は、OP-TEEの起動を終えて再開するhartで
+`sbi_hart_pmp_configure()`を省略し、直後にLinux側のPMP配置を検査する。
+実機のK3ではRPMI HSMの停止処理がコアまたはクラスタの電源断を要求する。
+観測した未設定のPMPは、この経路で設定の保持を前提にした処理と一致する。
+OP-TEE起動時に読み戻したPMP構成はKSB-098の記録にある。
+[OpenSBIの再開処理](../opensbi/lib/sbi/sbi_init.c) ·
+[K3の停止処理](../opensbi/platform/generic/spacemit/k3_corepm.c)
+
+副hartを再開するときにLinux側のPMP配置を再設定し、従来の読み戻しで検査してからS-modeに
+渡す。次の実機試験では同じImage・initrd・モジュールを使い、副hart 1〜15のPMP検査通過と
+Linuxの`16 CPUs`を確認する。本件の修正と再試験は未実施。
+
+<a id="ksb-100"></a>
+### KSB-100 Pico-ITX同梱FITでwatchdog初期化が読み出し例外を起こす
+
+同じ実機起動で、CPU 0がLinuxの初期化を続けた後、組み込みドライバの
+`spa_wdt_probe+0xe4/0x47a`で`Oops - load access fault`が出てpanicした。
+`Modules linked in:`は空で、呼び出し元は`spa_wdt_driver_init`だった。
+[実機UARTの抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-startup-uart.txt)
+
+レジスタの差分とドライバのソースから、読み出しは`mpmu_base + 0x1028`の`MPMU_ARSR`に
+一致する。Pico-ITXのwatchdogノードが指定するMPMUの物理ベースは`0xd4050000`。
+`0xd4051028`はPMPで保護されたMPMU内にあり、OpenSBIのPico-ITX用MMIO仲介許可表にない。
+ドライバはリブート理由の初期化・設定でARSR、watchdogリセット制御でAPRRを使用する。
+[watchdogドライバ](../linux-k3/drivers/watchdog/spacemit-k1-wdt.c) ·
+[実機のPMP配置](../opensbi/lib/sbi/k3_pico_itx_pmp.h) ·
+[現行のMMIO許可表](../opensbi/platform/generic/spacemit/k3_pico_itx_mmio.c)
+
+OpenSBIの既存のMMIO仲介で、Linuxのwatchdogに必要なレジスタと書き込みフィールドを扱う。
+次の実機試験で`spa_wdt_probe`を通過してLinuxがログインまで進むことを確認する。
+組み込みドライバを含む既存のImageを引き続き使う。本件の修正と再試験は未実施。

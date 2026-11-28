@@ -367,8 +367,14 @@ OpenSBIのヒープ192 KiBと実行時752 KiBをUARTで確認した。全16 hart
 U-Boot本体の `=>` に到達した。
 [修正版の実機UARTとPMPの集計](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-192k-uart.txt)
 
-次は、この同梱FITでUFS上のLinuxを一時起動する。Linuxの16 CPUとTEEデバイスを確認してから、
-同じ起動中にKeystone EnclaveとOP-TEE TAを確認する。Linux起動後のPMPや実機の周辺機器・DMA保護は
+U-Bootから同梱用DTBでUFS上のLinux 6.18.3 #4を一時起動した。副hart 1〜15のPMP検査に失敗し、
+CPU 0だけで初期化が続いた後、組み込みwatchdogのレジスタ読み出しでpanicした。
+[Linux起動の実機UART](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-startup-uart.txt) ·
+[副hart再開 KSB-099](keystone-bug-report.md#ksb-099) ·
+[watchdog KSB-100](keystone-bug-report.md#ksb-100)
+
+OpenSBIを修正した後に、同じImage・initrd・モジュールでLinuxの16 CPUとTEEデバイスを確認する。
+同じ起動中にKeystone EnclaveとOP-TEE TAを試験する。Linux起動後のPMPと実機の周辺機器・DMA保護は
 第2節に従って採取する。
 [UFSとLinuxの起動手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
 
