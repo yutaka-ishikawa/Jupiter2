@@ -27,8 +27,8 @@ struct k3_clock_rule {
 #define DMA_CONTROL(offset) \
     SHARED_CLOCK(K3_DCIU + (offset), 0, BIT(0), BIT(0))
 
-/* Linux and U-Boot CCU fields. OP-TEE supplies the shared clock settings
- * during initialization. Host writes merge only the host-owned fields.
+/* Linux and U-Boot clock and reset fields. OP-TEE sets shared clocks on
+ * initialization. Host writes merge only the host-owned fields.
  */
 #define MPMU_HOST_GATES \
     (BIT(0) | BIT(1) | BIT(2) | BIT(3) | BIT(4) | BIT(6) | BIT(7) | \
@@ -47,7 +47,9 @@ static const struct k3_clock_rule clock_rules[] = {
     HOST_CLOCK(K3_MPMU + 0x044, ~0U),		/* I2S clock fields */
     HOST_CLOCK(K3_MPMU + 0x200, GENMASK(2, 0)),	/* Watchdog clock/reset */
     HOST_CLOCK(K3_MPMU + 0x210, BIT(0) | BIT(2)),	/* RCPU IPC clock/reset */
+    HOST_CLOCK(K3_MPMU + 0x1020, BIT(4)),	/* APRR watchdog reset */
     SHARED_CLOCK(K3_MPMU + 0x1024, MPMU_HOST_GATES, BIT(5), BIT(5)),
+    HOST_CLOCK(K3_MPMU + 0x1028, GENMASK(17, 14)),	/* ARSR reboot reason */
     HOST_CLOCK(K3_MPMU + 0x1050, GENMASK(1, 0)),	/* APB mux */
     HOST_CLOCK(K3_MPMU + 0x10b0, MPMU_UART_DIV),
     HOST_CLOCK(K3_MPMU + 0x1100, ~0U),		/* I2S dividers */

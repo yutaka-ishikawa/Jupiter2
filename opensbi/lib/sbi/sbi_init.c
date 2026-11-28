@@ -658,14 +658,15 @@ static void __noreturn init_warm_startup(struct sbi_scratch *scratch,
 	 */
 #ifdef CONFIG_K3_KEYSTONE_SM
     if (sbi_hsm_optee_restart(scratch)) {
-	rc = 0;
+	rc = sbi_hart_keystone_optee_restart_pmp(scratch);
     } else
 #endif
     {
 	rc = sbi_hart_pmp_configure(scratch);
     }
-	if (rc)
-		sbi_hart_hang();
+    if (rc) {
+	sbi_hart_hang();
+    }
 
 #if defined(K3_PMP_DIAG_READONLY) && defined(CONFIG_PLATFORM_SPACEMIT_K3) && !defined(CONFIG_K3_KEYSTONE_SM)
 	k3_pmp_diag_readonly(scratch, hartid);

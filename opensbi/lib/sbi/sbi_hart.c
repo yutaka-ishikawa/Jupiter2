@@ -1838,6 +1838,34 @@ int sbi_hart_unmap_saddr(void)
 #endif
 }
 
+#ifdef CONFIG_K3_KEYSTONE_SM
+/* The hardware HSM can power down the hart at the end of OP-TEE boot.
+ * Configure empty PMP hardware. Any retained entries must pass the caller's
+ * existing full layout readback before the hart can enter S-mode.
+ */
+int sbi_hart_keystone_optee_restart_pmp(struct sbi_scratch *scratch)
+{
+    unsigned int count = sbi_hart_pmp_count(scratch);
+    unsigned long prot, addr, len;
+    unsigned int i;
+    int rc;
+
+    for (i = 0; i < count; i++) {
+	rc = pmp_get(i, &prot, &addr, &len);
+	if (rc) {
+	    return rc;
+	}
+	if (prot & (PMP_A | PMP_L)) {
+	    K3_PMP_TRACE("PMP retained on restarted hart=%u\n", current_hartid());
+	    return SBI_OK;
+	}
+    }
+
+    K3_PMP_TRACE("restore PMP on restarted hart=%u\n", current_hartid());
+    return sbi_hart_pmp_configure(scratch);
+}
+#endif
+
 int sbi_hart_pmp_configure(struct sbi_scratch *scratch)
 {
 #ifdef CONFIG_K3_KEYSTONE_SM

@@ -189,6 +189,7 @@ const struct sbi_domain *sbi_hart_keystone_optee_host(void);
 const struct sbi_domain *sbi_hart_keystone_optee_domain(void);
 bool sbi_hart_keystone_pico_itx(void);
 int sbi_hart_keystone_optee_boot_policy(struct sbi_scratch *scratch);
+int sbi_hart_keystone_optee_restart_pmp(struct sbi_scratch *scratch);
 int sbi_hart_keystone_switch_optee_pmp(const struct sbi_domain *target);
 void sbi_hart_keystone_pmp_block_opensbi(void);
 bool sbi_hart_keystone_pmp_opensbi_blocked(void);
