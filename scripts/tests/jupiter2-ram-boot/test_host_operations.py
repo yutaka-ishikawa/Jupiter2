@@ -16,6 +16,7 @@ import unittest
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parents[1]
 SCRIPT = SCRIPTS / 'run-jupiter2-ram-boot.py'
+BUNDLER = SCRIPTS / 'package-jupiter2-ram-boot.py'
 
 
 def load(name, path):
@@ -118,6 +119,48 @@ class HostOperationTests(unittest.TestCase):
                               '--fastboot', '/not-installed-fastboot',
                               script=self.release / 'tools/ram-boot.py')
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_ram_boot_bundle_is_relocatable(self):
+        dtb = 'k3-pico-itx-keystone-optee.dtb'
+        shutil.copyfile(self.base / 'board.dtb', self.release / 'images' / dtb)
+        self.assertFalse((self.release / 'tools').exists())
+        output = self.base / 'ram-boot-bundle'
+        args = ('--release', self.release, '--output', output)
+        result = self.run_cli(*args, script=BUNDLER)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        archive = output / 'ram-boot-bundle.tar.gz'
+        subprocess.run(['sha256sum', '-c', archive.name + '.sha256'],
+                       cwd=output, check=True, capture_output=True)
+        extracted = self.base / 'unpacked'
+        extracted.mkdir()
+        subprocess.run(['tar', '-xzf', archive, '-C', extracted], check=True, capture_output=True)
+        release = extracted / 'release'
+        subprocess.run(['sha256sum', '-c', 'records/FSBL.bin.sha256',
+                        'records/ram-boot-vendor.itb.sha256', 'records/host-tools.sha256',
+                        f'records/{dtb}.sha256'],
+                       cwd=release, check=True, capture_output=True)
+
+        for phase in ('fsbl', 'fit'):
+            result = self.run_cli('--phase', phase, '--serial', 'TEST-SERIAL',
+                                  '--fastboot', '/not-installed-fastboot', '--dry-run',
+                                  script=release / 'tools/ram-boot.py')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('stage', result.stdout)
+
+        result = self.run_cli(*args, script=BUNDLER)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('output already exists', result.stderr)
+        subprocess.run(['sha256sum', '-c', archive.name + '.sha256'],
+                       cwd=output, check=True, capture_output=True)
+
+    def test_corrupted_fit_cannot_be_bundled(self):
+        (self.release / 'images/ram-boot-vendor.itb').write_bytes(b'corrupted')
+        output = self.base / 'ram-boot-bundle'
+        result = self.run_cli('--release', self.release, '--output', output, script=BUNDLER)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('checksum mismatch', result.stderr)
+        self.assertFalse(output.exists())
 
 
 if __name__ == '__main__':

@@ -58,4 +58,4 @@ Linuxのrootfsは通常のrwで起動し、OSによるストレージ書込み�
 Keystone SM/Enclaveの検証は別段階。失敗時は全UARTログとlogs/を保存し、
 電源断後FDLを押さず通常起動へ戻る。永続領域を変更していた場合の復旧とは区別する。
 
-詳しい手順: https://github.com/yutaka-ishikawa/public/blob/main/doc/jupiter2-ram-boot-guide.md
+[USB RAM起動の詳しい手順](https://github.com/yutaka-ishikawa/Jupiter2/blob/main/doc/jupiter2-ram-boot-guide.md)

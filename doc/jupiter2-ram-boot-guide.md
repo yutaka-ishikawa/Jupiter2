@@ -19,6 +19,11 @@ REL="$OUT/release"
 FIT=ram-boot-keystone.itb
 ```
 
+USB RAM起動用bundleを受け取った場合は、SHA-256を照合して展開し、
+`REL` に展開先の `release/` の絶対パスを指定します。
+`FIT` はその `images/` に入っている統合FITの名前です。
+[USB RAM起動用bundleの展開手順](jupiter2-build-install-test.md#ram-boot-bundle)
+
 PC操作用の端末とUART端末を分けます。生成した `boot-linux.cmd` はUARTのU-Bootに入力します。
 ファームウェアをRAMに読み込み、Linuxのkernel・initrd・DTBはUFSから読みます。
 この手順では `fastboot flash`、`fastboot erase`、`saveenv` を使いません。
@@ -150,12 +155,6 @@ PCでコマンド生成スクリプトを実行する必要はない。
 ここではSM向けに準備・別名配置したk3-pico-itx-keystone.dtbを使用する。
 準備方法は[Keystoneアプリ試験手順の第2〜3節](jupiter2-keystone-app-test.md#2-別名の試験用linux-dtbを作る開発pc)を参照する。
 この修正DTBで販売元OpenSBIのLinux起動を確認し、SM版でも同じDTBを使用する。
-
-KeystoneとOP-TEEを同梱したFITでは、同じFITビルドから生成した `k3-pico-itx-keystone-optee.dtb` をUFSに配置する。
-下の手動例では `fdtfile` をそのファイル名に変更し、DTBのload後に `fdt addr ${fdt_addr_r}` と
-`fdt print /firmware/optee` を実行してノードを確認する。コマンド生成例を使う場合は `--dtb` に
-同梱用DTBのパスを指定する。
-[同梱用Linux DTBの生成](jupiter2-build-install-test.md#ram-boot-images)
 
 bootfsはscsi 0:2、rootfsのPARTUUIDは73708e51-d3a9-4b6f-ab55-894cd1d8b4a0。
 他の実機ではpart listとファイル一覧から得た値へ変更する。

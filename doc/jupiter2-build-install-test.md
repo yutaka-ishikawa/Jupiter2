@@ -44,7 +44,7 @@ python3 -c 'from elftools.elf.elffile import ELFFile'
 ```
 
 K3用クロスツールチェーンをPATHに置き、接頭辞は導入したものに合わせます。
-NOR用の包装スクリプトにはPython 3.11以上が必要です。
+NOR用・USB RAM起動用の包装スクリプトにはPython 3.11以上が必要です。
 採取した実機情報と `hardware/jupiter2/` の記録を照合します。
 [実機入力の管理](../hardware/jupiter2/README.md)
 
@@ -314,6 +314,63 @@ OP-TEE入り構成は1.5節のDTBの条件を満たしたイメージを使い�
 
 [Keystoneアプリの実機試験](jupiter2-keystone-app-test.md) · [OP-TEEの検査項目](jupiter2-optee-ftpm-porting-plan.md)
 
+<a id="ram-boot-bundle"></a>
+### 1.7 BootROMからRAM上で起動するFSBLと統合FITをbundleにする
+
+第1章で作成した参照ビルダーの `$OUT/release` を使います。
+Keystoneのみ、OP-TEEのみ、同梱構成のどれでも、同じビルドの
+`FSBL.bin` と統合FITを対で包装します。既存のreleaseからも作成できます。
+開発PCのリポジトリルートで、ビルド時に設定した `OUT` を引き継いで実行します。
+
+```bash
+BUNDLE_OUT="$OUT/ram-boot-bundle"
+python3 scripts/package-jupiter2-ram-boot.py \
+  --release "$OUT/release" --output "$BUNDLE_OUT" &&
+  (cd "$BUNDLE_OUT" && sha256sum -c ram-boot-bundle.tar.gz.sha256)
+```
+
+`--output` には新しいディレクトリを指定します。スクリプトは
+releaseのマニフェストからFITを選び、FSBLとFITのSHA-256を確認します。
+アーカイブと同じ内容の `release/` も出力します。
+
+```text
+$BUNDLE_OUT/
+├── ram-boot-bundle.tar.gz
+├── ram-boot-bundle.tar.gz.sha256
+└── release/
+    ├── images/
+    │   ├── FSBL.bin
+    │   └── ram-boot-keystone.itb または ram-boot-vendor.itb
+    ├── README-RAM-BOOT.md
+    ├── records/
+    └── tools/ram-boot.py
+```
+
+第1.5節で生成した `images/k3-pico-itx-keystone-optee.dtb` が入力releaseに
+ある場合は、そのDTBとSHA-256も同梱します。BootROMへの転送には
+`FSBL.bin` を、SPLへの転送には統合FITを使います。Linux用DTBはUFSの
+bootfsへ配置し、Linux起動時に指定します。
+
+別の開発PCからUSB転送する場合は、`ram-boot-bundle.tar.gz` と
+`ram-boot-bundle.tar.gz.sha256` を空のディレクトリにコピーします。
+そのディレクトリで、照合・展開・転送前の確認を行います。
+
+```bash
+(
+    set -eu
+    sha256sum -c ram-boot-bundle.tar.gz.sha256
+    test ! -e release && test ! -L release || exit 1
+    tar -xzf ram-boot-bundle.tar.gz
+    cd release
+    sha256sum -c records/host-tools.sha256
+    python3 tools/ram-boot.py --phase fsbl --dry-run
+)
+```
+
+実機への転送は、展開した `release/` の `README-RAM-BOOT.md` に従います。
+生成直後の `$BUNDLE_OUT/release` も同じ手順で使えます。
+[USB RAM起動ガイド](jupiter2-ram-boot-guide.md)
+
 <a id="nor-bundle"></a>
 ## 2. NOR導入用のbundle
 
@@ -377,3 +434,6 @@ python3 scripts/build-jupiter2-install-image.py --firmware-only \
 別途確認したBINを使う場合は、`--firmware-bin /absolute/path/fw_dynamic.bin`を追加します。
 この配布物にはFIT、検証・操作用ツールと文書が含まれます。
 [OpenSBIの更新・復旧手順](milkv-jupiter2-opensbi-replacement.md)
+
+USB RAM起動で使うFSBLと統合FITを配布する場合は、第1.7節でbundleを作ります。
+[BootROM用FSBLと統合FITの包装手順](#ram-boot-bundle)
