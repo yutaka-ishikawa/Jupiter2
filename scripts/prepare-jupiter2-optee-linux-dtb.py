@@ -55,6 +55,13 @@ def prepare(opensbi_dtb, linux_dtb, output):
            for _, node in nodes(root)):
         raise ValueError('Linux DTB already contains an OP-TEE node')
 
+    ftpm_nodes = [path for path, node in nodes(root)
+                  if b'microsoft,ftpm' in node.props.get('compatible', b'').split(b'\0')]
+    if len(ftpm_nodes) > 1:
+        raise ValueError('Linux DTB contains multiple fTPM nodes')
+    if not ftpm_nodes and 'tpm' in root.children:
+        raise ValueError('Linux DTB already uses /tpm for another device')
+
     with tempfile.TemporaryDirectory(dir=output.parent) as directory:
         staged = Path(directory) / 'linux.dtb'
         staged.write_bytes(data)
@@ -91,6 +98,11 @@ def prepare(opensbi_dtb, linux_dtb, output):
         edit(['-t', 's'], '/firmware/optee', 'method', 'smc')
         edit(['-t', 'x'], '/firmware/optee', 'mboxes',
              *(cell for channel in channels for cell in (handle.hex(), f'{channel:x}', '2')))
+        if ftpm_nodes:
+            edit(['-t', 's'], ftpm_nodes[0], 'status', 'okay')
+        else:
+            edit(['-c'], '/tpm')
+            edit(['-t', 's'], '/tpm', 'compatible', 'microsoft,ftpm')
         output.hardlink_to(staged)
 
 

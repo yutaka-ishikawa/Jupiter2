@@ -622,9 +622,9 @@ printf 'OP-TEE PTA exit=%s\n' "$?"
 [実機のHUKログ](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-boot-pass-uart.txt) ·
 [K3のHUK実装](https://github.com/spacemit-com/optee_os/blob/2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59/core/arch/riscv/plat-k3/k3_huk.c#L88-L103)
 
-REE側のファイルからfTPM TAをロードする試験では、Linux用DTBに有効な `microsoft,ftpm` ノードを
-用意する。実機同梱用のDTB生成処理はMPXYと `/firmware/optee` を追加する。参照DTBに
-`microsoft,ftpm` がなければ、LinuxがfTPMドライバをバインドするためのノードは別途必要。
+REE側のファイルからfTPM TAをロードするには、Linux用DTBに有効な `microsoft,ftpm` ノードが必要。
+実機同梱用の `k3-pico-itx-keystone-optee.dtb` の生成処理は、MPXYと `/firmware/optee` に加えて
+このノードを組み込む。生成済みの旧DTBを使っている場合は、同名のDTBを再生成して配置する。
 [LinuxのfTPMドライバ](../linux-k3/drivers/char/tpm/tpm_ftpm_tee.c) ·
 [REEに配置したfTPM TAの試験](jupiter2-ftpm-ta-test.md#linuxのtpmリソースマネージャー経由の試験)
 
