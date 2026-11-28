@@ -44,11 +44,9 @@ USB RAM起動では、実機用ビルド手順書の第1章で構成に合うFSB
 OP-TEE入りの場合は第1.5節で同じFITに対応するLinux用DTBも作る。
 [RAM起動用イメージの作成](jupiter2-build-install-test.md#ram-boot-images)
 
-fTPMも使う場合は、署名済みTAとRV64版`tee-supplicant`を準備する。実機用Coreと
-同じTA開発キットを使い、fTPMのクロスビルド手順の`OPTEE_OUT`には
-`$PWD/.build-k3/optee-hardware/out`を指定する。
-[fTPM TAのクロスビルド](jupiter2-ftpm-ta-test.md#ftpm-taのクロスビルド) ·
-[tee-supplicantと試験プログラムのビルド](jupiter2-ftpm-ta-test.md#テストコードとtee-supplicantのビルド)
+fTPMを使う場合は、実機用Linuxをビルドした後、対象CoreのTA開発キットで
+署名済みfTPM TAとRV64版 `tee-supplicant` を作る。
+[実機用fTPM TAとtee-supplicantのビルド](jupiter2-build-install-test.md#hardware-ftpm-build)
 
 <a id="4-容量確認とインストールイメージ作成"></a>
 ## 4. bundleの転送と事前検査
@@ -249,7 +247,9 @@ sudo install --backup=numbered -m 0644 -- "$DTB_SRC" "$DTB_DIR/"
 RV64の`tee-supplicant`を実機へ転送する。通常のKeystone用bundleとは別に扱う。
 既存のTAや`tee-supplicant`サービスの設定を保存し、実機のTA検索先と実行パスに合わせて配置する。
 
-以下は既存サービスを使わず、fTPM用の成果物を`$HOME/jupiter2-optee/`へ転送した例。
+以下は、開発PCの `.build-k3/optee-hardware/ftpm/transfer/` にある成果物を
+実機の `$HOME/jupiter2-optee/` に転送し、配布した `tee-supplicant` を使用する例。
+[実機用fTPMのビルドと転送するファイル](jupiter2-build-install-test.md#hardware-ftpm-build)
 
 ```bash
 OPTEE_STAGE="$HOME/jupiter2-optee"

@@ -4,6 +4,10 @@ K3 QEMUのLinuxから `libteec → OP-TEEドライバー → SBI MPXY →
 OpenSBI → OP-TEE Core → fTPM TA` と呼び、TPM 2.0コマンドの応答を検証する。
 [移植計画](jupiter2-optee-ftpm-porting-plan.md)の同居構成を使用する。
 
+実機向けのLinuxと、実機用Coreに対応するfTPM TA・`tee-supplicant` は、
+実機用ビルド手順書で用意する。
+[実機用fTPMのビルド](jupiter2-build-install-test.md#hardware-ftpm-build)
+
 ## 前提
 
 - RV64 Linuxクロスコンパイラー。試験ではBuildroot GCC 13.3.0を使用。

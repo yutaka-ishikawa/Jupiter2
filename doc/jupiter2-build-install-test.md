@@ -36,11 +36,13 @@ export CROSS_COMPILE=riscv64-unknown-linux-gnu-
 "${CROSS_COMPILE}gcc" --version
 ```
 
-OP-TEE入りの構成をビルドする場合は、開発PCに `pyelftools` を導入し、Pythonから読み込めることを確認します。
+OP-TEE入りの構成をビルドする場合は、開発PCにELF処理とTA署名に使うPythonパッケージを導入し、
+Pythonから読み込めることを確認します。
 
 ```bash
-sudo apt-get install python3-pyelftools
+sudo apt-get install python3-pyelftools python3-cryptography
 python3 -c 'from elftools.elf.elffile import ELFFile'
+python3 -c 'import cryptography'
 ```
 
 K3用クロスツールチェーンをPATHに置き、接頭辞は導入したものに合わせます。
@@ -81,8 +83,88 @@ grep -E '^CONFIG_(INTEGRITY|IMA|IMA_DEFAULT_TEMPLATE|IMA_DEFAULT_HASH|IMA_MEASUR
 
 `CONFIG_INTEGRITY=y`、`CONFIG_IMA=y`、`CONFIG_IMA_DEFAULT_TEMPLATE="ima-ng"`、
 `CONFIG_IMA_DEFAULT_HASH="sha256"`、`CONFIG_IMA_MEASURE_PCR_IDX=10` を確認します。
-OP-TEE Coreは第1.2節、fTPM TAは専用のクロスビルド手順で用意します。
-[fTPM TAのクロスビルド](jupiter2-ftpm-ta-test.md#ftpm-taのクロスビルド)
+OP-TEE構成でfTPMを使う場合は、続けて実機用のfTPM TAと `tee-supplicant` を作ります。
+
+<a id="hardware-ftpm-build"></a>
+### 実機用fTPM TAとtee-supplicantのビルド
+
+標準のK3 Linuxでは `CONFIG_TCG_FTPM_TEE=m` が有効です。Imageとモジュールをビルドすると
+`.build-k3/linux/drivers/char/tpm/tpm_ftpm_tee.ko` が得られます。実機のスタックには
+このカーネルモジュールに加え、OP-TEE上で動く署名済みのfTPM TAと、Linux上でTAを読み込む
+RV64版 `tee-supplicant` を用意します。
+
+先に第1.2節で、実機FITに組み込むOP-TEE Coreと同じビルドの `export-ta_rv64` を用意して
+ください。標準のビルド先は `.build-k3/optee-hardware/out` です。別の出力先を使った場合は
+下の `OPTEE_OUT` をその絶対パスに合わせます。独自のTA署名鍵を使うCoreには、そのCoreが信頼する
+鍵を環境変数 `TA_SIGN_KEY` に指定して署名します。
+[実機用OP-TEE Coreのビルド](#12-op-tee入り構成の共通準備)
+
+開発PCのJupiter2リポジトリのルートで実行します。ソースは指定コミットを取得します。
+既存のチェックアウトはコミットを確認して再利用します。
+
+```bash
+(
+    set -eu
+    CROSS="${CROSS_COMPILE:-riscv64-linux-gnu-}"
+    JOBS="${JOBS:-20}"
+    OPTEE_OUT="$PWD/.build-k3/optee-hardware/out"
+    FTPM_WORK="$PWD/.build-k3/optee-hardware/ftpm"
+    FTPM_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
+
+    test -s "$OPTEE_OUT/core/tee.bin"
+    test -s "$OPTEE_OUT/export-ta_rv64/mk/ta_dev_kit.mk"
+    mkdir -p "$FTPM_WORK/transfer"
+
+    checkout_source() {
+        local directory="$1" repository="$2" revision="$3"
+        if [[ ! -e "$directory" ]]; then
+            git clone "$repository" "$directory"
+            git -C "$directory" checkout --detach "$revision"
+        fi
+        if [[ "$(git -C "$directory" rev-parse HEAD)" != "$revision" ]]; then
+            printf 'Expected %s in %s\n' "$revision" "$directory" >&2
+            return 1
+        fi
+    }
+
+    checkout_source "$FTPM_WORK/ftpm-src" https://github.com/OP-TEE/optee_ftpm.git \
+        6f99e783eb9bb57c314a881433d4ec970de87959
+    checkout_source "$FTPM_WORK/ms-tpm" https://github.com/microsoft/ms-tpm-20-ref.git \
+        98b60a44aba79b15fcce1c0d1e46cf5918400f6a
+    checkout_source "$FTPM_WORK/client-src" https://github.com/OP-TEE/optee_client.git \
+        9f4414f62dfc5692fd39f760515ce2d344d07b6d
+
+    make -C "$FTPM_WORK/ftpm-src" -j"$JOBS" O="$FTPM_WORK/ta" \
+        TA_DEV_KIT_DIR="$OPTEE_OUT/export-ta_rv64" CROSS_COMPILE="$CROSS" \
+        CFG_MS_TPM_20_REF="$FTPM_WORK/ms-tpm" CPPFLAGS=-DRADIX_BITS=64
+    make -C "$FTPM_WORK/client-src/libteec" -j"$JOBS" OO="$FTPM_WORK/client" \
+        CROSS_COMPILE="$CROSS" CC="${CROSS}gcc" AR="${CROSS}ar"
+    make -C "$FTPM_WORK/client-src/tee-supplicant" -j"$JOBS" OO="$FTPM_WORK/client" \
+        CROSS_COMPILE="$CROSS" CC="${CROSS}gcc" LDFLAGS=-static \
+        CFG_TEE_SUPP_PLUGINS=n RPMB_EMU=0
+
+    test -s "$FTPM_WORK/ta/$FTPM_UUID.ta"
+    "${CROSS}readelf" -h "$FTPM_WORK/ta/$FTPM_UUID.elf"
+    "${CROSS}readelf" -h "$FTPM_WORK/client/tee-supplicant/tee-supplicant"
+    install -m 0644 "$FTPM_WORK/ta/$FTPM_UUID.ta" "$FTPM_WORK/transfer/"
+    install -m 0755 "$FTPM_WORK/client/tee-supplicant/tee-supplicant" "$FTPM_WORK/transfer/"
+)
+```
+
+`-DRADIX_BITS=64` はMicrosoft参照実装の多倍長整数のワード幅をRV64に合わせます。
+署名済みTAと静的リンクした `tee-supplicant` は、開発PCの
+`.build-k3/optee-hardware/ftpm/transfer/` に生成されます。この2ファイルを実機の
+`$HOME/jupiter2-optee/` に転送し、導入手順に従って配置します。
+[実機でのTAとtee-supplicantの配置](milkv-jupiter2-stack-install.md#op-teeのlinux側ファイルを追加配置する)
+
+このTAは実機用CoreのREEファイルシステムをセキュアストレージとして利用します。
+実機でTAをロードするには、HUKを使える状態が必要です。LinuxのfTPMドライバを使う場合は、
+`microsoft,ftpm` ノードを含むLinux用DTBで起動します。IMAのPCR 10を検査する場合は、
+IMA初期化より前にfTPMを登録する起動経路を使用します。
+[実機での外部TAとfTPMの検査](milkv-jupiter2-stack-install.md#外部taとftpm-taを確認する) ·
+[IMAとfTPMのPCR 10の確認](milkv-jupiter2-stack-install.md#pico-itx-ima-ftpm)
+
+### ビルドしたLinuxを実機へ配置する
 
 実機では、同じビルドのImageとモジュールを配置し、対応するinitrdを作ります。
 Keystone入りの通常bundleは実機スタック導入手順に従い、OP-TEEのみの構成は第1.6節の
