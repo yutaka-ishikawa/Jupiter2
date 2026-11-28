@@ -249,6 +249,10 @@ sudo install --backup=numbered -m 0644 -- "$DTB_SRC" "$DTB_DIR/"
 
 実機Linuxでtarを `$HOME/jupiter2-optee/` の下に新しく作ったディレクトリへ展開し、
 両ファイルを確認してから配置する。以下は既定のTA検索先と配布した `tee-supplicant` を使う例。
+配置先ディレクトリは `mkdir -p` で用意する。一部のRust coreutilsでは `install -D` が
+親ディレクトリのシンボリックリンクを実ディレクトリへ置き換えるため、ファイルの配置と
+ディレクトリの作成を別のコマンドで行う。
+[uutilsの不具合](https://github.com/uutils/coreutils/issues/11469) · [KSB-101](keystone-bug-report.md#ksb-101)
 
 ```bash
 (
@@ -260,9 +264,10 @@ sudo install --backup=numbered -m 0644 -- "$DTB_SRC" "$DTB_DIR/"
     printf 'fTPMの展開先 %s\n' "$OPTEE_STAGE"
     test -s "$OPTEE_STAGE/$FTPM_UUID.ta"
     test -s "$OPTEE_STAGE/tee-supplicant"
-    sudo install -D --backup=numbered -m 0644 \
+    sudo mkdir -p -- /lib/optee_armtz /usr/local/sbin
+    sudo install --backup=numbered -m 0644 -- \
       "$OPTEE_STAGE/$FTPM_UUID.ta" "/lib/optee_armtz/$FTPM_UUID.ta"
-    sudo install -D --backup=numbered -m 0755 \
+    sudo install --backup=numbered -m 0755 -- \
       "$OPTEE_STAGE/tee-supplicant" /usr/local/sbin/jupiter2-tee-supplicant
 )
 ```
@@ -399,7 +404,8 @@ Imageも変更した場合は、対応する新Imageとモジュール一式を�
     if [[ -d /sys/module/keystone_driver ]]; then
         sudo modprobe -r keystone_driver
     fi
-    sudo install -D --backup=numbered -m 0644 -- "$SRC" "$DEST"
+    sudo mkdir -p -- "/lib/modules/$KREL/extra"
+    sudo install --backup=numbered -m 0644 -- "$SRC" "$DEST"
     sudo depmod -a "$KREL"
     if sudo update-initramfs -u -k "$KREL"; then
         if [[ ! -s "$INITRD" ]]; then
@@ -821,6 +827,59 @@ GRUB・extlinux方式では保存した設定と元のエントリーを使う�
 ```
 
 旧Linuxが起動してから、退避した旧ファイルと今回の配置先を照合し、不要な試験用ファイルを個別に整理する。
+
+<a id="restore-usrmerge-lib"></a>
+### /libのシンボリックリンクを復旧する
+
+TAの配置直後に `ls` や `sudo` が `cannot execute: required file not found` で起動できなくなり、
+`/lib` がTAだけを含む実ディレクトリに変わった場合の手順。現在のシェルを残して、まず
+`/usr/lib` とそこで動的ローダーが見えることを確認する。
+[実機で確認した症状と原因](keystone-bug-report.md#ksb-101)
+
+UARTでU-Bootへ入り、前回と同じImage・initrd・Linux用DTBを読み込む。通常の `bootargs` に
+`break=bottom` を加えて `booti` を実行する。これでinitramfs-toolsのシェルに入り、
+rootfsを修復できる。U-Bootで設定を永続化する操作は不要。
+[U-Bootからの一時起動](jupiter2-ram-boot-guide.md#5-linuxを一時起動するuartでコマンドを直接入力) ·
+[initramfs-toolsのブートオプション](https://manpages.debian.org/unstable/initramfs-tools-core/initramfs-tools.7.en.html)
+
+```text
+setenv bootargs ${bootargs} break=bottom
+printenv bootargs
+booti ${kernel_addr_r} ${ramdisk_addr}:${initrd_size} ${fdt_addr_r}
+```
+
+`(initramfs)` で `cat /proc/mounts` を実行して対象のrootfsが `/root` にマウントされていることを確認する。
+`ls -la /root/lib /root/lib/optee_armtz` で置き換わったディレクトリに今回のTAだけがあることを
+確認し、次を実行する。置き換わったディレクトリはrootfs内に保存する。
+
+```sh
+(
+    set -eu
+    ROOTFS=/root
+    OLD_LIB="$ROOTFS/lib-ftpm-backup"
+    LOADER=ld-linux-riscv64-lp64d.so.1
+    grep -F " $ROOTFS " /proc/mounts
+    test -d "$ROOTFS/lib/optee_armtz"
+    test ! -L "$ROOTFS/lib"
+    test -x "$ROOTFS/usr/lib/riscv64-linux-gnu/$LOADER"
+    test -x "$ROOTFS/usr/lib/$LOADER"
+    test ! -e "$OLD_LIB"
+    test ! -L "$OLD_LIB"
+    mount -o remount,rw "$ROOTFS"
+    mv "$ROOTFS/lib" "$OLD_LIB"
+    if ! ln -s usr/lib "$ROOTFS/lib"; then
+        mv "$OLD_LIB" "$ROOTFS/lib"
+        exit 1
+    fi
+    test -x "$ROOTFS/lib/$LOADER"
+    ls -ld "$ROOTFS/lib" "$OLD_LIB"
+    sync
+)
+```
+
+`/root/lib -> usr/lib` が表示され、上のコマンドがすべて成功したら `exit` で起動を続ける。
+ログイン後、通常の `ls -ld /lib /usr/lib` と `sudo -v` を確認する。TAは修正後の手順で再配置する。
+[OP-TEEのLinux側ファイルの配置](#op-teeのlinux側ファイルを追加配置する)
 
 ### OpenSBIを復旧する場合
 

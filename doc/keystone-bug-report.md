@@ -124,6 +124,7 @@
 | KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Bootへ進まない | OpenSBIのドメインコンテキスト確保が `SBI_ENOMEM (-1004)`。QEMUの106 KiB構成で割り当て管理枠の枯渇を確認 | 同梱FITを192 KiBに修正。QEMU同居に合格し、実機USB RAM起動でU-Boot本体のプロンプトまで確認 |
 | KSB-099 | Pico-ITX同梱FITでLinuxの副hart 1〜15が起動しない | OP-TEE終了後にハードウェアHSMで再開。OpenSBIがPMP設定を省略し、枠0の読み戻しに失敗 | `223c5f2` でPMP再設定を実装。QEMUで保持時と消失時を確認。実機で副hart 1〜15のPMP再設定と16 CPU起動を確認 |
 | KSB-100 | Pico-ITX同梱FITで組み込みwatchdog初期化がpanic | `spa_wdt_probe()` が保護中のMPMU ARSRを読み出す。現行のMMIO仲介に該当レジスタがない | `223c5f2` でMMIO仲介を追加。実機でwatchdog初期化を通過しログインを確認。watchdogによるリセットは未試験 |
+| KSB-101 | 実機のfTPM TA配置直後にLinuxコマンドが起動不能になる | Rust coreutilsの `install -D` が `/lib` のリンクを実ディレクトリに置換し、動的ローダーへのパスを失う | ディレクトリ作成とファイル配置を分離。[復旧・再試験](#ksb-101) |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -2294,3 +2295,27 @@ OpenSBIの実行時範囲、出力のハッシュとUSB転送dry-runを確認し
 進んだ。前回の読み出し例外・panicは再発していない。watchdogのタイムアウトによるリセットや
 再起動理由の書き込みは未試験。
 [実機UARTの抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-boot-pass-uart.txt)
+
+<a id="ksb-101"></a>
+### KSB-101 fTPM TAの配置で実機の /lib リンクが失われる
+
+2026年11月28日のPico-ITX実機では、`f36b480` の手順でtarを正常に展開した後、
+`sudo install -D --backup=numbered` でfTPM TAを `/lib/optee_armtz/` に配置した。
+次の `sudo` と `ls` は `cannot execute: required file not found` で起動できなかった。
+既存のBashは `pwd` などの組み込みを実行できた。
+
+Bashの検査で `/lib` は実ディレクトリで、今回の `optee_armtz` とTAだけが入っていた。
+`/lib/ld-linux-riscv64-lp64d.so.1` は見つからず、`/usr/lib` 側からローダーを直接呼ぶと
+`coreutils` の診断が返った。既存の実行ファイルへの共通のローダーパスが失われている。
+これはRust coreutilsの `install -D` が親のシンボリックリンクを置換する既知の不具合と一致する。
+導入前の検査では通常のディレクトリを使っており、usrmergeのリンクを検査していなかった。
+[uutilsの不具合 #11469](https://github.com/uutils/coreutils/issues/11469) ·
+[Ubuntuでのusrmerge障害 #12166](https://github.com/uutils/coreutils/issues/12166)
+
+実機向けのfTPMとKeystoneドライバの配置手順を、`mkdir -p` と `-D` を付けない `install` に修正する。
+GNU版とRust版coreutils 0.8.0で、`/lib -> usr/lib` を持つ一時ディレクトリに配置した。
+親のリンク保持、内容の一致、既存ファイルの番号付きバックアップ、新規ディレクトリの作成を
+確認した。復旧手順のディレクトリ退避とリンクの再作成も一時ディレクトリで確認した。
+実機の復旧結果は未確認。
+[実機の配置手順](milkv-jupiter2-stack-install.md#op-teeのlinux側ファイルを追加配置する) ·
+[initramfsからの復旧手順](milkv-jupiter2-stack-install.md#restore-usrmerge-lib)
