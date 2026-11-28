@@ -502,8 +502,8 @@ KSB-099 OP-TEE restart PMP and KSB-100 watchdog mediation
   The firmware ELF contains host-only rules for APRR at 0xd4051020
   (write mask 0x10) and ARSR at 0xd4051028 (write mask 0x3c000).
   The QEMU configurations used here cover the PMP and TEE paths.
-  The board watchdog registers and their runtime behavior need a
-  physical-board test.
+  The watchdog probe later completed on Pico-ITX. A watchdog-triggered
+  reset and reboot-reason writes remain to be tested.
 
   The Pico-ITX FIT embeds the final firmware and uses a 192 KiB heap
   with a 752 KiB firmware span inside the 1 MiB reservation. The Linux
@@ -512,4 +512,6 @@ KSB-099 OP-TEE restart PMP and KSB-100 watchdog mediation
   5e51b38d87a4643dbeeac3f62655b59ce12e4e161119f933018ae1c7242fb3d1  FSBL.bin
   004fd61620ce3d1d0dca9d156e9144222cb783c28f919a6d7372e6a78f934874  ram-boot-keystone.itb
   8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  k3-pico-itx-keystone-optee.dtb
-  USB RAM boot of the fixed FIT and Linux login remain to be tested.
+  The user's Pico-ITX boot reached Linux login on 16 CPUs, and both
+  Keystone samples passed. See 2026-11-28-pico-itx-linux-boot-pass-uart.txt
+  for that trial. The hashes above identify the host-built artifacts.

@@ -488,8 +488,129 @@ sudo dmesg | grep -Ei 'op.?tee|mpxy'
 ls -l /dev/tee[0-9]* /dev/teepriv[0-9]*
 ```
 
-外部TAの試験は第6章で配置したTAとsupplicantを使用する。
-fTPMのLinuxドライバをモジュールとして用意した構成では`sudo modprobe tpm_ftpm_tee`を実行する。
+`optee: initialized driver` と、通常は `/dev/tee0`・`/dev/teepriv0` が見えることを確認する。
+デバイス番号は構成により変わる。ドライバ初期化を確認したら、TAの呼び出しを試す。
+[Pico-ITXで確認した起動結果](jupiter2-coexistence-16-pmp-plan.md#pico-itx-linux-pass)
+
+<a id="pico-itx-optee-ta-smoke"></a>
+##### 現在のFITで内蔵のdevice.ptaを確認する
+
+今回のPico-ITXでは、Linuxドライバが `device.pta` のセッションを開いて閉じるところまでUARTで確認した。
+同じ起動の実機Linuxで、デバイス列挙の結果を確認する。K3実機用Coreの既定では、RTC PTAのUUID
+`f389f8c8-845f-496c-8bbe-d64bd24c92fd` を持つ `optee-ta-…` が見える。
+[実機UART](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-boot-pass-uart.txt) ·
+[LinuxのOP-TEEデバイス列挙](../linux-k3/drivers/tee/optee/device.c)
+
+```bash
+ls -l /dev/tee[0-9]* /dev/teepriv[0-9]*
+ls -l /sys/bus/tee/devices/
+```
+
+ユーザー空間からも呼び出す場合は、**開発PC**のJupiter2リポジトリのルートで次のコマンドを実行する。
+Linux用のRV64クライアントを作り、Coreに組み込まれた `device.pta` に読み取り専用の
+`PTA_CMD_GET_DEVICES` を送る。FIT・Linux・DTBはそのまま使える。`tee-supplicant` や
+署名済み外部TAの配置は不要。
+[device.ptaのソース](https://github.com/spacemit-com/optee_os/blob/2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59/core/pta/device.c)
+
+```bash
+(
+    set -eu
+    CROSS="${CROSS_COMPILE:-riscv64-linux-gnu-}"
+    OPTEE_SRC="${OPTEE_SRC:-$PWD/.build-k3/optee-hardware/optee_os}"
+    TEST_OUT="$PWD/.build-k3/optee-hardware/pta-smoke"
+    CLIENT="$TEST_OUT/optee_client"
+    CLIENT_REV=9f4414f62dfc5692fd39f760515ce2d344d07b6d
+
+    test -s "$OPTEE_SRC/lib/libutee/include/pta_device.h"
+    mkdir -p "$TEST_OUT"
+    if [[ ! -e "$CLIENT" ]]; then
+        git clone https://github.com/OP-TEE/optee_client.git "$CLIENT"
+        git -C "$CLIENT" checkout --detach "$CLIENT_REV"
+    fi
+    test "$(git -C "$CLIENT" rev-parse HEAD)" = "$CLIENT_REV"
+    make -C "$CLIENT" O="$TEST_OUT/client" CROSS_COMPILE="$CROSS" build-libteec
+
+    cat > "$TEST_OUT/device-pta-smoke.c" <<'EOF'
+#include <stdio.h>
+#include <pta_device.h>
+#include <tee_client_api.h>
+
+int main(void)
+{
+    const TEEC_UUID uuid = PTA_DEVICE_UUID;
+    unsigned char devices[1024];
+    TEEC_Context context;
+    TEEC_Session session;
+    TEEC_Operation operation = { 0 };
+    uint32_t origin = 0;
+    TEEC_Result rc;
+    size_t bytes;
+
+    rc = TEEC_InitializeContext("optee-tz", &context);
+    if (rc != TEEC_SUCCESS) {
+	fprintf(stderr, "TEEC_InitializeContext: %#x\n", rc);
+	return 1;
+    }
+
+    rc = TEEC_OpenSession(&context, &session, &uuid, TEEC_LOGIN_PUBLIC,
+                          NULL, NULL, &origin);
+    if (rc != TEEC_SUCCESS) {
+	fprintf(stderr, "TEEC_OpenSession: %#x origin=%u\n", rc, origin);
+	TEEC_FinalizeContext(&context);
+	return 1;
+    }
+
+    operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_OUTPUT, TEEC_NONE,
+                                            TEEC_NONE, TEEC_NONE);
+    operation.params[0].tmpref.buffer = devices;
+    operation.params[0].tmpref.size = sizeof(devices);
+    rc = TEEC_InvokeCommand(&session, PTA_CMD_GET_DEVICES, &operation, &origin);
+    bytes = operation.params[0].tmpref.size;
+    TEEC_CloseSession(&session);
+    TEEC_FinalizeContext(&context);
+
+    if (rc != TEEC_SUCCESS || !bytes || bytes > sizeof(devices) ||
+        bytes % sizeof(TEEC_UUID)) {
+	fprintf(stderr, "PTA_CMD_GET_DEVICES: %#x origin=%u bytes=%zu\n",
+		rc, origin, bytes);
+	return 1;
+    }
+
+    printf("PASS OP-TEE device.pta: %zu device(s)\n", bytes / sizeof(TEEC_UUID));
+    return 0;
+}
+EOF
+
+    "${CROSS}gcc" -static -O2 -Wall -Wextra -Werror \
+        -I"$CLIENT/libteec/include" -I"$OPTEE_SRC/lib/libutee/include" \
+        "$TEST_OUT/device-pta-smoke.c" "$TEST_OUT/client/libteec/libteec.a" \
+        -pthread -o "$TEST_OUT/device-pta-smoke"
+)
+```
+
+`.build-k3/optee-hardware/pta-smoke/device-pta-smoke` を **Jupiter2実機**の `$HOME` に転送して実行する。
+`PASS OP-TEE device.pta: … device(s)` と終了コード0で、ユーザー空間からOP-TEE Coreへセッションを
+開き、コマンドに対して1件以上のデバイス情報が返ることを確認できる。
+
+```bash
+sudo "$HOME/device-pta-smoke"
+printf 'OP-TEE PTA exit=%s\n' "$?"
+```
+
+エラー時はクライアントが表示するAPI名・戻り値・`origin` と、
+`sudo dmesg | grep -Ei 'op.?tee|mpxy'` の結果、OP-TEEのUARTを採取する。
+
+##### 外部TAとfTPM TAを確認する
+
+今回の実機では、OP-TEEがeFuseバンク1・2の未書き込みを検出し、HUKの導出を拒否した。
+このSpacemiT版の `CFG_REE_FS_TA=y` では、外部TAのロード時にもCoreが
+バージョン情報の管理にセキュアストレージを使う。fTPMを含む外部TAの実機試験はHUKが使える環境で行う。
+[実機のHUKログ](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-boot-pass-uart.txt) ·
+[K3のHUK実装](https://github.com/spacemit-com/optee_os/blob/2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59/core/arch/riscv/plat-k3/k3_huk.c#L88-L103)
+
+fTPMのLinuxドライバをモジュールとして用意した構成では、fTPM TAを前述の手順で配置し、
+`tee-supplicant` を起動してから `sudo modprobe tpm_ftpm_tee` を実行する。
+
 `tpm2-tools`を実機に用意し、sysfsとログでfTPMに対応するTPMデバイスを特定する。
 以下の`TPM_DEVICE`は、実機で割り当てられた番号に合わせる。
 

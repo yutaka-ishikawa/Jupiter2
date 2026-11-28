@@ -1,0 +1,124 @@
+Pico-ITX実機の同梱FITでLinuxログインとKeystoneサンプルを確認（2026-11-28、日本時間）
+元UARTのSHA-256 567df76188234410e999bdfac8779f52dd92b0a885e917dcf9fa1d573e902e7f
+元UARTのサイズ 541053 バイト、8192 行
+
+対象は4547行のBootROM USB起動から8192行のログイン後のプロンプトまで。
+直前までの起動で出たpanicは別試行。U-Bootの日付はビルド表示。
+利用者は11月27日に使ったLinux Image・モジュールを継続使用したと報告した。
+カーネルは6.18.3 #4。FSBLとFITは転送済みバイト数で記録した。
+この試行のバイナリのSHA-256と正確なソースコミットは未収集。
+採取元の行番号を付け、ログイン後のプロンプトは利用者名とホスト名を省略した。
+
+USB転送、ESOS、OpenSBI、OP-TEE CoreとU-Boot本体
+4547 sys: 0x10001200
+4552 ROM: usb download handler
+4596 Starting download of 411776 bytes
+4605 U-Boot SPL 2022.10-g4c294a06-dirty (Nov 28 2026 - 11:56:34 +0900)
+4692 downloading/uploading of 2624105 bytes finished
+4698 k3-rproc rcpu@0: [RAMBOOT] core=0 handshake acknowledged
+4701 k3-rproc rcpu@1: [RAMBOOT] core=1 handshake acknowledged
+4710 OpenSBI v1.6
+4762 Firmware Size               : 752 KB
+4766 Firmware Heap Size          : 192 KB (total), 12 KB (reserved), 28 KB (used), 151 KB (free)
+5030 E/TC:00 00 tee_otp_get_hw_unique_key:100 HUK: eFuse banks 1/2 unprogrammed, refusing to derive
+5033 I/TC: MMP RTC registered
+6399 Registered OP-TEE entry table: 0x171000384
+6501 K3 OP-TEE handoff: PMP rc=0
+6504 K3 OP-TEE handoff: mret hart=0 next=0x102000000 arg1=0x102153cf0
+6507 U-Boot 2022.10-g4c294a06-dirty (Nov 28 2026 - 11:56:34 +0900)
+6511 DRAM:  32 GiB
+
+UFS上のLinux起動ファイルとOP-TEEノード
+6623 44638208 bytes read in 55 ms (774 MiB/s)
+6626 41886779 bytes read in 49 ms (815.2 MiB/s)
+6630 149843 bytes read in 1 ms (142.9 MiB/s)
+6638 knl_name=Image-6.18.3-keystone
+6639 ramdisk_name=initrd.img-6.18.3
+6640 dtb_dir=spacemit/6.18.3-generic
+6641 fdtfile=k3-pico-itx-keystone-optee.dtb
+6653         compatible = "linaro,optee-tz";
+6651 [要約] mboxesにOP-TEE用の16チャネル（0x1000〜0x100f）
+
+U-Bootの予約メモリ警告とLinuxへの引き渡し
+6659    Loading Ramdisk to 3f957b000, end 3fbd6d43b ... OK
+6660 ERROR: reserving fdt memory region failed (addr=3f9760000 size=261b9c9 flags=0)
+6661 ERROR: reserving fdt memory region failed (addr=3fe000000 size=2000000 flags=0)
+6662 ERROR: reserving fdt memory region failed (addr=100800000 size=200000 flags=4)
+6663 ERROR: reserving fdt memory region failed (addr=100a00000 size=200000 flags=4)
+6664    Loading Device Tree to 00000003f9553000, end 00000003f957a952 ... OK
+6665 fail to get alias node efuse_power
+6667 Starting kernel ...
+6669 [    0.000000] Booting Linux on hartid 0
+6685 [    0.000000] OF: reserved mem: 0x0000000171000000..0x0000000171ffffff (16384 KiB) nomap non-reusable optee-core@171000000
+6686 [    0.000000] OF: reserved mem: 0x0000000172000000..0x0000000172ffffff (16384 KiB) nomap non-reusable optee-shm@172000000
+6718 [    0.000000] OF: reserved mem: OVERLAP DETECTED!
+6719 [    0.000000] rcpu1_runtime@100800000 (0x0000000100800000--0x0000000100a00000) overlaps with mmode_resv5@1,800000 (0x0000000100800000--0x0000000100c00000)
+6720 [    0.000000] OF: reserved mem: OVERLAP DETECTED!
+6721 [    0.000000] mmode_resv5@1,800000 (0x0000000100800000--0x0000000100c00000) overlaps with rcpu1_heap@100a00000 (0x0000000100a00000--0x0000000100c00000)
+
+副hart再開時のPMP再設定と読み戻し
+6793 [    0.101752] smp: Bringing up secondary CPUs ...
+6794 [K3-PMP] restore PMP on restarted hart=1
+6820 [K3-PMP] root-config PASS hart=1 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+6844 [K3-PMP] restore PMP on restarted hart=2
+6870 [K3-PMP] root-config PASS hart=2 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+6894 [K3-PMP] restore PMP on restarted hart=3
+6920 [K3-PMP] root-config PASS hart=3 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+6944 [K3-PMP] restore PMP on restarted hart=4
+6970 [K3-PMP] root-config PASS hart=4 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+6994 [K3-PMP] restore PMP on restarted hart=5
+7020 [K3-PMP] root-config PASS hart=5 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+7044 [K3-PMP] restore PMP on restarted hart=6
+7070 [K3-PMP] root-config PASS hart=6 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+7094 [K3-PMP] restore PMP on restarted hart=7
+7120 [K3-PMP] root-config PASS hart=7 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+7144 [K3-PMP] restore PMP on restarted hart=8
+7170 [K3-PMP] root-config PASS hart=8 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7194 [K3-PMP] restore PMP on restarted hart=9
+7220 [K3-PMP] root-config PASS hart=9 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7244 [K3-PMP] restore PMP on restarted hart=10
+7270 [K3-PMP] root-config PASS hart=10 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7294 [K3-PMP] restore PMP on restarted hart=11
+7320 [K3-PMP] root-config PASS hart=11 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7344 [K3-PMP] restore PMP on restarted hart=12
+7370 [K3-PMP] root-config PASS hart=12 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7394 [K3-PMP] restore PMP on restarted hart=13
+7420 [K3-PMP] root-config PASS hart=13 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7444 [K3-PMP] restore PMP on restarted hart=14
+7470 [K3-PMP] root-config PASS hart=14 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7494 [K3-PMP] restore PMP on restarted hart=15
+7520 [K3-PMP] root-config PASS hart=15 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+7544 [    4.337421] smp: Brought up 1 node, 16 CPUs
+
+watchdogのプローブ、OP-TEEドライバ、ユーザー空間
+7698 [    6.016889] System boots up not because of SoC watchdog reset.
+7711 [    6.110918] riscv-sbi-mpxy-mbox soc:mpxy_mbox@0: mailbox registered with 21 channels
+7716 [    6.140642] remoteproc remoteproc0: rsc table is truncated
+7717 [    6.146104] remoteproc remoteproc0: Failed to process resources: -22
+7719 [    6.157952] spacemit-rproc 0.rcpu_rproc1: probe with driver spacemit-rproc failed with error -22
+7729 D/TC:?? 00 tee_ta_init_pseudo_ta_session:315 Open device.pta
+7730 D/TC:?? 00 tee_ta_init_pseudo_ta_session:330 device.pta : 7011a688-ddde-4053-a5a9-7b3c4ddf13b8
+7732 D/TC:?? 00 tee_ta_close_session:479 Destroy session
+7733 [    6.198240] optee: revision 4.5 (2fbd6ae54d89ff86)
+7734 [    6.244365] optee: initialized driver
+8088 [    9.412258] Run /init as init process
+8178 Welcome to Bianbu 4.0.4 (GNU/Linux 6.18.3 riscv64)
+8107 [要約] EXT4ルートファイルシステムをsda3からマウント。
+8183 [ログイン後のプロンプト] $ ls
+8192 [lsの出力後、シェルのプロンプトへ復帰]
+
+Keystoneサンプル（利用者による別報告。上記UARTには含まれない）
+実行コマンド sudo bash tools/run-hello.sh
+Verifying archive integrity... MD5 checksums are OK. All good.
+Uncompressing Keystone Enclave Package
+hello, world!
+
+PASS SAMPLE hello: enclave exit=0 DESTROY
+Verifying archive integrity... MD5 checksums are OK. All good.
+Uncompressing Keystone hello-native sample
+Hello World
+PASS SAMPLE hello-native: enclave exit=0 DESTROY
+
+OP-TEEはLinuxドライバからのdevice.ptaのセッション開閉とドライバ初期化を確認した。
+ユーザー空間からのPTA呼び出し、外部TA、fTPM、HUKを使う永続ストレージ、
+watchdogによるリセットは未試験。

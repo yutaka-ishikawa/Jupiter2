@@ -122,9 +122,10 @@ UARTに書込み表示があれば、その操作も記録する。
 <a id="coexistence-linux-boot"></a>
 ## 4. UFSと起動ファイルを確認する（UART）
 
-Keystone・OP-TEE同梱FITは、OpenSBIのヒープを192 KiBにした実機でU-Boot本体の `=>` まで到達した。
-同じ試行のプロンプトが出ていれば、ここからUFS上のLinuxを起動する。
-[実機で確認した到達点](keystone-bug-report.md#ksb-098-board-pass)
+Pico-ITXでは、OpenSBIのヒープを192 KiBにしたKeystone・OP-TEE同梱FITでU-Boot本体を起動し、
+UFS上のLinuxを16 CPUで立ち上げてBianbuにログインした。Keystoneの `hello` と `hello-native`
+も合格した。ここからUARTのU-BootプロンプトでLinuxを起動する。
+[同梱FITでの実機試験結果](jupiter2-coexistence-16-pmp-plan.md#pico-itx-linux-pass)
 
 以下は**UART端末のU-Bootプロンプト（=>）**へ直接入力する。
 開発PCのBashでは実行しない。
@@ -339,7 +340,13 @@ USB操作やCPU/SBI/PMPの模擬はしない。新しい操作補助ツールに
 [段階別の実機記録とテスト手順](jupiter2-reference-ram-boot-tests.md)、
 [障害台帳](keystone-bug-report.md)を参照する。
 
-## 9. 次にKeystoneアプリを試験する
+## 9. 起動後にKeystoneとOP-TEEを試験する
+
+Keystone・OP-TEE同梱FITで起動した場合は、実機Linuxにログインして `tools/run-hello.sh` と
+OP-TEE TAを試験する。Pico-ITXでは `hello` と `hello-native` の合格と、OP-TEEドライバの初期化を
+確認した。[実機Linux上でのKeystoneとOP-TEEの試験](milkv-jupiter2-stack-install.md#実機linux上でkeystoneとop-teeをテストする)
+
+### 販売元OpenSBIから始めるKeystone単独試験
 
 販売元OpenSBIでLinuxが起動したことと、SM/Enclaveが動くことは別の段階。
 提供Linux用DTBには、SMのM-only mailboxページ内の直接controllerが有効な不整合があった。

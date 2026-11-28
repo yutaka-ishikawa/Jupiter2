@@ -374,10 +374,36 @@ CPU 0だけで初期化が続いた後、組み込みwatchdogのレジスタ読�
 [watchdog KSB-100](keystone-bug-report.md#ksb-100)
 
 `223c5f2` で副hart再開時のPMP再設定とwatchdogの仲介を修正した。
-次の実機試験では、修正版の同梱FITで同じImage・initrd・モジュールを使い、Linuxの16 CPUと
-watchdogの初期化通過を確認する。ログイン後は同じ起動中にTEEデバイス、Keystone Enclaveと
-OP-TEE TAを試験する。Linux起動後のPMPと実機の周辺機器・DMA保護は第2節に従って採取する。
 [同梱FITの実機再試験](keystone-bug-report.md#ksb-099-retest)
+
+<a id="pico-itx-linux-pass"></a>
+#### 修正版でLinuxの16 CPU起動とKeystoneサンプルを確認
+
+Pico-ITXのUSB RAM起動で、ヒープ192 KiBのOpenSBIとOP-TEEを同梱したFITを使用した。
+FSBLは411,776バイト、FITは2,624,105バイト。利用者は11月27日に使ったLinux Imageとモジュールを
+継続使用した。Linux 6.18.3 #4、`Image-6.18.3-keystone`、`initrd.img-6.18.3`、
+`k3-pico-itx-keystone-optee.dtb` をUARTから確認した。この試行に使った実バイナリの
+SHA-256と正確なソースコミットは未収集。
+[実機UARTとKeystoneサンプル結果](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-boot-pass-uart.txt)
+
+| 項目 | 実機で確認した結果 |
+| --- | --- |
+| 起動経路 | ESOS両RCPUが応答し、OpenSBIからOP-TEE Core初期化、U-Boot本体へ進んだ。UFSのLinuxでルートファイルシステムをマウントし、Bianbu 4.0.4へログインして `ls` を実行できた |
+| 副hartとPMP | LinuxのSMP起動中にhart 1〜15でPMPを再設定し、すべてで `root-config PASS`。hart 8〜15では上位16枠が無効。Linuxは16 CPUを起動 |
+| watchdog | 前回の読み出し例外を越えて、watchdogドライバが起動理由を表示。watchdogによるリセットは未試験 |
+| Keystone | `sudo bash tools/run-hello.sh` で `hello` と `hello-native` がともに `enclave exit=0 DESTROY` |
+| OP-TEE | DTBの `/firmware/optee` に16個のOP-TEE用チャネルがあり、LinuxのMPXYは全体で21チャネルを登録。Linuxの起動処理が内蔵の `device.pta` のセッションを開閉し、OP-TEE 4.5のドライバ初期化が完了 |
+
+U-Bootは予約メモリ4件の警告と `fail to get alias node efuse_power` を出した後にLinuxへ進んだ。
+LinuxはOP-TEE Coreと共有メモリを各16 MiB予約し、RCPU1用の予約領域と既存のM-mode予約領域の重複を
+報告した。Linuxの `spacemit-rproc` がRCPU1を登録する際にリソース表の検査で `-22` が出た。
+OP-TEEはeFuseバンク1・2が未書き込みとしてHUKの導出を拒否していた。この構成の外部TAの
+ロードにはHUKを使うセキュアストレージが必要。
+[実機UARTの該当行](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-boot-pass-uart.txt)
+
+次は同じ起動でTEEデバイスを確認し、ユーザー空間からCore内蔵の `device.pta` の応答を試す。
+EnclaveとTAの同時実行、fTPM・IMA、DMA保護、実行時のPMP検査は第2節で追跡する。
+[実機のOP-TEE試験手順](milkv-jupiter2-stack-install.md#pico-itx-optee-ta-smoke)
 
 ## 3. 完了時の記録
 
