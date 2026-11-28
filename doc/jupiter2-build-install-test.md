@@ -94,7 +94,7 @@ OP-TEE構成でfTPMを使う場合は、続けて実機用のfTPM TAと `tee-sup
 RV64版 `tee-supplicant` を用意します。
 
 先に第1.2節で、実機FITに組み込むOP-TEE Coreと同じビルドの `export-ta_rv64` を用意して
-ください。標準のビルド先は `.build-k3/optee-hardware/out` です。別の出力先を使った場合は
+ください。標準のビルド先は `.build-k3/optee-hardware/out-huk-dev` です。別の出力先を使った場合は
 下の `OPTEE_OUT` をその絶対パスに合わせます。独自のTA署名鍵を使うCoreには、そのCoreが信頼する
 鍵を環境変数 `TA_SIGN_KEY` に指定して署名します。
 [実機用OP-TEE Coreのビルド](#12-op-tee入り構成の共通準備)
@@ -107,7 +107,7 @@ RV64版 `tee-supplicant` を用意します。
     set -eu
     CROSS="${CROSS_COMPILE:-riscv64-linux-gnu-}"
     JOBS="${JOBS:-20}"
-    OPTEE_OUT="$PWD/.build-k3/optee-hardware/out"
+    OPTEE_OUT="${OPTEE_OUT:-$PWD/.build-k3/optee-hardware/out-huk-dev}"
     FTPM_WORK="$PWD/.build-k3/optee-hardware/ftpm"
     FTPM_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
 
@@ -285,9 +285,10 @@ python3 scripts/build-jupiter2-reference-ram-boot.py \
 ### 1.2 OP-TEE入り構成の共通準備
 
 固定コミットのSpacemiT版OP-TEEをK3向けにクロスビルドします。下の例は
-実機向けK3のデバイス設定を使う評価用ビルドです。実機のeFuseに鍵が
-プロビジョニングされている想定で開発用HUKのフォールバックを無効にします。
-未書き込み機ではHUKが必要な機能を検証する前に対象機の鍵構成を確認してください。
+eFuse未書き込みのPico-ITX実機向けの評価用ビルドです。開発用HUKを許可し、
+RPMBを無効にします。開発用HUKは公開値に基づくため、製品の鍵保護には使用できません。
+Coreのログレベルを2に設定し、起動情報とエラーを残しながらUARTのシステムコールトレースを抑えます。
+[実機でのfTPM動作結果](milkv-jupiter2-stack-install.md#pico-itx-ftpm-pass)
 
 ```bash
 OPTEE_WORK="$PWD/.build-k3/optee-hardware"
@@ -305,16 +306,17 @@ fi
     git -C "$OPTEE_SRC" apply --reverse --check "$patch" 2>/dev/null ||
       git -C "$OPTEE_SRC" apply "$patch"
   done
-  make -C "$OPTEE_SRC" -j20 O="$OPTEE_WORK/out" ARCH=riscv PLATFORM=k3 \
+  make -C "$OPTEE_SRC" -j20 O="$OPTEE_WORK/out-huk-dev" ARCH=riscv PLATFORM=k3 \
     CROSS_COMPILE="$CROSS_COMPILE" CROSS_COMPILE_core="$CROSS_COMPILE" \
     CROSS_COMPILE_ta_rv64="$CROSS_COMPILE" \
     CFG_TEE_CORE_NB_CORE=16 CFG_NUM_THREADS=16 CFG_K3_PRIVATE_BOOT_DTB=y \
-    CFG_K3_EFUSE=y CFG_K3_HUK_ALLOW_UNFUSED=n CFG_K3_IOPMP=y CFG_K3_PRNG=y \
+    CFG_TEE_CORE_LOG_LEVEL=2 \
+    CFG_K3_EFUSE=y CFG_K3_HUK_ALLOW_UNFUSED=y CFG_K3_IOPMP=y CFG_K3_PRNG=y \
     CFG_MMP_RTC=y CFG_TE200_CRYPTO_DRIVER=y CFG_REE_FS=y CFG_REE_FS_TA=y CFG_RPMB_FS=n
 )
 
-TEE_BIN="$OPTEE_WORK/out/core/tee.bin"
-TEE_ELF="$OPTEE_WORK/out/core/tee.elf"
+TEE_BIN="$OPTEE_WORK/out-huk-dev/core/tee.bin"
+TEE_ELF="$OPTEE_WORK/out-huk-dev/core/tee.elf"
 test -s "$TEE_BIN"
 "${CROSS_COMPILE}readelf" -h -l "$TEE_ELF"
 ```

@@ -291,7 +291,10 @@ TAの読み込みやストレージのRPCには、選択した構成に応じて
   `k3_bianbu_defconfig` で `tpm_ftpm_tee` を既定モジュールにし、QEMUで
   `microsoft,ftpm` のDTノードから登録した `/dev/tpmrm0` 経由でも
   `TPM2_GetRandom(16)` の応答を確認した。KSB-084の修正後は16 hart QEMUで
-  モジュール登録から電源断まで反復試験に成功した。実機での動作は未確認。
+  モジュール登録から電源断まで反復試験に成功した。2026年11月28日にはPico-ITX実機でも
+  開発用HUKを許可したCoreで `/dev/tpmrm0` の登録と `TPM2_GetRandom(16)` の成功を確認した。
+  この実機試験ではIMAとfTPMは連携していない。
+  [実機でのfTPM動作結果](milkv-jupiter2-stack-install.md#pico-itx-ftpm-pass)
 - UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896` とコマンドID・共有バッファ
   の仕様を [Linux側ヘッダー](../linux-k3/drivers/char/tpm/tpm_ftpm_tee.h) と
   照合する。初期評価は署名済みREE-FS TAとrootfs起動後のドライバー読み込みを

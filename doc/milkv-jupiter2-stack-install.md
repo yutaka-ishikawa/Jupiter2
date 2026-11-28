@@ -647,6 +647,18 @@ sudo tpm2_getrandom -T "device:$TPM_DEVICE" --hex 16
 [TA直接呼び出しの準備](jupiter2-ftpm-ta-test.md#テストコードとtee-supplicantのビルド) ·
 [TPMデバイスを使う試験](jupiter2-ftpm-ta-test.md#linuxのtpmリソースマネージャー経由の試験)
 
+<a id="pico-itx-ftpm-pass"></a>
+##### Pico-ITX実機でのfTPM動作結果
+
+2026年11月28日、eFuse未書き込みのPico-ITX実機で、開発用HUKを許可した
+OP-TEE Core（`CFG_K3_HUK_ALLOW_UNFUSED=y`、`CFG_RPMB_FS=n`）を同居FITに組み込んで起動した。
+`microsoft,ftpm` を含むLinux用DTBを使用し、ログイン後に `tee-supplicant` を起動してから
+`tpm_ftpm_tee` を再ロードした。`/dev/tpm0` と `/dev/tpmrm0` が登録され、実機の操作者が
+`sudo tpm2_getrandom -T device:/dev/tpmrm0 --hex 16` の成功を確認した。
+この試験では **IMAとfTPMは連携していない**。IMAによるPCR 10の更新は未検証。
+試験時のCoreは詳細トレースを出力していた。UARTの出力を抑えるビルド設定は
+[実機用Coreのビルド手順](jupiter2-build-install-test.md#12-op-tee入り構成の共通準備)に記載する。
+
 <a id="pico-itx-ima-ftpm"></a>
 ##### Linux IMAとfTPMのPCR 10を確認する
 
