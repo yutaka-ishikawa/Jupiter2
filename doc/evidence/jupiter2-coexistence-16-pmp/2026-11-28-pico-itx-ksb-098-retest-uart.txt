@@ -1,0 +1,30 @@
+KSB-098 Pico-ITX 実機USB RAM起動の再試験（2026-11-28、日本時間）
+元UARTのSHA-256 c55629ce6215e76dc85526fd1168282dde79cc57d1de7cd626bd99747645f6b3
+元UARTのサイズ 303293 バイト、4565 行
+提供されたFITチェックサム 9da8c3b862fded0a74ca622d1e632ec45fc03fa990eabfb41d136249a28d8e78  images/ram-boot-keystone.itb
+FIT本体とソースコミットの照合は未実施。
+
+1〜2699行は先行した起動。以下は2700行から始まるUSB RAM起動の抜粋。
+4564行が最後の非空行。再試験区間ではU-Boot本体のバナーとLinux起動の出力を確認できなかった。
+
+2700 sys: 0x10001200
+2705 ROM: usb download handler
+2772 Starting download of 411776 bytes
+2781 U-Boot SPL 2022.10-g4c294a06-dirty (Nov 28 2026 - 10:19:42 +0900)
+2868 downloading/uploading of 2624029 bytes finished
+2874 k3-rproc rcpu@0: [RAMBOOT] core=0 handshake acknowledged
+2877 k3-rproc rcpu@1: [RAMBOOT] core=1 handshake acknowledged
+2879 [RAMBOOT] OpenSBI entry=0x100000000 next=0x102000000 dtb=102153cf0 hart=0
+2886 OpenSBI v1.6
+2942 Firmware Heap Size          : 106 KB (total), 6 KB (reserved), 28 KB (used), 71 KB (free)
+2971 Domain1 Name                : untrusted-domain
+2993 Domain1 Next Address        : 0x0000000102000000
+2994 Domain1 Next Arg1           : 0x0000000102153cf0
+2999 Domain2 Name                : optee-domain
+3022 Domain2 Next Address        : 0x0000000171000000
+3023 Domain2 Next Arg1           : 0x0000000171132000
+3028 Boot HART ID                : 0
+3033 Boot HART PMP Count         : 16
+3206 E/TC:00 00 tee_otp_get_hw_unique_key:100 HUK: eFuse banks 1/2 unprogrammed, refusing to derive
+4563 Registered OP-TEE entry table: 0x171000384
+4564 K3 OP-TEE handoff: domain exit returned rc=-1004

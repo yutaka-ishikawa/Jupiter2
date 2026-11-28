@@ -432,3 +432,40 @@ KSB-098 boot-hart diagnostics
   b62785dac7d446c1b18b3660e55ef4e405cf986a64ae9408d3e84a69e308ab66  ram-boot-keystone.itb
   8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  k3-pico-itx-keystone-optee.dtb
   USB RAM boot of the diagnostic image on Pico-ITX is pending.
+
+KSB-098 OpenSBI heap regression
+  Fix commit 617f1c38853c69e5f9f86c7c379f79e37822db05
+  OpenSBI was linked with GCC 13.3 and Zbb using the same Keystone SM.
+  The R/W offset 0x40000 matches the Pico-ITX trace. Both heap cases used
+  the same firmware, 16 harts, Sstc on, Linux, Core with the eFuse model,
+  and initramfs. The QEMU DTB differed only in the heap-size setting.
+  OpenSBI BIN SHA-256 954a3374093912d7fc1b139f9782131cf8b2f938f55f7c90cb9cc74f622a19f2
+
+  Default 106 KiB, mixed 16/32 slots. Failure reproduced before Linux.
+    Domain context allocation failed: hart=0 domain=root bytes=440 heap-free=15168
+    K3 OP-TEE handoff: domain exit returned rc=-1004
+  The run reached the 60 s harness timeout. A separate reproduction paused
+  at the same failure and inspected the allocator lists through QEMU.
+  The free data area was one contiguous 15,168-byte block. The allocator
+  had no free bookkeeping nodes. The 6,144-byte bookkeeping area provides
+  192 nodes of 32 bytes; it is distinct from the data area.
+  Inspection UART SHA-256 1563a0ac1fa3c886b3f2cf20b744ac08f50331e2a86192ec84d65a2b7699c444
+
+  192 KiB, mixed 16/32 slots, PASS, exit 0, 43.87 s.
+  192 KiB, uniform 16 slots, PASS, exit 0, 56.25 s.
+  Both brought up 16 CPUs, passed 16 enclave runs and 33 TA calls including
+  OCALL, and powered down. PMP peak by state: boot-host 15, OP-TEE 15,
+  host 16, enclave 16. GEU and UTM round trips passed on both profiles.
+
+  Pico-ITX host build used the pinned SPL/U-Boot and the board Core ELF/BIN.
+  Extracted FIT DTB matched records/opensbi-uboot.dtb and contained
+  heap-size 0x30000. Runtime span was 770,048 bytes (752 KiB), with the
+  fixed 1,048,576-byte PMP reservation. The 1 MiB check rejected an ELF
+  whose R/W offset was 0x80000, for which the R/W region cannot cover the
+  text in the same 1 MiB entry. The generated Linux DTB had 16 MPXY channels.
+  All 48 host regression checks, bundle checksums and both USB dry runs passed.
+  f1c2913890a44a3d56ce9bc283c7b4001c8b489f1576de680467bd9c6f0b6259  FSBL.bin
+  aebc76c4e6562d70982165e4d6f272f788366796d49829d65f45c2cb2835fdb9  ram-boot-keystone.itb
+  8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  k3-pico-itx-keystone-optee.dtb
+  5ae48ebffe8306e9154b19e0dd0e3f2aa69ca002db7b254a9d8453548c6afeef  ram-boot-bundle.tar.gz
+  The 192 KiB FIT has yet to boot on the physical board.

@@ -350,9 +350,13 @@ UARTで確認した。実機でのPMPの読み戻し結果は表の2状態に限
 OP-TEEはeFuseバンク1・2を未書き込みと判定し、HUKの導出を拒否した。
 `tee_fs_init_key_manager()` に続いて初期化エラーが出た後も、周辺機器の初期化ログと
 エントリーテーブルの登録まで進んだ。HUKのエラーと最後の停止との因果関係は未確定。
-ドメイン終了から `mret` 直前までを区別する診断ログを追加した。次の実機試験では診断版のFITで
-USB RAM起動し、UARTの最後の診断行と使用イメージのハッシュを採取する。
-[診断版のビルドと実機再試験](keystone-bug-report.md#ksb-098-retest)
+診断版で再試験すると、初回ドメイン終了処理が `SBI_ENOMEM (-1004)` を返した。実機と同じ
+106 KiBでQEMUでも再現し、空きデータがある状態で割り当て管理枠が枯渇していることを確認した。
+Pico-ITX同梱FITのヒープを192 KiBに設定し、OpenSBIの実行範囲を既存の1 MiB内に収めた。
+QEMUの混在16/32枠・一律16枠の同居試験が通過した。再試験では修正版のUSB RAM起動で
+U-Bootへ引き渡せることを確認する。
+[再試験の実機UARTとFITチェックサム](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-retest-uart.txt) ·
+[修正版のビルドと実機再試験](keystone-bug-report.md#ksb-098-retest)
 
 [実機UART抜粋と元ログのSHA-256](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt) ·
 [不具合台帳 KSB-098](keystone-bug-report.md#ksb-098)

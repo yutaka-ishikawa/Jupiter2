@@ -232,7 +232,9 @@ VARIANT=keystone
 OpenSBI側は参照U-BootのPico-ITX用DTBをベースに、ビルド中に
 OP-TEEドメイン、Coreと共有メモリの予約、MPXY設定を生成します。
 ベースDTBは `records/opensbi-uboot-base.dtb` に保存します。
-この構成の実機起動とPMP割り当ては未検証です。
+Pico-ITXの16枠同梱構成では、OpenSBIのヒープを192 KiBに設定して初回の
+ドメインコンテキスト確保に必要な管理枠を確保します。修正後の実機確認はKSB-098で追跡します。
+[停止原因と再試験](keystone-bug-report.md#ksb-098)
 
 実機向けの設定済みDTBやオーバーレイを既に用意している場合は、
 それぞれ `--opensbi-dtb` または `--opensbi-overlay` で指定できます。
@@ -286,8 +288,15 @@ fdtget -t x "$LINUX_OPTEE_DTB" /firmware/optee mboxes
 
 1.4節で指定した `VARIANT=keystone` を使うと、上のコマンドが
 `--optee-elf "$TEE_ELF" --pico-itx-pmp16` を渡します。ビルダーが同じCoreのELFとBINを
-照合し、ELFの `.k3_boot_dtb` から私有DTBのアドレスと容量を取り出します。
+照合し、ELFの `.k3_boot_dtb` から私有DTBのアドレスと容量を取り出します。OpenSBIのELFと
+生成DTBから、実行時に確保するスタックとヒープを含めて既存の1 MiB保護範囲に収まるか検査します。
 上のLinux用DTB生成で、同じビルドの `records/opensbi-uboot.dtb` を使います。
+
+標準の入力で生成したOpenSBI用DTBの `heap-size` は16進数の `30000` です。
+
+```bash
+fdtget -t x "$OUT/records/opensbi-uboot.dtb" /chosen/opensbi-config heap-size
+```
 
 FSBL・FIT・Linux用DTBの生成とハッシュ照合をホストで確認しました。実機のUSB RAM起動では、
 クロック・リセット仲介と実機I/O・DMAの動作を確認します。

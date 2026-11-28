@@ -121,7 +121,7 @@
 | KSB-095 | OP-TEE単独の並行TA試験で停滞 | 16 hartのK3 QEMUでタイマー割り込みによるOP-TEEからの復帰と再試行が続く | OpenSBIが切り替え前の競合を返すよう修正。QEMU単独試験10回合格 |
 | KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
 | KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
-| KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Boot出力が確認できない | 未確定 | エントリーテーブル登録まで実機UARTを採取。診断ログはQEMUで確認。実機再試験待ち |
+| KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Bootへ進まない | OpenSBIのドメインコンテキスト確保が `SBI_ENOMEM (-1004)`。QEMUの106 KiB構成で割り当て管理枠の枯渇を確認 | 同梱FITを192 KiBに修正。QEMU同居とホスト生成に合格。修正版の実機起動待ち |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -2082,8 +2082,7 @@ OpenSBIのPMP初期化、OP-TEE Core起動まで到達した。最後の有効�
 カーネルモジュールの読み込みより前の段階である。
 
 OP-TEEのセキュアストレージ鍵初期化では、eFuseバンク1・2が未書き込みと判定されHUK導出に失敗した。
-その後にエントリーテーブルの登録まで進んでおり、最後の停止との因果関係は未確定。
-原因と再現頻度は未確定。ドメイン終了とU-Boot先頭のどちらまで実行されたかを切り分ける。
+その後もエントリーテーブルの登録まで進んだ。HUK導出の成否はストレージを試験する段階で確認する。
 [到達した段階とPMPの実測値](jupiter2-coexistence-16-pmp-plan.md#pico-itx-ram-boot-2026-11-28) ·
 [実機UART抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt)
 
@@ -2102,13 +2101,39 @@ OP-TEEのセキュアストレージ鍵初期化では、eFuseバンク1・2が�
 電源断まで進んだ。診断版は混在16/32枠と一律16枠の両方で、登録後の5つの診断行が順に
 出力された後、16 CPU、Enclave 16回、TA呼び出し33回、正常電源断を確認した。
 診断版OpenSBIを含むPico-ITX用FSBL・統合FITとLinux用DTBをホストで生成し、bundle照合、
-FSBLとFITの転送前dry-run、ホスト回帰48件に合格した。実機の停止箇所は再試験で確認する。
+FSBLとFITの転送前dry-run、ホスト回帰48件に合格した。
 [QEMUとホストビルドの証跡](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+#### 実機再試験で確認した原因と修正
+
+提供された2026-11-28の再試験ログは、ヒープが106 KiBの構成で、
+`Registered OP-TEE entry table` の直後に `K3 OP-TEE handoff: domain exit returned rc=-1004` で止まった。
+`-1004` は `SBI_ENOMEM`。`sbi_domain_context_exit()` が初回切り替え用のhart別コンテキストを
+確保できず、復帰先を選択する前に戻った。
+[再試験の実機UARTとFITチェックサム](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-retest-uart.txt)
+
+同じ106 KiBを使った16 hartのQEMUでも同じ停止を再現した。失敗した要求は440バイトで、
+連続した15,168バイトの空きデータ領域があった。QEMUで停止時の管理リストを読み取り、
+OpenSBIが割り当てを記録する管理枠を使い切ったことを確認した。実機では管理リストの採取は未実施。
+[OpenSBIのヒープ実装](../opensbi/lib/sbi/sbi_heap.c)
+
+`617f1c388` でPico-ITX同梱FITのOpenSBI用DTBに、既存の `opensbi,config` の
+`heap-size = <0x30000>`（192 KiB）を設定した。OpenSBIのELFと生成DTBから、
+コード・データ・全hartのスタック・ヒープが既存の1 MiBのPMP保護範囲に入る配置かを検査する。
+割り当て失敗時にはhart、ドメイン、要求バイト数、空きバイト数を記録する。
+[DTB生成](../scripts/prepare-jupiter2-optee-opensbi-dtb.py) ·
+[予約領域の検査](../scripts/build-jupiter2-reference-ram-boot.py)
+
+192 KiBでは混在16/32枠と一律16枠のQEMUがともに16 CPUを起動し、Enclave 16回、
+TA 33回（OCALLを含む）、電源断に合格した。使用したPMPは最大16枠。
+ホストで生成した実機用FITはOpenSBIの実行時サイズ752 KiB、予約1 MiBで、同梱ファイルの
+ハッシュ照合と転送dry-runに合格した。修正後の実機起動は再試験で確認する。
+[比較試験、実機用FITの生成とハッシュ](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
 <a id="ksb-098-retest"></a>
 #### 次の実機試験
 
-1. 開発PCのリポジトリルートで診断版OpenSBIとKeystone SMをビルドする。
+1. 開発PCのリポジトリルートで修正版OpenSBIとKeystone SMをビルドする。
    K3用クロスコンパイラの設定は実機用ビルド手順の準備を参照する。
    [開発PCの準備](jupiter2-build-install-test.md#開発pcの準備)
 2. 前回使ったOP-TEE Coreの`tee.bin`と`tee.elf`を用意する。
@@ -2133,11 +2158,14 @@ test -s "$SBI.bin" && test -s "$SBI.elf" && test -s "$TEE_BIN" && test -s "$TEE_
    `--optee-elf "$TEE_ELF" --pico-itx-pmp16` が選ばれる。別PCへ運ぶ場合は第1.7節で包装する。
    [同梱FITの生成](jupiter2-build-install-test.md#optee-fit-build) ·
    [RAM起動用bundle](jupiter2-build-install-test.md#ram-boot-bundle)
-4. 同じ出力先の`FSBL.bin`と`ram-boot-keystone.itb`をUSB RAM起動の手順で転送する。
-   電源投入からU-Bootのバナーか出力が止まるまでのUART全文と、使用したファイルのハッシュを保存する。
+4. FITの元になるOpenSBI用DTBで `heap-size` が `30000`（16進数）であることを確認する。
+   同じ出力先の`FSBL.bin`と`ram-boot-keystone.itb`をUSB RAM起動の手順で転送する。
+   UARTで `Firmware Heap Size : 192 KB`、`K3 OP-TEE handoff: PMP rc=0`、U-Boot本体のバナー
+   または `=>` を確認する。電源投入から到達点までのUART全文と、使用したファイルのハッシュを保存する。
    [USB RAM起動手順](jupiter2-ram-boot-guide.md)
 
 ```bash
+fdtget -t x "$OUT/records/opensbi-uboot.dtb" /chosen/opensbi-config heap-size
 git rev-parse HEAD > "$OUT/records/ksb-098-source-commit.txt"
 sha256sum "$SBI.bin" "$SBI.elf" "$TEE_BIN" "$TEE_ELF" \
   "$OUT/release/images/FSBL.bin" "$OUT/release/images/ram-boot-keystone.itb" \
@@ -2152,6 +2180,7 @@ sha256sum "$SBI.bin" "$SBI.elf" "$TEE_BIN" "$TEE_ELF" \
 | 最後に出た行 | 次に調べる範囲 |
 | --- | --- |
 | `Registered OP-TEE entry table` | ドメイン終了処理の入口からコンテキストの確保・選択まで |
+| `Domain context allocation failed` または `domain exit returned rc=-1004` | ヒープの設定値と、確保に失敗したhart・ドメインを確認する |
 | `hart=0 target=... initialized=...` | 復帰先は選択済み。`PMP rc` が出るまでのPMP切り替え処理を調べる |
 | `domain exit returned rc=...` または非0の `PMP rc=...` | 記録した戻り値と、その前に出た診断行 |
 | `PMP rc=0` | hartのドメイン所属を更新する処理 |
