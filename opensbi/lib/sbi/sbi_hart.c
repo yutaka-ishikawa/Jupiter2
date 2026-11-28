@@ -2354,6 +2354,9 @@ sbi_hart_switch_mode(unsigned long arg0, unsigned long arg1,
 		     unsigned long next_addr, unsigned long next_mode,
 		     bool next_virt)
 {
+#if defined(CONFIG_K3_KEYSTONE_SM) && K3_PMP_BOOT_TRACE
+    const struct sbi_domain *host = sbi_hart_keystone_optee_host();
+#endif
 #if __riscv_xlen == 32
 	unsigned long val, valH;
 #else
@@ -2413,6 +2416,15 @@ sbi_hart_switch_mode(unsigned long arg0, unsigned long arg1,
 
 	csr_write(CSR_TCMCFG, 1);
 	csr_set(CSR_MHCR, (1<<0));
+
+#if defined(CONFIG_K3_KEYSTONE_SM) && K3_PMP_BOOT_TRACE
+    if (host && sbi_domain_thishart_ptr() == host &&
+	current_hartid() == host->boot_hartid &&
+	next_addr == host->next_addr && next_mode == PRV_S && !next_virt) {
+	sbi_printf("K3 OP-TEE handoff: mret hart=%u next=%#lx arg1=%#lx\n",
+		   current_hartid(), next_addr, arg1);
+    }
+#endif
 
 	register unsigned long a0 asm("a0") = arg0;
 	register unsigned long a1 asm("a1") = arg1;

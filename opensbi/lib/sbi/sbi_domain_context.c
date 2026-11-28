@@ -105,6 +105,9 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
     struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
     struct sbi_trap_context *trap_ctx = sbi_trap_get_context(scratch);
     struct sbi_domain *current_dom, *target_dom;
+#if defined(CONFIG_K3_KEYSTONE_SM) && K3_PMP_BOOT_TRACE
+    bool trace_handoff;
+#endif
 #ifdef CONFIG_K3_KEYSTONE_SM
     int rc;
 #else
@@ -116,6 +119,15 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
     }
     current_dom = ctx->dom;
     target_dom = dom_ctx->dom;
+#if defined(CONFIG_K3_KEYSTONE_SM) && K3_PMP_BOOT_TRACE
+    trace_handoff = !set_caller && !ctx->initialized &&
+	current_dom == sbi_hart_keystone_optee_domain() &&
+	current_hartid() == current_dom->boot_hartid;
+    if (trace_handoff) {
+	sbi_printf("K3 OP-TEE handoff: hart=%u target=%s initialized=%d\n",
+		   current_hartid(), target_dom->name, dom_ctx->initialized);
+    }
+#endif
 
     /* A retryable entry must acquire both locks before changing domains. */
     if (try_lock) {
@@ -133,6 +145,11 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
      * new domain. On error the source retains its existing context.
      */
     rc = sbi_hart_keystone_switch_optee_pmp(target_dom);
+#if K3_PMP_BOOT_TRACE
+    if (trace_handoff) {
+	sbi_printf("K3 OP-TEE handoff: PMP rc=%d\n", rc);
+    }
+#endif
     if (rc) {
 	if (try_lock) {
 	    spin_unlock(&target_dom->assigned_harts_lock);
@@ -175,6 +192,12 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
 	spin_unlock(&current_dom->assigned_harts_lock);
     }
 
+#if defined(CONFIG_K3_KEYSTONE_SM) && K3_PMP_BOOT_TRACE
+    if (trace_handoff) {
+	sbi_printf("K3 OP-TEE handoff: domain assignment complete\n");
+    }
+#endif
+
     /* Generic domains retain the full PMP reconfiguration path. */
 #ifndef CONFIG_K3_KEYSTONE_SM
 	for (int i = 0; i < pmp_count; i++) {
@@ -208,23 +231,26 @@ static int switch_to_next_domain_context(struct hart_context *ctx,
 	/* Mark current context structure initialized because context saved */
 	ctx->initialized = true;
 
-	/* If target domain context is not initialized or runnable */
-	if (!dom_ctx->initialized) {
-		/* Startup boot HART of target domain */
-		if (current_hartid() == target_dom->boot_hartid)
-			sbi_hart_switch_mode(target_dom->boot_hartid,
-					     target_dom->next_arg1,
-					     target_dom->next_addr,
-					     target_dom->next_mode,
-					     false);
-	else {
+    /* If target domain context is not initialized or runnable */
+    if (!dom_ctx->initialized) {
+	if (current_hartid() == target_dom->boot_hartid) {
+#if defined(CONFIG_K3_KEYSTONE_SM) && K3_PMP_BOOT_TRACE
+	    if (trace_handoff) {
+		sbi_printf("K3 OP-TEE handoff: switch mode next=%#lx mode=%lu\n",
+			   target_dom->next_addr, target_dom->next_mode);
+	    }
+#endif
+	    sbi_hart_switch_mode(target_dom->boot_hartid, target_dom->next_arg1,
+				 target_dom->next_addr, target_dom->next_mode,
+				 false);
+	} else {
 #ifdef CONFIG_K3_KEYSTONE_SM
 	    sbi_hsm_optee_boot_stop(scratch);
 #else
 	    sbi_hsm_hart_stop(scratch, true);
 #endif
 	}
-	}
+    }
     return 0;
 }
 

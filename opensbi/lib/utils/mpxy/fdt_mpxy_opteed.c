@@ -216,6 +216,12 @@ static int mpxy_opteed_send_message_withresp(
 		entry_vector_table = (struct abi_entry_vectors *)words[1];
 		sbi_printf("Registered OP-TEE entry table: %#lx\n",
 			   (ulong)entry_vector_table);
+#if defined(CONFIG_K3_KEYSTONE_SM) && K3_PMP_BOOT_TRACE
+		rc = sbi_ecall_tee_domain_exit();
+		sbi_printf("K3 OP-TEE handoff: domain exit returned rc=%d\n",
+			   rc);
+		return rc;
+#endif
 	    }
 	} else {
 	    /* Skip a0 and transfer the a1 through a4 response. */
