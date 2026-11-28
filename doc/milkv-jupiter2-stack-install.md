@@ -608,6 +608,12 @@ printf 'OP-TEE PTA exit=%s\n' "$?"
 [実機のHUKログ](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-linux-boot-pass-uart.txt) ·
 [K3のHUK実装](https://github.com/spacemit-com/optee_os/blob/2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59/core/arch/riscv/plat-k3/k3_huk.c#L88-L103)
 
+REE側のファイルからfTPM TAをロードする試験では、Linux用DTBに有効な `microsoft,ftpm` ノードを
+用意する。実機同梱用のDTB生成処理はMPXYと `/firmware/optee` を追加する。参照DTBに
+`microsoft,ftpm` がなければ、LinuxがfTPMドライバをバインドするためのノードは別途必要。
+[LinuxのfTPMドライバ](../linux-k3/drivers/char/tpm/tpm_ftpm_tee.c) ·
+[REEに配置したfTPM TAの試験](jupiter2-ftpm-ta-test.md#linuxのtpmリソースマネージャー経由の試験)
+
 fTPMのLinuxドライバをモジュールとして用意した構成では、fTPM TAを前述の手順で配置し、
 `tee-supplicant` を起動してから `sudo modprobe tpm_ftpm_tee` を実行する。
 
@@ -626,6 +632,45 @@ sudo tpm2_getrandom -T "device:$TPM_DEVICE" --hex 16
 `sudo ./ftpm-smoke`を実行し、`fTPM PASS`と終了コード0を確認する。
 [TA直接呼び出しの準備](jupiter2-ftpm-ta-test.md#テストコードとtee-supplicantのビルド) ·
 [TPMデバイスを使う試験](jupiter2-ftpm-ta-test.md#linuxのtpmリソースマネージャー経由の試験)
+
+<a id="pico-itx-ima-ftpm"></a>
+##### Linux IMAとfTPMのPCR 10を確認する
+
+2026年11月28日のPico-ITX実機で `CONFIG_TCG_TPM=y`、`CONFIG_TCG_FTPM_TEE=m`、
+`CONFIG_SECURITYFS=y`、`# CONFIG_INTEGRITY is not set` を確認した。`securityfs` は
+`/sys/kernel/security` にマウント済みで、`ima/ascii_runtime_measurements`、`/sys/class/tpm/tpmN`、
+`/dev/tpmrmN` はなかった。IMAはカーネルで無効で、TPMも未登録だった。
+
+IMAの測定ログを確認する試験では、開発PCの `hardware/jupiter2/linux.config` に次の設定を入れる。
+このファイルは通常のK3カーネルの設定に重ねられる。既に定義のある項目は値を更新する。
+[K3カーネルのビルドスクリプト](../scripts/build-linux-k3.sh)
+
+```text
+CONFIG_INTEGRITY=y
+CONFIG_IMA=y
+CONFIG_IMA_NG_TEMPLATE=y
+CONFIG_IMA_MEASURE_PCR_IDX=10
+CONFIG_CRYPTO_SHA256=y
+CONFIG_IMA_DEFAULT_HASH_SHA256=y
+```
+
+この設定ではPCR 10、`ima-ng`、SHA-256が選ばれ、IMA部分のRV64クロスコンパイルは通過した。
+この設定を使ったImage全体のビルドと実機起動は未試験。
+
+Keystone同梱の試験では、開発PCで `make keystone JOBS=20` を実行し、Imageと同じビルドの
+モジュール、Keystoneドライバ、対応するinitrdで一時起動する。ログイン後、`securityfs` の
+`ima/ascii_runtime_measurements` に `boot_aggregate` が出ることを確認する。
+[カーネルとモジュールの配置](#6-新linuxとアプリを追加配置する) ·
+[USB RAM起動手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
+
+fTPMに測定を反映するには、`ima_init()` が走る前にfTPMを登録する。ログイン後に
+`modprobe` でTPMデバイスが現れても、その起動のIMAが初期化時に `TPM-bypass` だった場合は
+PCR 10を更新しない。QEMUでは早期登録した場合にだけPCR 10が更新された。
+実機ではHUKを使える状態とfTPMの早期登録経路を用意し、IMAログに追加された測定に対応する
+SHA-256バンクのPCR 10更新を `tpm2_pcrread -T device:/dev/tpmrmN sha256:10` で照合する。
+`N` はfTPMに割り当てられた番号。
+[カーネルのIMA初期化](../linux-k3/security/integrity/ima/ima_init.c#L118) ·
+[QEMUでの早期・遅延登録の比較](evidence/jupiter2-ftpm-ima/uart.txt)
 
 同梱構成では、同じ起動中にKeystoneとOP-TEEの結果を採取する。
 同時実行、再起動後の保持、IMA、PMPなどの追加確認は構成に合う実機検査項目を使用する。
