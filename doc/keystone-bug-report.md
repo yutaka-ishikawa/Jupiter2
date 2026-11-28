@@ -115,12 +115,13 @@
 | KSB-089 | OP-TEE同居ゲストの `/init` が命令アクセスフォルトで停止 | 起動DTB用PMP領域のLinux予約漏れを確認。報告時のフォルト物理アドレスは未確認 | 予約を追加し、既存の同居試験で回帰確認 |
 | KSB-090 | 既定の同居DTBでfTPMデバイスが作られない | `microsoft,ftpm` のノードが未定義 | 同居用DTSにfTPMノードを追加 |
 | KSB-091 | fTPM・IMAゲストの初期化がタイムアウトする | 固定DTSで起動時の乱数シード欠落を確認。タイムアウトとの因果は未確定 | 試験ごとに新しいシードを供給 |
-| KSB-092 | 実機の同居RAM起動がOpenSBIのPMP初期化で停止 | 同梱FITとUARTから現行規則で21枠相当を確認 | Pico-ITXの固定配置を実装。QEMUで最大16枠を確認し実機用FITを生成。実機未試験 |
-| KSB-093 | 実機同居用のOP-TEE起動DTBが読み取り専用 | OP-TEEの外部DTB初期化と領域のR権限が不整合 | Core内にDTBを複製する構成をQEMUで確認。実機未試験 |
+| KSB-092 | 実機の同居RAM起動がOpenSBIのPMP初期化で停止 | 同梱FITとUARTから現行規則で21枠相当を確認 | Pico-ITXの固定配置を実装。実機でOpenSBIのPMP初期化を通過しCore起動へ到達 |
+| KSB-093 | 実機同居用のOP-TEE起動DTBが読み取り専用 | OP-TEEの外部DTB初期化と領域のR権限が不整合 | 実機UARTでCore内への複製とCore起動を確認 |
 | KSB-094 | 対応するMPXY初期化が失敗しても起動を継続 | FDTドライバーの失敗がgenericプラットフォームへ返らない | K3 Keystone構成で失敗を返し、QEMUでS-modeへの引き渡し前に停止を確認 |
 | KSB-095 | OP-TEE単独の並行TA試験で停滞 | 16 hartのK3 QEMUでタイマー割り込みによるOP-TEEからの復帰と再試行が続く | OpenSBIが切り替え前の競合を返すよう修正。QEMU単独試験10回合格 |
 | KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
 | KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
+| KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Boot出力が確認できない | 未確定 | エントリーテーブル登録まで実機UARTを採取。U-Bootへの引き渡しを調査中 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -1889,7 +1890,10 @@ Linuxの16 KiB拒否、OP-TEEの4 KiB RW、Linux復帰後の拒否を枠7のCSR�
 
 Pico-ITXの全枠配置をK3コードに追加した。QEMUでは枠14をLinuxのDCIU拒否、OP-TEEの無効、
 EnclaveのUTM RWで共用し、Linux復帰時の読み戻しを確認した。混在16/32枠と一律16枠で最大16枠だった。
-Pico-ITX向けのFSBL・FIT・Linux DTBを生成し、Coreと予約範囲を照合した。実機の起動とDMA保護は未検査。
+Pico-ITX向けのFSBL・FIT・Linux DTBを生成し、Coreと予約範囲を照合した。
+2026-11-28の実機USB RAM起動では全16 hartで起動時15枠、OP-TEE実行時14枠を読み戻し、
+この問題で止まっていたOpenSBI初期化を通過した。Linux復帰後のPMPとDMA保護は未確認。
+[実機で確認した範囲](jupiter2-coexistence-16-pmp-plan.md#pico-itx-ram-boot-2026-11-28)
 [B案の選択とA案へ変更する条件](jupiter2-coexistence-16-pmp-plan.md#状態別pmpアドレスの定義先)
 [QEMUのUART・CSR記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
@@ -1899,12 +1903,15 @@ Pico-ITX向けのFSBL・FIT・Linux DTBを生成し、Coreと予約範囲を照�
 採用コミット `2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59` のK3構成は `CFG_EXTERNAL_DT=y` で、
 OP-TEE起動時に `fdt_open_into()` を同じバッファーに対して呼び、`update_external_dt()` で
 ノードと予約情報を書き込む。実機用生成側の権限指定と採用版の起動処理の不整合をソースで確認した。
-起動は先にKSB-092の枠不足で止まっており、この書き込みまで到達した実機ログは未取得。
+初期調査では、起動が先にKSB-092の枠不足で止まり、この書き込みまで到達しなかった。
 [実機用DTBの権限指定](../scripts/prepare-jupiter2-optee-opensbi-dtb.py#L40) · [OP-TEEの外部DTB初期化](https://github.com/spacemit-com/optee_os/blob/2fbd6ae54d89ff8621cdc1b5379c6bbe6f2d3c59/core/kernel/dt.c#L809)
 
 OP-TEEのリンク時に書き込み可能な領域を確保し、OpenSBIが検査済みDTBを複製してCoreの起動引数へ渡す。
 QEMUでは元のDTBをOP-TEEから読み取り専用にした状態で、コピーを使う初期化とTAの実行を確認した。
-実機向けはELFとBINの一致、予約領域、FIT内のDTBをホストで照合した。実機の起動確認が残る。
+実機向けはELFとBINの一致、予約領域、FIT内のDTBをホストで照合した。
+2026-11-28の実機ログでOpenSBIが66,352バイトの起動DTBをCore内に複製し、Coreが起動して
+エントリーテーブルを登録したことを確認した。U-Boot本体への引き渡しはKSB-098で追跡する。
+[実機UART抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt)
 [OP-TEEの予約領域](../patches/optee/k3-private-boot-dtb.patch) ·
 [QEMUとホストビルドの記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
@@ -2064,3 +2071,18 @@ HSM待機のままで、主hartはOP-TEEの `wait_secondary` に留まってい�
 
 実機での確認は未実施。
 [QEMUの入力と停止時の記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+<a id="ksb-098"></a>
+### KSB-098 実機USB RAM起動でOP-TEE登録後のU-Boot出力が確認できない
+
+2026-11-28のPico-ITXの同居USB RAM起動で、SPLのFIT受信、両RCPUのハンドシェイク、
+OpenSBIのPMP初期化、OP-TEE Core起動まで到達した。最後の有効行は
+`Registered OP-TEE entry table: 0x171000384`。この出力の直後に
+`sbi_ecall_tee_domain_exit()` を呼ぶ。U-Boot本体のバナーやLinux起動ログは採取されていない。
+カーネルモジュールの読み込みより前の段階である。
+
+OP-TEEのセキュアストレージ鍵初期化では、eFuseバンク1・2が未書き込みと判定されHUK導出に失敗した。
+その後にエントリーテーブルの登録まで進んでおり、最後の停止との因果関係は未確定。
+原因と再現頻度は未確定。ドメイン終了とU-Boot先頭のどちらまで実行されたかを切り分ける。
+[到達した段階とPMPの実測値](jupiter2-coexistence-16-pmp-plan.md#pico-itx-ram-boot-2026-11-28) ·
+[実機UART抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt)

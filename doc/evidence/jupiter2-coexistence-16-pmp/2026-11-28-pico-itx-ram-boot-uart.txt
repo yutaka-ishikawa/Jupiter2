@@ -1,0 +1,100 @@
+Milk-V Jupiter2 Pico-ITX USB RAM boot UART excerpts
+Record date: 2026-11-28 JST
+Original pasted text: 182541 bytes
+SHA-256 of original pasted text: b770f0abd1f9572baf54be6cd842c2114da78cbaa173495d06802d511898f7a0
+
+Each number at the left is a line number in the original UART text.
+The excerpts retain the boot checkpoints, recognizable PMP readbacks and the
+last non-empty line. UART messages from multiple harts interleave near the end.
+
+Earlier boot before entering USB download mode
+  10  U-Boot SPL 2022.10 (Jul 15 2026 - 08:17:41 +0000)
+ 104  Starting kernel ...
+ 758  [    5.078664] Run /init as init process
+ 788  [    8.975583] systemd[1]: Created slice system-modprobe.slice - Slice /system/modprobe.
+
+BootROM USB download, FSBL/SPL, FIT and ESOS
+ 850  bm:2
+ 854  ROM: usb download handler
+ 902  Starting download of 411776 bytes
+ 907  fastboot_handle_command: continue
+ 911  U-Boot SPL 2022.10-g4c294a06-dirty (Nov 28 2026 - 09:29:42 +0900)
+ 913  Get product name from eeprom k3-pico-itx
+ 915  DDR Part Number: MT62F4G32D8DV, Size: 16384MB, Data Rate: 6400MT/s
+1002  Starting download of 2624029 bytes
+1004  downloading/uploading of 2624029 bytes finished
+1006  Boot from fit configuration k3-pico-itx
+1009  k3-rproc rcpu@0: [RAMBOOT] start core=0 entry=0x100200000
+1010  k3-rproc rcpu@0: [RAMBOOT] core=0 handshake acknowledged
+1012  k3-rproc rcpu@1: [RAMBOOT] start core=1 entry=0x100804000
+1013  k3-rproc rcpu@1: [RAMBOOT] core=1 handshake acknowledged
+1015  [RAMBOOT] OpenSBI entry=0x100000000 next=0x102000000 dtb=102153cf0 hart=0
+1022  OpenSBI v1.6
+1032  [SM/TIMER] host=sstc enclave=mtimer slice-us=10000
+1055  K3 OP-TEE boot DTB: 66352 bytes from 0x102153cf0 to 0x171132000
+
+OpenSBI domain configuration and boot hart
+1107  Domain1 Name                : untrusted-domain
+1129  Domain1 Next Address        : 0x0000000102000000
+1131  Domain1 Next Mode           : S-mode
+1135  Domain2 Name                : optee-domain
+1158  Domain2 Next Address        : 0x0000000171000000
+1160  Domain2 Next Mode           : S-mode
+1164  Boot HART ID                : 0
+1165  Boot HART Domain            : optee-domain
+1169  Boot HART PMP Count         : 16
+1170  Boot HART PMP Granularity   : 12 bits
+
+PMP readbacks in boot-host state
+1202  [K3-PMP] shared CSR hart=0 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1753  [K3-PMP] shared CSR hart=1 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1754  [K3-PMP] shared CSR hart=2 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1755  [K3-PMP] shared CSR hart=3 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1756  [K3-PMP] shared CSR hart=5 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1757  [K3-PMP] shared CSR hart=4 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1758  [K3-PMP] shared CSR hart=6 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1759  [K3-PMP] shared CSR hart=7 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+1760  [K3-PMP] shared CSR hart=8 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+1761  [K3-PMP] shared CSR hart=9 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+1762  [K3-PMP] shared CSR hart=12 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+1763  [K3-PMP] shared CSR hart=13 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+1764  [K3-PMP] shared CSR hart=10 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+1765  [K3-PMP] shared CSR hart=11 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+1766  [K3-PMP] shared CSR hart=14 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+1767  [K3-PMP] shared CSR hart=15 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+
+OP-TEE Core startup and key initialization
+1326  I/TC: OP-TEE version: k3-br-v1.0.10-dev+k3-v1.0 (gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1)) #2 Fri Nov 27 08:41:09 UTC 2026 riscv
+1329  I/TC: Primary CPU initializing
+1341  D/TC:00 00 do_init_calls:19 service_initcall level 3 tee_fs_init_key_manager()
+1342  E/TC:00 00 tee_otp_get_hw_unique_key:100 HUK: eFuse banks 1/2 unprogrammed, refusing to derive
+1343  E/TC:00 00 do_init_calls:22 service_initcall __text_start + 0x00065b18 failed
+1345  I/TC: MMP RTC registered
+1347  I/TC: K3 PRNG enabled
+1349  I/TC: K3 IOPMP: 8 instances enabled, RISCV checker disabled
+1354  I/TC: TE200 base initialized
+
+PMP readbacks in optee state
+1258  [K3-PMP] shared CSR hart=0 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2518  [K3-PMP] shared CSR hart=1 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2519  [K3-PMP] shared CSR hart=2 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2520  [K3-PMP] shared CSR hart=3 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2521  [K3-PMP] shared CSR hart=5 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2522  [K3-PMP] shared CSR hart=4 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2523  [K3-PMP] shared CSR hart=6 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2524  [K3-PMP] shared CSR hart=7 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+2525  [K3-PMP] shared CSR hart=8 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+2526  [K3-PMP] shared CSR hart=9 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+2527  [K3-PMP] shared CSR hart=12 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+2528  [K3-PMP] shared CSR hart=13 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+2529  [K3-PMP] shared CSR hart=10 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+2530  [K3-PMP] shared CSR hart=11 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+2531  [K3-PMP] shared CSR hart=14 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+2532  [K3-PMP] shared CSR hart=15 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+
+Final intact lines
+2698  [K3-PMP] retarget CSR hart=2 state=host slot=10 base=0xd4050000 order=14 prot=0x18
+2699  Registered OP-TEE entry table: 0x171000384
+
+Line 2699 is the last non-empty line. The USB boot segment begins at line 849
+and contains no subsequent U-Boot proper banner, Linux boot marker or kernel log.

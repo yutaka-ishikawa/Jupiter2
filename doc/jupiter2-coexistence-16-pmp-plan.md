@@ -321,6 +321,41 @@ fTPM・IMAは早期登録と遅延登録が合格し、NV試験は別のQEMUプ�
 工程5では修正版の統合FITでUSB RAM起動し、Pico-ITXのMMIO仲介、ESOS・RPMI、eFuseおよび
 IOPMPの実効権限を確認する。今回のQEMUゲストはQEMU用DTBで起動した。
 
+<a id="pico-itx-ram-boot-2026-11-28"></a>
+### 実機USB RAM起動の記録（2026-11-28）
+
+Pico-ITX実機でKeystone・OP-TEE同梱FITをUSB RAM起動した際の、利用者提供のUARTログを確認した。
+前半のLinuxとsystemdの出力は、後半のBootROM USBダウンロードより前の別の起動に属する。
+以下は後半のUSB RAM起動の到達点。試験で使ったFSBL・FIT・Coreのハッシュと正確なソースコミットは
+この記録からは特定できていない。
+
+| 段階 | UARTで確認した内容 |
+| --- | --- |
+| BootROMとSPL | 411,776バイトのFSBLを転送し、参照SPLが起動。SPLが2,624,029バイトの統合FITを受信 |
+| ESOSとOpenSBI | 両RCPUのハンドシェイクが完了し、OpenSBI v1.6が起動。起動hart 0は `optee-domain` を選択 |
+| PMP | 全16 hartで、`boot-host` 状態は15枠（`0xdfff`）、`optee` 状態は14枠（`0x9fff`）を読み戻した。実装数はhart 0–7が16枠、8–15が32枠。粒度は4 KiB |
+| OP-TEE Core | OpenSBIが66,352バイトの起動DTBをCore内へ複製。Coreの初期化を経てエントリーテーブルを登録 |
+| U-Boot本体とLinux | 最後の有効行は `Registered OP-TEE entry table: 0x171000384`。以後のU-Boot本体のバナー、プロンプト、Linux起動の出力は未確認 |
+
+KSB-092のドメイン初期化の停止地点をこの試行では通過し、KSB-093で追加した起動DTBの複製も
+UARTで確認した。実機でのPMPの読み戻し結果は表の2状態に限る。Linux復帰後とEnclave実行時のPMP、
+周辺機器・DMA保護、TAとfTPMの動作は今後の確認項目。
+
+最後の出力は `sbi_ecall_tee_domain_exit()` の呼び出し直前に出る。次の引き渡し先は
+`untrusted-domain` のS-mode、アドレス `0x102000000` のU-Boot本体。ログだけでは
+ドメイン終了処理とU-Boot初期出力の間のどこで止まったかを特定できない。
+カーネルモジュールが読み込まれるより前の段階。
+[OpenSBIのエントリーテーブル登録とドメイン終了](../opensbi/lib/utils/mpxy/fdt_mpxy_opteed.c#L215)
+
+OP-TEEはeFuseバンク1・2を未書き込みと判定し、HUKの導出を拒否した。
+`tee_fs_init_key_manager()` に続いて初期化エラーが出た後も、周辺機器の初期化ログと
+エントリーテーブルの登録まで進んだ。HUKのエラーと最後の停止との因果関係は未確定。
+次の実機試験では、使用したイメージのハッシュと末尾までのUARTを保存し、
+停止が繰り返される場合はOpenSBIのドメイン終了とU-Bootの先頭を別々に計測する。
+
+[実機UART抜粋と元ログのSHA-256](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt) ·
+[不具合台帳 KSB-098](keystone-bug-report.md#ksb-098)
+
 ## 3. 完了時の記録
 
 ソースのコミットと設定、ハードウェア採取ID、FSBL・FIT・OpenSBI・Core・Linux Image・DTBの
