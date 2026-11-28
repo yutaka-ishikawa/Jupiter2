@@ -121,7 +121,7 @@
 | KSB-095 | OP-TEE単独の並行TA試験で停滞 | 16 hartのK3 QEMUでタイマー割り込みによるOP-TEEからの復帰と再試行が続く | OpenSBIが切り替え前の競合を返すよう修正。QEMU単独試験10回合格 |
 | KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
 | KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
-| KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Boot出力が確認できない | 未確定 | エントリーテーブル登録まで実機UARTを採取。U-Bootへの引き渡しを調査中 |
+| KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Boot出力が確認できない | 未確定 | エントリーテーブル登録まで実機UARTを採取。診断ログはQEMUで確認。実機再試験待ち |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -2086,3 +2086,75 @@ OP-TEEのセキュアストレージ鍵初期化では、eFuseバンク1・2が�
 原因と再現頻度は未確定。ドメイン終了とU-Boot先頭のどちらまで実行されたかを切り分ける。
 [到達した段階とPMPの実測値](jupiter2-coexistence-16-pmp-plan.md#pico-itx-ram-boot-2026-11-28) ·
 [実機UART抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt)
+
+#### 引き渡しの診断ログ
+
+`b037d8266` に、PMP起動トレース有効時の起動hart向け診断を追加した。
+エントリーテーブル登録後のドメイン選択、PMP切り替えの戻り値、hartの所属更新完了、
+`sbi_hart_switch_mode()` への遷移、および `mret` 直前を記録する。
+初回のドメイン終了処理から戻った場合は戻り値も表示する。
+通常の `make opensbi` は `K3_PMP_BOOT_TRACE=1` を指定する。
+[MPXYの初回完了処理](../opensbi/lib/utils/mpxy/fdt_mpxy_opteed.c) ·
+[ドメイン切り替え](../opensbi/lib/sbi/sbi_domain_context.c) ·
+[S-modeへの引き渡し](../opensbi/lib/sbi/sbi_hart.c)
+
+診断版と同じQEMU入力で、変更前の混在16/32枠構成はLinux起動、Enclave実行、TA呼び出しと
+電源断まで進んだ。診断版は混在16/32枠と一律16枠の両方で、登録後の5つの診断行が順に
+出力された後、16 CPU、Enclave 16回、TA呼び出し33回、正常電源断を確認した。
+診断版OpenSBIを含むPico-ITX用FSBL・統合FITとLinux用DTBをホストで生成し、bundle照合、
+FSBLとFITの転送前dry-run、ホスト回帰48件に合格した。実機の停止箇所は再試験で確認する。
+[QEMUとホストビルドの証跡](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+<a id="ksb-098-retest"></a>
+#### 次の実機試験
+
+1. 開発PCのリポジトリルートで診断版OpenSBIとKeystone SMをビルドする。
+   K3用クロスコンパイラの設定は実機用ビルド手順の準備を参照する。
+   [開発PCの準備](jupiter2-build-install-test.md#開発pcの準備)
+2. 前回使ったOP-TEE Coreの`tee.bin`と`tee.elf`を用意する。
+   以下は実機向けの標準出力先を使う例。別の場所にビルドした場合は両方のパスを合わせる。
+
+```bash
+git pull --ff-only && make opensbi JOBS=20
+```
+
+ビルドに成功したシェルで、統合FITの入力と新しい出力先を設定する。
+
+```bash
+SBI="$PWD/.build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic"
+TEE_BIN="$PWD/.build-k3/optee-hardware/out/core/tee.bin"
+TEE_ELF="$PWD/.build-k3/optee-hardware/out/core/tee.elf"
+OUT="$PWD/work/jupiter2-ram-boot/ksb-098-$(date +%Y%m%d-%H%M%S)"
+VARIANT=keystone
+test -s "$SBI.bin" && test -s "$SBI.elf" && test -s "$TEE_BIN" && test -s "$TEE_ELF"
+```
+
+3. 第1.5節で同梱FITとLinux用DTBを生成する。`VARIANT=keystone` で
+   `--optee-elf "$TEE_ELF" --pico-itx-pmp16` が選ばれる。別PCへ運ぶ場合は第1.7節で包装する。
+   [同梱FITの生成](jupiter2-build-install-test.md#optee-fit-build) ·
+   [RAM起動用bundle](jupiter2-build-install-test.md#ram-boot-bundle)
+4. 同じ出力先の`FSBL.bin`と`ram-boot-keystone.itb`をUSB RAM起動の手順で転送する。
+   電源投入からU-Bootのバナーか出力が止まるまでのUART全文と、使用したファイルのハッシュを保存する。
+   [USB RAM起動手順](jupiter2-ram-boot-guide.md)
+
+```bash
+git rev-parse HEAD > "$OUT/records/ksb-098-source-commit.txt"
+sha256sum "$SBI.bin" "$SBI.elf" "$TEE_BIN" "$TEE_ELF" \
+  "$OUT/release/images/FSBL.bin" "$OUT/release/images/ram-boot-keystone.itb" \
+  "$OUT/release/images/k3-pico-itx-keystone-optee.dtb" \
+  > "$OUT/records/ksb-098-sha256.txt"
+```
+
+#### 最後のUART出力を読む
+
+診断行は `K3 OP-TEE handoff:` で始まる。次の行が出ない場合は、上から順に到達点を判定する。
+
+| 最後に出た行 | 次に調べる範囲 |
+| --- | --- |
+| `Registered OP-TEE entry table` | ドメイン終了処理の入口からコンテキストの確保・選択まで |
+| `domain exit returned rc=...` または非0の `PMP rc=...` | 記録した戻り値と、その前に出た診断行 |
+| `PMP rc=0` | hartのドメイン所属を更新する処理 |
+| `domain assignment complete` | S-modeのコンテキスト復元と対象ドメインの起動判定 |
+| `switch mode next=...` | `sbi_hart_switch_mode()` のレジスタ設定から `mret` 直前まで |
+| `mret hart=...` | `mret` 直前まで到達。次はU-Boot入口から最初のUART出力までを調べる |
+| U-Boot本体のバナーまたは `=>` | U-Bootへの引き渡しを確認。対応するDTBを使ったLinux起動へ進む |

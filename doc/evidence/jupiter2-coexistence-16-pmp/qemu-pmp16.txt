@@ -407,3 +407,28 @@ Pico-ITX 16-slot publication validation
   95524c1a8146d37e68d2c7704a87270f22ad0a10ac0fa94ad96121a2b63ceee5  ram-boot-keystone.itb
   8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  k3-pico-itx-keystone-optee.dtb
   USB RAM boot and Pico-ITX peripheral and DMA behavior remain to be tested.
+
+KSB-098 boot-hart diagnostics
+  OpenSBI and Keystone SM source b037d8266f60701761d68f9a685cd42653ef2616
+  714eff595f5829321f999d0884dc51a2f858a5e2515e321e39bd72712e2ef91c  diagnostic OpenSBI BIN
+  Existing K3 QEMU, Linux, Core, QEMU DTB and initramfs were reused.
+  The baseline OpenSBI and SM source trees match the published parent.
+  baseline-mixed PASS, exit 0, 28.56 s
+  diagnostic-mixed PASS, exit 0, 30.12 s
+  diagnostic-uniform16 PASS, exit 0, 29.83 s
+  Each run brought up 16 CPUs, completed 16 enclave runs and 33 TA calls
+  including OCALL, and powered down. The two diagnostic runs printed the
+  following milestones before Linux boot.
+    Registered OP-TEE entry table: 0x17100037c
+    K3 OP-TEE handoff: hart=0 target=untrusted-domain initialized=0
+    K3 OP-TEE handoff: PMP rc=0
+    K3 OP-TEE handoff: domain assignment complete
+    K3 OP-TEE handoff: switch mode next=0x102200000 mode=1
+    K3 OP-TEE handoff: mret hart=0 next=0x102200000 arg1=0x181e00000
+  The Pico-ITX host build used the diagnostic OpenSBI and existing board
+  Core ELF/BIN, with the fixed 16-slot layout. Bundle checksum and both
+  USB transfer dry runs passed. The 48 RAM-boot host checks passed.
+  dbc1d20ea765ff3904679995d02b36a94ea6cc94468ca0f5b7a6cb6b0bf950a6  FSBL.bin
+  b62785dac7d446c1b18b3660e55ef4e405cf986a64ae9408d3e84a69e308ab66  ram-boot-keystone.itb
+  8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  k3-pico-itx-keystone-optee.dtb
+  USB RAM boot of the diagnostic image on Pico-ITX is pending.
