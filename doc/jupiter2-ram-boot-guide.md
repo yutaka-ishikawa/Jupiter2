@@ -156,6 +156,12 @@ PCでコマンド生成スクリプトを実行する必要はない。
 準備方法は[Keystoneアプリ試験手順の第2〜3節](jupiter2-keystone-app-test.md#2-別名の試験用linux-dtbを作る開発pc)を参照する。
 この修正DTBで販売元OpenSBIのLinux起動を確認し、SM版でも同じDTBを使用する。
 
+KeystoneとOP-TEEを同梱したFITでは、同じFITビルドから生成した `k3-pico-itx-keystone-optee.dtb` をUFSに配置する。
+下の手動例では `fdtfile` をそのファイル名に変更し、DTBのload後に `fdt addr ${fdt_addr_r}` と
+`fdt print /firmware/optee` を実行してノードを確認する。コマンド生成例を使う場合は `--dtb` に
+同梱用DTBのパスを指定する。
+[同梱用Linux DTBの生成](jupiter2-build-install-test.md#ram-boot-images)
+
 bootfsはscsi 0:2、rootfsのPARTUUIDは73708e51-d3a9-4b6f-ab55-894cd1d8b4a0。
 他の実機ではpart listとファイル一覧から得た値へ変更する。
 **各loadの成功を確認してから次へ進み、失敗した場合はbootiを実行しない。**
