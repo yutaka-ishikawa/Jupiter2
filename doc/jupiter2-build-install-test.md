@@ -148,14 +148,24 @@ RV64版 `tee-supplicant` を用意します。
     "${CROSS}readelf" -h "$FTPM_WORK/client/tee-supplicant/tee-supplicant"
     install -m 0644 "$FTPM_WORK/ta/$FTPM_UUID.ta" "$FTPM_WORK/transfer/"
     install -m 0755 "$FTPM_WORK/client/tee-supplicant/tee-supplicant" "$FTPM_WORK/transfer/"
+    tar -C "$FTPM_WORK/transfer" -cf "$FTPM_WORK/jupiter2-ftpm.tar" -- \
+        "$FTPM_UUID.ta" tee-supplicant
 )
 ```
 
 `-DRADIX_BITS=64` はMicrosoft参照実装の多倍長整数のワード幅をRV64に合わせます。
-署名済みTAと静的リンクした `tee-supplicant` は、開発PCの
-`.build-k3/optee-hardware/ftpm/transfer/` に生成されます。この2ファイルを実機の
-`$HOME/jupiter2-optee/` に転送し、導入手順に従って配置します。
-[実機でのTAとtee-supplicantの配置](milkv-jupiter2-stack-install.md#op-teeのlinux側ファイルを追加配置する)
+署名済みTAと静的リンクした `tee-supplicant` を
+`.build-k3/optee-hardware/ftpm/jupiter2-ftpm.tar` にまとめます。
+開発PCから、このtarを実機ユーザーのホームディレクトリへコピーします。
+`JUPITER2_SSH` は実機のユーザー名とホスト名またはIPアドレスに置き換えます。
+
+```bash
+JUPITER2_SSH=user@jupiter2
+scp .build-k3/optee-hardware/ftpm/jupiter2-ftpm.tar "${JUPITER2_SSH}:"
+```
+
+コピー後、実機Linuxで `jupiter2-ftpm.tar` を展開し、TAと `tee-supplicant` を配置します。
+[実機でのtarの展開と配置](milkv-jupiter2-stack-install.md#op-teeのlinux側ファイルを追加配置する)
 
 このTAは実機用CoreのREEファイルシステムをセキュアストレージとして利用します。
 実機でTAをロードするには、HUKを使える状態が必要です。LinuxのfTPMドライバを使う場合は、

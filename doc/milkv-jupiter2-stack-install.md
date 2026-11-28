@@ -45,8 +45,8 @@ OP-TEE入りの場合は第1.5節で同じFITに対応するLinux用DTBも作る
 [RAM起動用イメージの作成](jupiter2-build-install-test.md#ram-boot-images)
 
 fTPMを使う場合は、実機用Linuxをビルドした後、対象CoreのTA開発キットで
-署名済みfTPM TAとRV64版 `tee-supplicant` を作る。
-[実機用fTPM TAとtee-supplicantのビルド](jupiter2-build-install-test.md#hardware-ftpm-build)
+署名済みfTPM TAとRV64版 `tee-supplicant` を作り、`jupiter2-ftpm.tar` にまとめて実機へ転送する。
+[実機用fTPMのビルドとtarの転送](jupiter2-build-install-test.md#hardware-ftpm-build)
 
 <a id="4-容量確認とインストールイメージ作成"></a>
 ## 4. bundleの転送と事前検査
@@ -243,21 +243,28 @@ sudo install --backup=numbered -m 0644 -- "$DTB_SRC" "$DTB_DIR/"
 
 ### OP-TEEのLinux側ファイルを追加配置する
 
-外部TAを試験する場合は、実機用Coreと同じTA開発キットで作成した署名済みTAと
-RV64の`tee-supplicant`を実機へ転送する。通常のKeystone用bundleとは別に扱う。
-既存のTAや`tee-supplicant`サービスの設定を保存し、実機のTA検索先と実行パスに合わせて配置する。
+開発PCで作成した `jupiter2-ftpm.tar` を実機のホームディレクトリへコピーする。
+既存のTAや `tee-supplicant` サービスの設定を保存し、実機のTA検索先と実行パスを確認する。
+[実機用fTPMのビルドとtarの転送](jupiter2-build-install-test.md#hardware-ftpm-build)
 
-以下は、開発PCの `.build-k3/optee-hardware/ftpm/transfer/` にある成果物を
-実機の `$HOME/jupiter2-optee/` に転送し、配布した `tee-supplicant` を使用する例。
-[実機用fTPMのビルドと転送するファイル](jupiter2-build-install-test.md#hardware-ftpm-build)
+実機Linuxでtarを `$HOME/jupiter2-optee/` の下に新しく作ったディレクトリへ展開し、
+両ファイルを確認してから配置する。以下は既定のTA検索先と配布した `tee-supplicant` を使う例。
 
 ```bash
-OPTEE_STAGE="$HOME/jupiter2-optee"
-FTPM_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
-sudo install -D --backup=numbered -m 0644 \
-  "$OPTEE_STAGE/$FTPM_UUID.ta" "/lib/optee_armtz/$FTPM_UUID.ta"
-sudo install -D --backup=numbered -m 0755 \
-  "$OPTEE_STAGE/tee-supplicant" /usr/local/sbin/jupiter2-tee-supplicant
+(
+    set -eu
+    FTPM_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
+    mkdir -p "$HOME/jupiter2-optee"
+    OPTEE_STAGE=$(mktemp -d "$HOME/jupiter2-optee/ftpm.XXXXXX")
+    tar -xf "$HOME/jupiter2-ftpm.tar" -C "$OPTEE_STAGE"
+    printf 'fTPMの展開先 %s\n' "$OPTEE_STAGE"
+    test -s "$OPTEE_STAGE/$FTPM_UUID.ta"
+    test -s "$OPTEE_STAGE/tee-supplicant"
+    sudo install -D --backup=numbered -m 0644 \
+      "$OPTEE_STAGE/$FTPM_UUID.ta" "/lib/optee_armtz/$FTPM_UUID.ta"
+    sudo install -D --backup=numbered -m 0755 \
+      "$OPTEE_STAGE/tee-supplicant" /usr/local/sbin/jupiter2-tee-supplicant
+)
 ```
 
 OP-TEE入りFITで起動してから、実機OSの既存サービスか、別端末で
