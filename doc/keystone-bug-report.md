@@ -2152,9 +2152,10 @@ sha256sum "$SBI.bin" "$SBI.elf" "$TEE_BIN" "$TEE_ELF" \
 | 最後に出た行 | 次に調べる範囲 |
 | --- | --- |
 | `Registered OP-TEE entry table` | ドメイン終了処理の入口からコンテキストの確保・選択まで |
+| `hart=0 target=... initialized=...` | 復帰先は選択済み。`PMP rc` が出るまでのPMP切り替え処理を調べる |
 | `domain exit returned rc=...` または非0の `PMP rc=...` | 記録した戻り値と、その前に出た診断行 |
 | `PMP rc=0` | hartのドメイン所属を更新する処理 |
 | `domain assignment complete` | S-modeのコンテキスト復元と対象ドメインの起動判定 |
 | `switch mode next=...` | `sbi_hart_switch_mode()` のレジスタ設定から `mret` 直前まで |
-| `mret hart=...` | `mret` 直前まで到達。次はU-Boot入口から最初のUART出力までを調べる |
+| `mret hart=...` | `mret` 直前まで到達。次は `mret` の実行とU-Boot入口から最初のUART出力までを調べる |
 | U-Boot本体のバナーまたは `=>` | U-Bootへの引き渡しを確認。対応するDTBを使ったLinux起動へ進む |
