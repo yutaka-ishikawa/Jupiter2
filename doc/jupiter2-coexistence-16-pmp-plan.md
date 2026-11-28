@@ -373,10 +373,11 @@ CPU 0だけで初期化が続いた後、組み込みwatchdogのレジスタ読�
 [副hart再開 KSB-099](keystone-bug-report.md#ksb-099) ·
 [watchdog KSB-100](keystone-bug-report.md#ksb-100)
 
-OpenSBIを修正した後に、同じImage・initrd・モジュールでLinuxの16 CPUとTEEデバイスを確認する。
-同じ起動中にKeystone EnclaveとOP-TEE TAを試験する。Linux起動後のPMPと実機の周辺機器・DMA保護は
-第2節に従って採取する。
-[UFSとLinuxの起動手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
+`223c5f2` で副hart再開時のPMP再設定とwatchdogの仲介を修正した。
+次の実機試験では、修正版の同梱FITで同じImage・initrd・モジュールを使い、Linuxの16 CPUと
+watchdogの初期化通過を確認する。ログイン後は同じ起動中にTEEデバイス、Keystone Enclaveと
+OP-TEE TAを試験する。Linux起動後のPMPと実機の周辺機器・DMA保護は第2節に従って採取する。
+[同梱FITの実機再試験](keystone-bug-report.md#ksb-099-retest)
 
 ## 3. 完了時の記録
 

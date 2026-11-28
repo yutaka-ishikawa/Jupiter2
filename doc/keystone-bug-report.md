@@ -122,8 +122,8 @@
 | KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
 | KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
 | KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Bootへ進まない | OpenSBIのドメインコンテキスト確保が `SBI_ENOMEM (-1004)`。QEMUの106 KiB構成で割り当て管理枠の枯渇を確認 | 同梱FITを192 KiBに修正。QEMU同居に合格し、実機USB RAM起動でU-Boot本体のプロンプトまで確認 |
-| KSB-099 | Pico-ITX同梱FITでLinuxの副hart 1〜15が起動しない | OP-TEE終了後にハードウェアHSMで再開。OpenSBIがPMP設定を省略し、枠0の読み戻しに失敗 | 実機UARTと再開処理を照合。PMP再設定の修正待ち |
-| KSB-100 | Pico-ITX同梱FITで組み込みwatchdog初期化がpanic | `spa_wdt_probe()` が保護中のMPMU ARSRを読み出す。現行のMMIO仲介に該当レジスタがない | ソースと実機UARTでアクセスを照合。必要なレジスタの仲介を追加予定 |
+| KSB-099 | Pico-ITX同梱FITでLinuxの副hart 1〜15が起動しない | OP-TEE終了後にハードウェアHSMで再開。OpenSBIがPMP設定を省略し、枠0の読み戻しに失敗 | `223c5f2` でPMP再設定を実装。QEMUで保持時と消失時を確認。実機再試験待ち |
+| KSB-100 | Pico-ITX同梱FITで組み込みwatchdog初期化がpanic | `spa_wdt_probe()` が保護中のMPMU ARSRを読み出す。現行のMMIO仲介に該当レジスタがない | `223c5f2` でMMIO仲介を追加。ELFと実機用FITを照合。watchdog実機試験待ち |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -2228,9 +2228,34 @@ OP-TEE起動時に読み戻したPMP構成はKSB-098の記録にある。
 [OpenSBIの再開処理](../opensbi/lib/sbi/sbi_init.c) ·
 [K3の停止処理](../opensbi/platform/generic/spacemit/k3_corepm.c)
 
-副hartを再開するときにLinux側のPMP配置を再設定し、従来の読み戻しで検査してからS-modeに
-渡す。次の実機試験では同じImage・initrd・モジュールを使い、副hart 1〜15のPMP検査通過と
-Linuxの`16 CPUs`を確認する。本件の修正と再試験は未実施。
+修正 `223c5f2` では、OP-TEE起動を終えたhartのHSM再開時にPMPを読む。
+有効またはロックされた枠がなければ、既存の初期化処理でLinux側の配置を再設定する。
+設定が残っている場合は、その内容を使って既存の全枠読み戻しを行う。
+両経路とも従来のA1-E検査に合格してからS-modeへ渡す。
+[再開とPMP設定](../opensbi/lib/sbi/sbi_hart.c) ·
+[OpenSBIの事前検査](../opensbi/lib/sbi/sbi_init.c)
+
+192 KiBのQEMU同居試験は混在16/32枠と一律16枠の両構成で、PMPが保持された副hart 1〜15の
+再開を確認した。空のPMPで再開する条件はQEMU専用の検証ビルドで作り、LinuxのSMP起動中に
+副hart 1〜15の再設定と `root-config PASS` を確認した。3件とも16 CPU、Enclave 16回、
+TA 33回、最大PMP 16枠、正常電源断を確認した。修正版の実機起動は未試験。
+[QEMUログと試験条件](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+<a id="ksb-099-retest"></a>
+#### 実機の再試験
+
+1. `git pull --ff-only` の後、開発PCで `make opensbi JOBS=20` を実行する。
+   同じ実機用OP-TEE CoreのELF・BINと、新しいOpenSBIのELF・BINで同梱FITを新規出力先へ作る。
+   [同梱FITの生成](jupiter2-build-install-test.md#optee-fit-build)
+2. 同じ出力先のFSBLとFITでUSB RAM起動する。U-Bootから、前回と同じLinux Image、initrd、
+   11月27日のモジュールを使う。Linux用DTBは同じFITビルドから生成したものを指定する。
+   [UFSとLinuxの起動手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
+3. `smp: Bringing up secondary CPUs` 以降に副hart 1〜15の再開を確認する。
+   PMPが消えていたhartでは `restore PMP on restarted hart` に続く `root-config PASS` を記録する。
+   Linuxが `smp: Brought up 1 node, 16 CPUs` と表示し、watchdogの初期化を通過してログインできれば
+   起動試験は合格。UART全文と使用したFSBL・FIT・Linux Image・initrd・DTBのSHA-256を保存する。
+4. 同じ起動中に16 CPUのオンライン、TEEデバイス、Keystoneのサンプル、OP-TEEのTA呼び出しを確認する。
+   [実機Linuxでの同梱試験](milkv-jupiter2-stack-install.md#実機linux上でkeystoneとop-teeをテストする)
 
 <a id="ksb-100"></a>
 ### KSB-100 Pico-ITX同梱FITでwatchdog初期化が読み出し例外を起こす
@@ -2248,6 +2273,15 @@ Linuxの`16 CPUs`を確認する。本件の修正と再試験は未実施。
 [実機のPMP配置](../opensbi/lib/sbi/k3_pico_itx_pmp.h) ·
 [現行のMMIO許可表](../opensbi/platform/generic/spacemit/k3_pico_itx_mmio.c)
 
-OpenSBIの既存のMMIO仲介で、Linuxのwatchdogに必要なレジスタと書き込みフィールドを扱う。
-次の実機試験で`spa_wdt_probe`を通過してLinuxがログインまで進むことを確認する。
-組み込みドライバを含む既存のImageを引き続き使う。本件の修正と再試験は未実施。
+修正 `223c5f2` で、Pico-ITXのLinux側ドメインからの32ビットMMIOを既存の許可表で仲介する。
+書き込みは`APRR`（`0xd4051020`）のwatchdogリセットビット4と、`ARSR`（`0xd4051028`）の
+ソフトウェア再起動理由ビット17〜14に限定する。
+[MMIO許可表の変更](../opensbi/platform/generic/spacemit/k3_pico_itx_mmio.c)
+
+クロスビルドしたELFで両レジスタの書き込みマスクを照合した。実機用FITを生成し、
+OpenSBIの実行時範囲、出力のハッシュとUSB転送dry-runを確認した。watchdogドライバの
+実行とMMIOの実機動作は未試験。
+[実機用FITのビルド・照合記録](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
+
+次は既存のImageで`spa_wdt_probe`を通過してLinuxがログインまで進むことを確認する。
+[同梱FITの実機再試験](#ksb-099-retest)
