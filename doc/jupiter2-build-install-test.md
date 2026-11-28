@@ -48,6 +48,48 @@ NOR用・USB RAM起動用の包装スクリプトにはPython 3.11以上が必�
 採取した実機情報と `hardware/jupiter2/` の記録を照合します。
 [実機入力の管理](../hardware/jupiter2/README.md)
 
+<a id="linux-kernel-build"></a>
+## Linuxカーネルのビルド
+
+RAM起動とNOR導入で使うLinuxを開発PCのリポジトリルートでビルドします。
+OP-TEEのみの構成でLinuxをビルドする場合は、次を実行します。
+
+```bash
+make linux JOBS=20
+```
+
+Keystoneを使う構成でLinuxを更新する場合は、新しいカーネルに対応する
+Keystoneドライバも同時にビルドします。`make keystone` がLinuxのビルドを実行します。
+
+```bash
+make keystone JOBS=20
+```
+
+標準のK3カーネルは `k3_bianbu_defconfig` に `hardware/jupiter2/linux.config` を重ねて作ります。
+既定設定でLinux IMAを有効にし、テンプレートを `ima-ng`、ハッシュをSHA-256、
+測定先をPCR 10に設定します。ビルドした `Image` は既定で
+`.build-k3/linux/arch/riscv/boot/Image`、生成したカーネル設定は `.build-k3/linux/.config` にあります。
+[既定のK3 Linux追加設定](../hardware/jupiter2/linux.config)
+
+ビルド後は成果物と設定を確認します。
+
+```bash
+test -s .build-k3/linux/arch/riscv/boot/Image
+grep -E '^CONFIG_(INTEGRITY|IMA|IMA_DEFAULT_TEMPLATE|IMA_DEFAULT_HASH|IMA_MEASURE_PCR_IDX)=' \
+  .build-k3/linux/.config
+```
+
+`CONFIG_INTEGRITY=y`、`CONFIG_IMA=y`、`CONFIG_IMA_DEFAULT_TEMPLATE="ima-ng"`、
+`CONFIG_IMA_DEFAULT_HASH="sha256"`、`CONFIG_IMA_MEASURE_PCR_IDX=10` を確認します。
+OP-TEE Coreは第1.2節、fTPM TAは専用のクロスビルド手順で用意します。
+[fTPM TAのクロスビルド](jupiter2-ftpm-ta-test.md#ftpm-taのクロスビルド)
+
+実機では、同じビルドのImageとモジュールを配置し、対応するinitrdを作ります。
+Keystone入りの通常bundleは実機スタック導入手順に従い、OP-TEEのみの構成は第1.6節の
+Linux用DTBと組み合わせます。
+[実機へのImage・モジュール配置とinitrd生成](milkv-jupiter2-stack-install.md#6-新linuxとアプリを追加配置する) ·
+[実機への配置と起動確認](#16-実機への配置と起動確認)
+
 <a id="ram-boot-images"></a>
 ## 1. RAM起動用のFSBLと統合FIT
 
@@ -196,13 +238,13 @@ DTBのOP-TEEノードをRISC-V SBI MPXYのメールボックスに対応付け�
 ### 1.3 OP-TEEのみ
 
 Keystone SMを含まないOpenSBIを `opensbi/` の `k3_defconfig` で作ります。
-1.2節と同じシェルで `TEE_BIN` を引き継ぎます。
+Linuxを更新する場合は共通のビルド手順で用意します。1.2節と同じシェルで `TEE_BIN` を引き継ぎます。
+[Linuxカーネルのビルド](#linux-kernel-build)
 
 ```bash
 SBI_OUT="$PWD/.build-k3/firmware/build-opensbi-k3-optee"
 make -C opensbi -j20 O="$SBI_OUT" PLATFORM=generic \
   PLATFORM_DEFCONFIG=k3_defconfig CROSS_COMPILE="$CROSS_COMPILE"
-make linux JOBS=20
 SBI="$SBI_OUT/platform/generic/firmware/fw_dynamic"
 OUT="$PWD/work/jupiter2-ram-boot/optee-only-$(date +%Y%m%d-%H%M%S)"
 VARIANT=vendor
@@ -213,12 +255,14 @@ VARIANT=vendor
 
 ### 1.4 KeystoneとOP-TEEを同梱する
 
-Keystone SM入りOpenSBIと、対応するLinux・ドライバをビルドします。
+Keystone SM入りOpenSBIをビルドします。Linuxを更新する場合は共通のビルド手順で、
+Linuxと対応するKeystoneドライバを用意します。
 先に1.2節で同じビルドの `TEE_BIN` と `TEE_ELF` を作ります。
 続く1.5節は `VARIANT=keystone` に対してPico-ITX用の16枠固定配置を指定します。
+[Linuxカーネルのビルド](#linux-kernel-build)
 
 ```bash
-make opensbi keystone JOBS=20
+make opensbi JOBS=20
 SBI="$PWD/.build-k3/firmware/build-opensbi-k3-keystone/platform/generic/firmware/fw_dynamic"
 OUT="$PWD/work/jupiter2-ram-boot/keystone-optee-$(date +%Y%m%d-%H%M%S)"
 VARIANT=keystone
@@ -406,8 +450,10 @@ CAPACITY=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["capacity_by
   < "hardware/jupiter2/captures/${CAPTURE_ID:?対象実機の採取IDを設定してください}/jupiter2-nor-capacity.json")
 ```
 
-容量を指定してbundleを作ります。すでに同じ構成のビルドが完了している場合は、
-`make opensbi keystone JOBS=20` の行を省略できます。
+共通のビルド手順でLinuxとKeystoneドライバを用意し、容量を指定してbundleを作ります。
+作成済みのLinuxを使う場合は、共通手順の設定確認で対象のビルドを照合します。
+同じ構成のOpenSBIがビルド済みの場合は `make opensbi JOBS=20` の行を省略できます。
+[Linuxカーネルのビルド](#linux-kernel-build)
 
 ```bash
 OUT="$PWD/work/jupiter2-release-$(date +%Y%m%d-%H%M%S)"
@@ -415,7 +461,7 @@ OUT="$PWD/work/jupiter2-release-$(date +%Y%m%d-%H%M%S)"
     set -eu
     python3 scripts/check-jupiter2-install-capacity.py \
       --capacity-bytes "${CAPACITY:?先に実機のNOR区画容量を設定してください}"
-    make opensbi keystone JOBS=20
+    make opensbi JOBS=20
     python3 scripts/build-jupiter2-install-image.py --capacity-bytes "$CAPACITY" --output "$OUT"
     cd "$OUT"
     sha256sum -c bundle.tar.gz.sha256

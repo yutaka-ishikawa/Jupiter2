@@ -37,6 +37,7 @@ Pico-ITXの16枠同梱構成は、実機用FITとLinux用DTBの生成を開発PC
 開発PCでの依存ツール導入、Linux・OpenSBIのビルド、NOR用bundleの作成は
 実機用ビルド手順書に従う。通常bundleの成果物は`$OUT/bundle.tar.gz`と
 `$OUT/bundle.tar.gz.sha256`。
+[Linuxカーネルのビルド](jupiter2-build-install-test.md#linux-kernel-build) ·
 [NOR導入用bundleの作成](jupiter2-build-install-test.md#nor-bundle)
 
 USB RAM起動では、実機用ビルド手順書の第1章で構成に合うFSBLと統合FITを生成する。
@@ -641,27 +642,17 @@ sudo tpm2_getrandom -T "device:$TPM_DEVICE" --hex 16
 `/sys/kernel/security` にマウント済みで、`ima/ascii_runtime_measurements`、`/sys/class/tpm/tpmN`、
 `/dev/tpmrmN` はなかった。IMAはカーネルで無効で、TPMも未登録だった。
 
-IMAの測定ログを確認する試験では、開発PCの `hardware/jupiter2/linux.config` に次の設定を入れる。
-このファイルは通常のK3カーネルの設定に重ねられる。既に定義のある項目は値を更新する。
-[K3カーネルのビルドスクリプト](../scripts/build-linux-k3.sh)
-
-```text
-CONFIG_INTEGRITY=y
-CONFIG_IMA=y
-CONFIG_IMA_NG_TEMPLATE=y
-CONFIG_IMA_MEASURE_PCR_IDX=10
-CONFIG_CRYPTO_SHA256=y
-CONFIG_IMA_DEFAULT_HASH_SHA256=y
-```
-
-この設定ではPCR 10、`ima-ng`、SHA-256が選ばれ、IMA部分のRV64クロスコンパイルは通過した。
-この設定を使ったImage全体のビルドと実機起動は未試験。
-
-Keystone同梱の試験では、開発PCで `make keystone JOBS=20` を実行し、Imageと同じビルドの
-モジュール、Keystoneドライバ、対応するinitrdで一時起動する。ログイン後、`securityfs` の
-`ima/ascii_runtime_measurements` に `boot_aggregate` が出ることを確認する。
+IMAを有効にしたImage、同じビルドのモジュール、対応するinitrdでLinuxを一時起動する。
+Keystone入りの構成では、カーネルに対応するKeystoneドライバも配置する。
+ログイン後に測定ログの `boot_aggregate` と、fTPMを試験する場合はTPMデバイスを確認する。
+[Linuxカーネルのビルド](jupiter2-build-install-test.md#linux-kernel-build) ·
 [カーネルとモジュールの配置](#6-新linuxとアプリを追加配置する) ·
 [USB RAM起動手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
+
+```bash
+sudo head -n 5 /sys/kernel/security/ima/ascii_runtime_measurements
+ls -ld /sys/class/tpm/tpm[0-9]* /dev/tpmrm[0-9]*
+```
 
 fTPMに測定を反映するには、`ima_init()` が走る前にfTPMを登録する。ログイン後に
 `modprobe` でTPMデバイスが現れても、その起動のIMAが初期化時に `TPM-bypass` だった場合は
