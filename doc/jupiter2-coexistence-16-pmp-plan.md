@@ -326,8 +326,8 @@ IOPMPの実効権限を確認する。今回のQEMUゲストはQEMU用DTBで起�
 
 Pico-ITX実機でKeystone・OP-TEE同梱FITをUSB RAM起動した際の、利用者提供のUARTログを確認した。
 前半のLinuxとsystemdの出力は、後半のBootROM USBダウンロードより前の別の起動に属する。
-以下は後半のUSB RAM起動の到達点。試験で使ったFSBL・FIT・Coreのハッシュと正確なソースコミットは
-この記録からは特定できていない。
+以下は106 KiBのヒープで行った初回のUSB RAM起動。試験で使ったFSBL・FIT・Coreのハッシュと正確な
+ソースコミットはこの記録からは特定できていない。
 
 | 段階 | UARTで確認した内容 |
 | --- | --- |
@@ -353,13 +353,24 @@ OP-TEEはeFuseバンク1・2を未書き込みと判定し、HUKの導出を拒�
 診断版で再試験すると、初回ドメイン終了処理が `SBI_ENOMEM (-1004)` を返した。実機と同じ
 106 KiBでQEMUでも再現し、空きデータがある状態で割り当て管理枠が枯渇していることを確認した。
 Pico-ITX同梱FITのヒープを192 KiBに設定し、OpenSBIの実行範囲を既存の1 MiB内に収めた。
-QEMUの混在16/32枠・一律16枠の同居試験が通過した。再試験では修正版のUSB RAM起動で
-U-Bootへ引き渡せることを確認する。
-[再試験の実機UARTとFITチェックサム](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-retest-uart.txt) ·
-[修正版のビルドと実機再試験](keystone-bug-report.md#ksb-098-retest)
+QEMUの混在16/32枠・一律16枠の同居試験が通過した。
+[106 KiBの実機UARTとFITチェックサム](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-retest-uart.txt)
 
-[実機UART抜粋と元ログのSHA-256](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt) ·
+[初回の実機UART抜粋](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ram-boot-uart.txt) ·
 [不具合台帳 KSB-098](keystone-bug-report.md#ksb-098)
+
+#### 192 KiBの修正版でU-Bootへ到達
+
+OpenSBIのヒープ192 KiBと実行時752 KiBをUARTで確認した。全16 hartで `boot-host` は15枠、
+`optee` は14枠だった。32枠を実装するhart 8–15で追加16枠は無効。起動時の `host` 状態は
+判読できた8 hartで15枠だった。hart 0は `PMP rc=0` で `untrusted-domain` に切り替わり、
+U-Boot本体の `=>` に到達した。
+[修正版の実機UARTとPMPの集計](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-192k-uart.txt)
+
+次は、この同梱FITでUFS上のLinuxを一時起動する。Linuxの16 CPUとTEEデバイスを確認してから、
+同じ起動中にKeystone EnclaveとOP-TEE TAを確認する。Linux起動後のPMPや実機の周辺機器・DMA保護は
+第2節に従って採取する。
+[UFSとLinuxの起動手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
 
 ## 3. 完了時の記録
 

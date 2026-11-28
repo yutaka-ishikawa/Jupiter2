@@ -121,7 +121,7 @@
 | KSB-095 | OP-TEE単独の並行TA試験で停滞 | 16 hartのK3 QEMUでタイマー割り込みによるOP-TEEからの復帰と再試行が続く | OpenSBIが切り替え前の競合を返すよう修正。QEMU単独試験10回合格 |
 | KSB-096 | fTPM・IMA試験のゲストがLinux起動前に停止 | PMP読み戻し後の起動台帳更新が一時的なロック競合で失敗し、副hartが停止 | 台帳を取得順に更新。KSB-097との修正版でQEMU起動40回合格 |
 | KSB-097 | OP-TEEからの副hart起動要求が間欠的に失敗 | 別のhartのHSM起動処理が共有ゲートを使用中だと、起動要求の発行側が即時に失敗 | 初回起動とLinuxへの引き渡しで取得を再試行。KSB-096との修正版でfTPM・IMA合格 |
-| KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Bootへ進まない | OpenSBIのドメインコンテキスト確保が `SBI_ENOMEM (-1004)`。QEMUの106 KiB構成で割り当て管理枠の枯渇を確認 | 同梱FITを192 KiBに修正。QEMU同居とホスト生成に合格。修正版の実機起動待ち |
+| KSB-098 | 実機USB RAM起動でOP-TEE登録後にU-Bootへ進まない | OpenSBIのドメインコンテキスト確保が `SBI_ENOMEM (-1004)`。QEMUの106 KiB構成で割り当て管理枠の枯渇を確認 | 同梱FITを192 KiBに修正。QEMU同居に合格し、実機USB RAM起動でU-Boot本体のプロンプトまで確認 |
 | KSB-077 | KeystoneのPMP初期化で設定ビットが別の枠に残る | `pmp_init()` が `PMP_SET` の更新値をループ間で再利用 | K3で枠ごとの消去に修正、QEMUで枠13の拒否が解消 |
 | KSB-041 | attestor統合時に負荷・2 OCALLのループを削除 | samples統合の変更 | 復元済・Sstc on/off実QEMU PASS |
 
@@ -2075,7 +2075,7 @@ HSM待機のままで、主hartはOP-TEEの `wait_secondary` に留まってい�
 <a id="ksb-098"></a>
 ### KSB-098 実機USB RAM起動でOP-TEE登録後のU-Boot出力が確認できない
 
-2026-11-28のPico-ITXの同居USB RAM起動で、SPLのFIT受信、両RCPUのハンドシェイク、
+2026-11-28のPico-ITXでの初回の同居USB RAM起動では、SPLのFIT受信、両RCPUのハンドシェイク、
 OpenSBIのPMP初期化、OP-TEE Core起動まで到達した。最後の有効行は
 `Registered OP-TEE entry table: 0x171000384`。この出力の直後に
 `sbi_ecall_tee_domain_exit()` を呼ぶ。U-Boot本体のバナーやLinux起動ログは採取されていない。
@@ -2127,11 +2127,29 @@ OpenSBIが割り当てを記録する管理枠を使い切ったことを確認�
 192 KiBでは混在16/32枠と一律16枠のQEMUがともに16 CPUを起動し、Enclave 16回、
 TA 33回（OCALLを含む）、電源断に合格した。使用したPMPは最大16枠。
 ホストで生成した実機用FITはOpenSBIの実行時サイズ752 KiB、予約1 MiBで、同梱ファイルの
-ハッシュ照合と転送dry-runに合格した。修正後の実機起動は再試験で確認する。
+ハッシュ照合と転送dry-runに合格した。
 [比較試験、実機用FITの生成とハッシュ](evidence/jupiter2-coexistence-16-pmp/qemu-pmp16.txt)
 
+<a id="ksb-098-board-pass"></a>
+#### 192 KiBの実機でU-Bootへの引き渡しを確認
+
+2026-11-28の最後のUSB RAM起動では、SPLが2,624,105バイトの同梱FITを受信した。
+OpenSBIのヒープは192 KiB、実行時サイズは752 KiB。OP-TEE Coreがエントリーテーブルを登録し、
+hart 0が `untrusted-domain` へ復帰した。`PMP rc=0` と `mret` の出力に続いて
+U-Boot本体のバナーと `=>` を確認した。KSB-098の停止点はこの実機試行で通過した。
+[192 KiBの実機UART](evidence/jupiter2-coexistence-16-pmp/2026-11-28-pico-itx-ksb-098-192k-uart.txt)
+
+今回のログはU-Bootで終了している。次はUFSから同梱用のLinux Image・initrd・DTBを読み込み、
+同じRAM起動中に16 CPU、Keystoneのサンプル、OP-TEEのLinuxドライバとTA呼び出しを確認する。
+HUK導出エラーはこの試行でも出ている。セキュアストレージとfTPMはLinux起動後の試験で確認する。
+[U-BootからLinuxを起動する手順](jupiter2-ram-boot-guide.md#coexistence-linux-boot) ·
+[Linux上のKeystoneとOP-TEEの試験](milkv-jupiter2-stack-install.md#実機linux上でkeystoneとop-teeをテストする)
+
 <a id="ksb-098-retest"></a>
-#### 次の実機試験
+#### 修正版の再生成とUSB RAM起動
+
+同じ試験を再実施する手順。すでに修正版で `=>` が出ている場合はUFSの確認から続ける。
+[UFSとLinux起動ファイルの確認](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
 
 1. 開発PCのリポジトリルートで修正版OpenSBIとKeystone SMをビルドする。
    K3用クロスコンパイラの設定は実機用ビルド手順の準備を参照する。

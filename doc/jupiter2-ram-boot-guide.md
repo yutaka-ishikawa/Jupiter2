@@ -119,7 +119,12 @@ UARTに書込み表示があれば、その操作も記録する。
 手動操作のPCログはターミナルのログ保存機能等で残す。UARTログも別途保存する。
 自動でPCログを残す操作補助スクリプトは第6節で紹介する。
 
+<a id="coexistence-linux-boot"></a>
 ## 4. UFSと起動ファイルを確認する（UART）
+
+Keystone・OP-TEE同梱FITは、OpenSBIのヒープを192 KiBにした実機でU-Boot本体の `=>` まで到達した。
+同じ試行のプロンプトが出ていれば、ここからUFS上のLinuxを起動する。
+[実機で確認した到達点](keystone-bug-report.md#ksb-098-board-pass)
 
 以下は**UART端末のU-Bootプロンプト（=>）**へ直接入力する。
 開発PCのBashでは実行しない。
@@ -144,9 +149,12 @@ kernel=/Image-6.18.3-keystone、initrd=/initrd.img-6.18.3、
 DTB=/spacemit/6.18.3-generic/k3-pico-itx.dtbを確認した。
 Partition Type: EFIはGPT形式の表示で、GRUBの起動指定ではない。
 別実機ではpart listとファイル一覧に合わせる。
-第5節の今回の例では修正DTBを使うため、準備後は同じディレクトリにk3-pico-itx-keystone.dtbがあることも確認する。
+Keystone・OP-TEE同梱FITの場合は、同じディレクトリに `k3-pico-itx-keystone-optee.dtb` があることを
+確認する。Keystoneのみの場合は `k3-pico-itx-keystone.dtb` を使う。
 このU-Bootのlsにはディレクトリを指定する。ファイル単体の読込みは第5節のload成功で確認する。
-これらのファイルを確認したら、第5節のLinux一時起動へ進む。
+Image・initrd・DTBがそろっていれば第5節へ進む。足りない場合はLinux上で配置を済ませ、
+同じFSBLとFITでUSB RAM起動し直す。
+[Linux・initrd・DTBの配置手順](milkv-jupiter2-stack-install.md#6-新linuxとアプリを追加配置する)
 
 ## 5. Linuxを一時起動する（UARTでコマンドを直接入力）
 
@@ -156,11 +164,19 @@ PCでコマンド生成スクリプトを実行する必要はない。
 準備方法は[Keystoneアプリ試験手順の第2〜3節](jupiter2-keystone-app-test.md#2-別名の試験用linux-dtbを作る開発pc)を参照する。
 この修正DTBで販売元OpenSBIのLinux起動を確認し、SM版でも同じDTBを使用する。
 
-KeystoneとOP-TEEを同梱したFITでは、同じFITビルドから生成した `k3-pico-itx-keystone-optee.dtb` をUFSに配置する。
-下の手動例では `fdtfile` をそのファイル名に変更し、DTBのload後に `fdt addr ${fdt_addr_r}` と
-`fdt print /firmware/optee` を実行してノードを確認する。コマンド生成例を使う場合は `--dtb` に
-同梱用DTBのパスを指定する。
-[同梱用Linux DTBの生成](jupiter2-build-install-test.md#ram-boot-images)
+KeystoneのみのFITでは、次のようにDTB名を指定する。
+
+```text
+setenv fdtfile k3-pico-itx-keystone.dtb
+```
+
+KeystoneとOP-TEEを同梱したFITでは、同じFITビルドから生成したLinux用DTBをUFSに配置し、
+次のように指定する。コマンド生成例を使う場合は `--dtb` に同梱用DTBのパスを指定する。
+[同梱用Linux DTBの生成](jupiter2-build-install-test.md#optee-fit-build)
+
+```text
+setenv fdtfile k3-pico-itx-keystone-optee.dtb
+```
 
 bootfsはscsi 0:2、rootfsのPARTUUIDは73708e51-d3a9-4b6f-ab55-894cd1d8b4a0。
 他の実機ではpart listとファイル一覧から得た値へ変更する。
@@ -177,7 +193,6 @@ setenv fdt_addr_r 0x138000000
 setenv knl_name Image-6.18.3-keystone
 setenv ramdisk_name initrd.img-6.18.3
 setenv dtb_dir spacemit/6.18.3-generic
-setenv fdtfile k3-pico-itx-keystone.dtb
 
 load scsi 0:2 ${kernel_addr_r} /${knl_name}
 
@@ -190,7 +205,19 @@ printenv kernel_addr_r ramdisk_addr initrd_size fdt_addr_r
 printenv knl_name ramdisk_name dtb_dir fdtfile
 
 setenv bootargs console=ttyS0,115200 earlycon=sbi root=PARTUUID=73708e51-d3a9-4b6f-ab55-894cd1d8b4a0 rootwait rw loglevel=8
+```
 
+Keystone・OP-TEE同梱FITの場合は、DTBのloadが成功した後に次を実行する。
+`compatible = "linaro,optee-tz"` と `mboxes` を確認する。
+
+```text
+fdt addr ${fdt_addr_r}
+fdt print /firmware/optee
+```
+
+読み込んだファイルを確認してからLinuxを起動する。
+
+```text
 booti ${kernel_addr_r} ${ramdisk_addr}:${initrd_size} ${fdt_addr_r}
 ```
 
@@ -209,9 +236,14 @@ env_k3.txtの編集やsaveenvは行わない。
 ```bash
 uname -r
 cat /proc/cmdline
+cat /sys/devices/system/cpu/online
 ```
 
-Linux起動成功はユーザー報告済み。実際のuname出力は未収集。
+同梱構成では `0-15` がオンラインであることと、OP-TEEドライバの初期化および
+`/dev/tee*` の生成を確認する。その後、同じ起動中にKeystoneとOP-TEEを試験する。
+[実機LinuxでのKeystone・OP-TEEの試験](milkv-jupiter2-stack-install.md#実機linux上でkeystoneとop-teeをテストする)
+
+販売元OpenSBIでのLinux起動は先行試験で確認した。
 Image名が-keystoneでも、kernel releaseはビルド設定で決まる（今回の導入例は6.18.3）。
 販売元OpenSBIでの起動と、SM/Enclaveの成功は分ける。
 SM版でLinuxが起動した後のdriverとhello試験は[Keystoneアプリ試験手順](jupiter2-keystone-app-test.md#6-ドライバーとhello二種を試験する実機linux)を参照する。

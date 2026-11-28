@@ -233,8 +233,10 @@ OpenSBI側は参照U-BootのPico-ITX用DTBをベースに、ビルド中に
 OP-TEEドメイン、Coreと共有メモリの予約、MPXY設定を生成します。
 ベースDTBは `records/opensbi-uboot-base.dtb` に保存します。
 Pico-ITXの16枠同梱構成では、OpenSBIのヒープを192 KiBに設定して初回の
-ドメインコンテキスト確保に必要な管理枠を確保します。修正後の実機確認はKSB-098で追跡します。
-[停止原因と再試験](keystone-bug-report.md#ksb-098)
+ドメインコンテキスト確保に必要な管理枠を確保します。192 KiBの修正版はPico-ITX実機で
+U-Boot本体のプロンプトに到達しました。続けて同じFITビルドのLinux用DTBでLinuxを一時起動します。
+[停止原因と実機の確認結果](keystone-bug-report.md#ksb-098-board-pass) ·
+[UFSとLinux起動ファイルの確認](jupiter2-ram-boot-guide.md#coexistence-linux-boot)
 
 実機向けの設定済みDTBやオーバーレイを既に用意している場合は、
 それぞれ `--opensbi-dtb` または `--opensbi-overlay` で指定できます。

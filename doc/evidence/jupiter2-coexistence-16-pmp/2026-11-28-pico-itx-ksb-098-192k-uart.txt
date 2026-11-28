@@ -1,0 +1,51 @@
+KSB-098 Pico-ITX実機の192 KiB構成でのUSB RAM起動（2026-11-28、日本時間）
+元UARTのSHA-256 13535bf83c06158b71f65b9b88cd24b797a77b823a531eb2b46e58c6863afe3e
+元UARTのサイズ 434083 バイト、6557 行
+
+対象は4565行から始まる最後のUSB RAM起動。4564行までにあるLinux起動と106 KiBでの
+rc=-1004は先行試行の記録。新しい実機試行のFSBL・FIT・CoreのSHA-256とソースコミットは未収集。
+
+起動時のPMP読み戻しを対象区間で集計した。粒度は全hartで4 KiB。
+  boot-host  hart 0–15                     有効15枠 mask=0xdfff
+  optee      hart 0–15                     有効14枠 mask=0x9fff
+  host       hart 0, 4, 5, 11, 12, 13, 14, 15 有効15枠 mask=0xdfff
+判読できたhost行は上記8 hart。hart 0–7は16枠、hart 8–15は32枠を実装し、
+後者の追加16枠の無効化をroot-config PASSで確認した。Linux起動後のPMPは未採取。
+
+以下は対象区間のUART抜粋。最後はU-Boot本体のプロンプト。
+4565 sys: 0x10001200
+4570 ROM: usb download handler
+4615 Starting download of 411776 bytes
+4624 U-Boot SPL 2022.10-g4c294a06-dirty (Nov 28 2026 - 10:55:56 +0900)
+4711 downloading/uploading of 2624105 bytes finished
+4717 k3-rproc rcpu@0: [RAMBOOT] core=0 handshake acknowledged
+4720 k3-rproc rcpu@1: [RAMBOOT] core=1 handshake acknowledged
+4722 [RAMBOOT] OpenSBI entry=0x100000000 next=0x102000000 dtb=102153cf0 hart=0
+4729 OpenSBI v1.6
+4762 K3 OP-TEE boot DTB: 66352 bytes from 0x102153cf0 to 0x171132000
+4770 Platform HART Count         : 16
+4781 Firmware Size               : 752 KB
+4785 Firmware Heap Size          : 192 KB (total), 12 KB (reserved), 28 KB (used), 151 KB (free)
+4906 [K3-PMP] verified shared firmware deny slot=3 base=0x100000000
+4908 [K3-PMP] root-config PASS hart=0 implemented=16 common=16 extra-off=0 root=14 Keystone-free=2
+4909 [K3-PMP] shared CSR hart=0 state=boot-host implemented=16 gran=12 active=15 mask=0xdfff
+4965 [K3-PMP] shared CSR hart=0 state=optee implemented=16 gran=12 active=14 mask=0x9fff
+5049 E/TC:00 00 tee_otp_get_hw_unique_key:100 HUK: eFuse banks 1/2 unprogrammed, refusing to derive
+5452 [K3-PMP] root-config PASS hart=8 implemented=32 common=16 extra-off=16 root=14 Keystone-free=2
+5467 [K3-PMP] shared CSR hart=8 state=boot-host implemented=32 gran=12 active=15 mask=0xdfff
+6232 [K3-PMP] shared CSR hart=8 state=optee implemented=32 gran=12 active=14 mask=0x9fff
+6418 Registered OP-TEE entry table: 0x171000384
+6434 K3 OP-TEE handoff: hart=0 target=untrusted-domain initialized=0
+6450 [K3-PMP] shared CSR hart=0 state=host implemented=16 gran=12 active=15 mask=0xdfff
+6520 K3 OP-TEE handoff: PMP rc=0
+6521 K3 OP-TEE handoff: domain assignment complete
+6522 K3 OP-TEE handoff: switch mode next=0x102000000 mode=1
+6523 K3 OP-TEE handoff: mret hart=0 next=0x102000000 arg1=0x102153cf0
+6526 U-Boot 2022.10-g4c294a06-dirty (Nov 28 2026 - 10:55:56 +0900)
+6529 Model: spacemit k3 pico itx board
+6530 DRAM:  32 GiB
+6539 Loading Environment from nowhere... OK
+6542 In:    serial
+6543 Out:   serial
+6544 Err:   serial
+6557 =>

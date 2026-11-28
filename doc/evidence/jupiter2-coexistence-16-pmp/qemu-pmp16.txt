@@ -468,4 +468,5 @@ KSB-098 OpenSBI heap regression
   aebc76c4e6562d70982165e4d6f272f788366796d49829d65f45c2cb2835fdb9  ram-boot-keystone.itb
   8a6c2809b035f2b462bde7bbf602b5447c381e73f69ed71f2d4601712048bc17  k3-pico-itx-keystone-optee.dtb
   5ae48ebffe8306e9154b19e0dd0e3f2aa69ca002db7b254a9d8453548c6afeef  ram-boot-bundle.tar.gz
-  The 192 KiB FIT has yet to boot on the physical board.
+  The physical follow-up with the 192 KiB configuration reached the
+  U-Boot prompt. See 2026-11-28-pico-itx-ksb-098-192k-uart.txt for the separate UART record.
