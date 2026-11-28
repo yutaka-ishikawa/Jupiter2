@@ -15,6 +15,7 @@ import zlib
 
 COMMIT = '4c294a06c14e46e9c9cc934373c3e63919703017'
 REPOSITORY = 'https://github.com/ganboing/u-boot-k3.git'
+PICO_ITX_FIRMWARE_BYTES = 0x100000
 SETTINGS = {
     'CONFIG_BOOTCOMMAND': '""',
     'CONFIG_BOOTDELAY': '-1',
@@ -258,7 +259,7 @@ def automatic_reservation(args, fit, dtb, records):
     symbols = subprocess.check_output([prefix + 'nm', '--defined-only', elf], text=True)
     addresses = {fields[-1]: int(fields[0], 16) for line in symbols.splitlines()
                  if len(fields := line.split()) == 3 and fields[-1] in
-                 ('_fw_start', '_fw_end', 'fw_fdt_bin')}
+                 ('_fw_start', '_fw_end', '_fw_rw_start', 'fw_fdt_bin')}
     if 'fw_fdt_bin' in addresses:
         raise ValueError('automatic reservation requires OpenSBI without an embedded DTB')
     # Confirm that the ELF describes the exact raw binary being packaged.
@@ -315,6 +316,16 @@ char scratch_bytes[SBI_SCRATCH_SIZE];
     # naturally aligned PMP rounding of its read-only and writable regions.
     if not 0 < runtime_bytes <= 0x100000000:
         raise ValueError('OpenSBI runtime span exceeds the supported K3 load window')
+    if args.pico_itx_pmp16:
+        rw_offset = addresses['_fw_rw_start'] - addresses['_fw_start']
+        # At the aligned K3 load address, both endpoints of the writable
+        # span must round to the fixed 1 MiB region that also covers text.
+        rw_pmp_bytes = 1 << (rw_offset ^ (runtime_bytes - 1)).bit_length()
+        if (not 0 < rw_offset < runtime_bytes <= PICO_ITX_FIRMWARE_BYTES
+                or rw_offset & (rw_offset - 1) or rw_pmp_bytes != PICO_ITX_FIRMWARE_BYTES):
+            raise ValueError(f'Pico-ITX OpenSBI does not fit the fixed 1 MiB PMP region '
+                             f'(RW offset {rw_offset:#x}, runtime {runtime_bytes:#x}, '
+                             f'heap {heap_bytes:#x})')
     reserve_bytes = max(4096, 1 << (runtime_bytes - 1).bit_length())
     return {'source': 'OpenSBI ELF, bundled generic platform headers and generated U-Boot FIT DTB',
             'elf_sha256': sha(elf), 'dtb_sha256': hashlib.sha256(dtb).hexdigest(),
@@ -363,6 +374,9 @@ def build(args):
         args.optee_elf = args.optee_elf.resolve(strict=True)
     if args.pico_itx_pmp16 and (not args.optee_elf or args.variant != 'keystone'):
         raise ValueError('--pico-itx-pmp16 requires --variant keystone and --optee-elf')
+    if (args.pico_itx_pmp16 and args.opensbi_reserve_bytes is not None
+            and args.opensbi_reserve_bytes != PICO_ITX_FIRMWARE_BYTES):
+        raise ValueError('Pico-ITX 16-slot layout requires a 1 MiB OpenSBI reservation')
     if generate_optee_dtb and not args.prepare_only and not shutil.which('fdtput'):
         raise ValueError('install device-tree-compiler for fdtput')
     if args.opensbi_overlay:

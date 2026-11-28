@@ -294,23 +294,28 @@ int sbi_domain_context_exit(void)
 	 * context allocated before. Loop through each domain to allocate
 	 * its context on the current hart if valid.
 	 */
-	if (!ctx) {
-		sbi_domain_for_each(dom) {
-			if (!sbi_hartmask_test_hartindex(hartindex,
-							 dom->possible_harts))
-				continue;
+    if (!ctx) {
+	sbi_domain_for_each(dom) {
+	    if (!sbi_hartmask_test_hartindex(hartindex, dom->possible_harts)) {
+		continue;
+	    }
 
-			dom_ctx = sbi_zalloc(sizeof(struct hart_context));
-			if (!dom_ctx)
-				return SBI_ENOMEM;
+	    dom_ctx = sbi_zalloc(sizeof(*dom_ctx));
+	    if (!dom_ctx) {
+		sbi_printf("Domain context allocation failed: hart=%u domain=%s "
+			   "bytes=%lu heap-free=%lu\n",
+			   current_hartid(), dom->name, (unsigned long)sizeof(*dom_ctx),
+			   sbi_heap_free_space());
+		return SBI_ENOMEM;
+	    }
 
-			/* Bind context and domain */
-			dom_ctx->dom = dom;
-			hart_context_set(dom, hartindex, dom_ctx);
-		}
-
-		ctx = hart_context_thishart_get();
+	    /* Bind context and domain */
+	    dom_ctx->dom = dom;
+	    hart_context_set(dom, hartindex, dom_ctx);
 	}
+
+	ctx = hart_context_thishart_get();
+    }
 
     if (!ctx) {
 	return SBI_EINVAL;

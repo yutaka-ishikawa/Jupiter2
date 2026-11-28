@@ -11,6 +11,7 @@ import tempfile
 CORE_BASE = 0x171000000
 EVENT_LOG_BASE = 0x171ff0000
 BOOT_DTB_SIZE = 0x11000
+PICO_ITX_OPTEE_HEAP_BYTES = 0x30000
 
 
 def private_boot_dtb_buffer(elf_path, bin_path):
@@ -76,7 +77,8 @@ def prepare(source, output, uboot_entry, optee_elf=None, optee_bin=None, pico_it
                             or b'spacemit,k3' not in root.props.get('compatible', b'').split(b'\0')):
         raise ValueError('the 16-slot layout requires the reference Pico-ITX firmware DTB')
     chosen = root.children.get('chosen')
-    if chosen and any(name in chosen.children for name in ('opensbi-domains', 'sbi-mpxy-opteed')):
+    chosen_children = chosen.children if chosen else {}
+    if any(name in chosen_children for name in ('opensbi-domains', 'sbi-mpxy-opteed')):
         raise ValueError('base DTB already contains domain or OP-TEE settings')
     if any(root.props.get(key) != struct.pack('>I', 2) for key in ('#address-cells', '#size-cells')):
         raise ValueError('expected 64-bit RAM and reservation ranges')
@@ -228,6 +230,28 @@ def prepare(source, output, uboot_entry, optee_elf=None, optee_bin=None, pico_it
                   base & 0xffffffff, 0, size)
         if pico_itx_pmp16:
             flag(dispatcher, 'spacemit,pico-itx-pmp16')
+            # The generic per-hart default is insufficient for the three
+            # domains, MPXY and all 16 harts. Use OpenSBI's existing setting.
+            configs = [(name, config) for name, config in chosen_children.items()
+                       if b'opensbi,config' in config.props.get('compatible', b'').split(b'\0')]
+            if len(configs) > 1:
+                raise ValueError('multiple opensbi,config nodes in the base DTB')
+            heap_bytes = PICO_ITX_OPTEE_HEAP_BYTES
+            if configs:
+                name, config = configs[0]
+                heap = config.props.get('heap-size')
+                if heap is not None:
+                    if len(heap) != 4:
+                        raise ValueError('OpenSBI heap-size must be a single DTB cell')
+                    heap_bytes = max(heap_bytes, fit['number'](heap))
+                config_path = f'/chosen/{name}'
+            else:
+                if 'opensbi-config' in chosen_children:
+                    raise ValueError('base /chosen/opensbi-config lacks opensbi,config compatibility')
+                config_path = '/chosen/opensbi-config'
+                node(config_path)
+                string(config_path, 'compatible', 'opensbi,config')
+            cells(config_path, 'heap-size', heap_bytes)
         if reserved is None:
             node('/reserved-memory')
             cells('/reserved-memory', '#address-cells', 2)
